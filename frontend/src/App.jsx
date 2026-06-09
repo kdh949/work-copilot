@@ -16,7 +16,7 @@ function App() {
         {/* 페이지는 프라이빗하게 운영 예정 */}
         <Route element = {<PrivateRoute />}>
           <Route path = "/" element={<Home />} />
-          <Route path = "/post/:id" element={<Postdetail />} />
+          <Route path = "/post/:id" element={<PostDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>
