@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+
 function Login() {
     const [id, setId] = useState('');
     const [password, setPassword] = useState('');
