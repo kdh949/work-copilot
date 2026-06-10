@@ -11,6 +11,7 @@ function App() {
         {/* path = url 주소(경로) / element = 그 경로에서 보여줄 컴포넌트 */}
         {/* 로그인 페이지는 항상 진입 가능하게 */}
         <Route path = "/login" element={<Login />} />
+        <Route path = "/join" element={<Join />} />
 
         {/* 페이지는 프라이빗하게 운영 예정 */}
         <Route element = {<PrivateRoute />}>

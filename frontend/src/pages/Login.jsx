@@ -31,7 +31,9 @@ function Login() {
             <input type = "text" placeholder = "아이디" value = {user_id} onChange = {e => setId(e.target.value)} />
             <input type = "password" placeholder = "비밀번호" value = {password} onChange = {e => setPassword(e.target.value)} />
             <button onClick = {handleLogin}>로그인</button>
-            <h3>회원가입</h3>
+            <h3>
+                <a href="/join">회원가입</a>
+            </h3>
         </div>
     )
 }
