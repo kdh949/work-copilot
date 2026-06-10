@@ -3,3 +3,40 @@ docker-compose.yml
 nginx/certbot/
 local/*
 local
+
+# dependencies
+node_modules/
+server/node_modules/
+client/node_modules/
+
+# environment variables
+.env
+.env.*
+server/.env
+server/.env.*
+client/.env
+client/.env.*
+
+# build outputs
+server/dist/
+client/dist/
+build/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor files
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Prisma local artifacts
+server/prisma/*.db
+server/prisma/*.db-journal
