@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import PostDetail from './pages/PostDetail';
 import Login from './pages/Login';
+import Join from './pages/join';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
