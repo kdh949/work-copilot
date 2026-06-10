@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
-import { JoinRepository } from '../join/join.repository';
 import { AuthService } from './auth.service';
+import { JoinModule } from '../join/join.module';
 
 @Module ({
     imports : [
@@ -12,9 +12,10 @@ import { AuthService } from './auth.service';
             secret : process.env.JWT_SECRET ?? 'key',
             signOptions : {expiresIn: '1d' },
         }),
+        JoinModule,
     ], 
     controllers : [AuthController],
-    providers : [AuthService, JoinRepository]
+    providers : [AuthService],
 })
 
 export class AuthModule {}
