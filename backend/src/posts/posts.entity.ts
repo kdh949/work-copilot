@@ -21,9 +21,9 @@ export class Post {
     author: Members;
 
     @Column({
-    type: 'enum',
-    enum: PostCategory,
-    enumName: 'post_category',
+        type: 'enum',
+        enum: PostCategory,
+        enumName: 'post_category',
     })
     category: PostCategory;
 

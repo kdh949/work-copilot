@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { LoginDto } from './login.dto';
 import * as bcrypt from 'bcrypt';
-import { JoinRepository } from '../join/join.repository';  // 추가
+import { JoinRepository } from '../users/join.repository';  // 추가
 
 @Injectable()
 export class AuthService {
