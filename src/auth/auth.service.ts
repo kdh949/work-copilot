@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from "../users/users.service";
 import { SignupDto } from "./dto/signup.dto";
-import { sign } from "node:crypto";
 
 type SignupResponse = {
     id: number;
