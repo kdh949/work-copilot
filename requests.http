@@ -129,3 +129,49 @@ Content-Type: application/json
 
 ### 게시글 삭제
 DELETE http://localhost:3000/posts/1703
+
+
+
+
+
+
+
+### 회원가입 - 정상
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "12345678",
+  "nickname": "정글러"
+}
+
+### 회원가입 - 잘못된 이메일
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
+
+{
+  "email": "not-email",
+  "password": "12345678",
+  "nickname": "정글러"
+}
+
+### 회원가입 - 짧은 비밀번호
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
+
+{
+  "email": "short@example.com",
+  "password": "1234",
+  "nickname": "정글러"
+}
+
+### 회원가입 - 중복 이메일
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "12345678",
+  "nickname": "다른닉네임"
+}
