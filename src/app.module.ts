@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { PostsModule } from './posts/posts.module';
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { UsersModule } from './users/users.module';
 
 @Module({ // 부품 조립 박스라고 생각
     imports: [
@@ -26,6 +27,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
         }),
 
         PostsModule,
+        UsersModule,
     ],
     controllers: [AppController], // 이 모듈은 AppController를 사용하고,
     providers: [AppService],      // AppService를 주입 가능한 서비스로 등록한다.
