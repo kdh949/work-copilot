@@ -1,84 +1,76 @@
-import {Injectable, NotFoundException, Post} from '@nestjs/common';
-import {CreatePostDto} from "./dto/create-post.dto";
-import {UpdatePostDto} from "./dto/update-post.dto";
-import * as timers from "node:timers";
-import * as string_decoder from "node:string_decoder";
-import {reportUnhandledError} from "rxjs/internal/util/reportUnhandledError";
-import {contains} from "class-validator";
+import { Delete, Injectable, NotFoundException } from '@nestjs/common';
+import { CreatePostDto } from "./dto/create-post.dto";
+import { UpdatePostDto } from "./dto/update-post.dto";
+import { InjectRepository } from "@nestjs/typeorm";
+import { ILike, Repository } from "typeorm";
+import { Post } from "./post.entity";
 
-export type PostItem = {
-    id: number;
-    title: string;
-    content: string;
-};
+// import {contains} from "class-validator"; // 타입 검증 미진행 (엔티티에서 할 예정)
 
 @Injectable()
 export class PostsService {
-    private posts: PostItem[] = [
-        {
-            id: 1,
-            title: '첫 번째 글',
-            content: '내용입니다.',
-        },
-    ];
+    constructor(
+        @InjectRepository(Post) // Post Entity를 다루는 Repository를
+        private readonly postRepository: Repository<Post> // PostsService 안에서 this.postRepository로 쓰겠다.
+    ) { }
 
-    findAll(keyword?: string): PostItem[] {
+    async findAll(keyword?: string): Promise<Post[]> {
         if (!keyword) {
-            return this.posts;
+            return this.postRepository.find({
+                order: {
+                    id: 'DESC',
+                },
+            });
         }
-
-        return this.posts.filter((post) => post.title.includes(keyword));
+        
+        return this.postRepository.find({
+            where: {
+                title: ILike(`%${keyword}%`),
+            },
+            order: {
+                id: 'DESC',
+            },
+        });
     }
 
-    findOne(id: Number): PostItem {
-        const post = this.posts.find((post) => post.id === id);
+    async findOne(id: number): Promise<Post> {
+        const post = await this.postRepository.findOne({
+            where: { id },
+        });
         if (!post) {
             throw new NotFoundException('게시글을 찾을 수 없습니다.');
         }
         return post;
     }
 
-    create(createPostDto: CreatePostDto): PostItem {
-        const post: PostItem = {
-            id: this.posts.length + 1,
+    async create(createPostDto: CreatePostDto): Promise<Post> {
+        const post = this.postRepository.create({
             title: createPostDto.title,
             content: createPostDto.content,
-        };
+        });
 
-        this.posts.push(post);
+        return this.postRepository.save(post);
+    }
 
+    async update(id: number, updatePostDto: UpdatePostDto): Promise<Post> {
+        const post = await this.findOne(id);
+
+        if (updatePostDto.title) {
+            post.title = updatePostDto.title;
+        }
+        if (updatePostDto.content) {
+            post.content = updatePostDto.content;
+        }
         return post;
     }
 
-    update(
-        id: number,
-        body: { title?: string; content?: string },
-    ): PostItem | undefined {
-        const post = this.findOne(id);
+    async remove(id: number): Promise<{ deleted: boolean }> {
+        const post = await this.findOne(id);
 
-        if (!post) {
-            return undefined;
-        }
-
-        if (body.title) {
-            post.title = body.title;
-        }
-
-        if (body.content) {
-            post.content = body.content;
-        }
-
-        return post;
-    }
-
-    remove(id: number): { deleted: boolean } {
-        const beforeLength = this.posts.length;
-
-        this.posts = this.posts.filter((post) => post.id !== id);
+        await this.postRepository.delete(post.id);
 
         return {
-            deleted: this.posts.length < beforeLength,
+            deleted: true,
         };
     }
 }
-
