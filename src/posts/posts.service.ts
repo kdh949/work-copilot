@@ -1,4 +1,4 @@
-import { Delete, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreatePostDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -22,7 +22,7 @@ export class PostsService {
                 },
             });
         }
-        
+
         return this.postRepository.find({
             where: {
                 title: ILike(`%${keyword}%`),
