@@ -1,5 +1,7 @@
+import { PostCategory } from "./posts.entity";
+
 export class CreatePostDto {
-    category!: string;
+    category!: PostCategory;
     title!: string;
     location!: string;
 }

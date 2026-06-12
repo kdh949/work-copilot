@@ -33,7 +33,7 @@ export class PostEntity {
     @Column({ type: 'varchar', length: 100 })
     location!: string;
 
-    @Column ({ type: 'int4'})
+    @Column ({ type: 'int4', default: 0})
     likes!: number;
 
     @CreateDateColumn({ type: 'timestamp' })

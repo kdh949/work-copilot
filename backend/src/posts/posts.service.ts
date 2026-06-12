@@ -2,6 +2,7 @@ import { Body, Injectable } from '@nestjs/common';
 import { Repository } from 'typeorm'
 import { PostEntity } from './posts.entity'
 import { InjectRepository } from '@nestjs/typeorm';
+import { CreatePostDto } from './posts.dto';
 
 @Injectable()
 export class PostService {
@@ -19,15 +20,17 @@ export class PostService {
         return this.postsRepository.findOne({ where: { id }});
     }
 
-    createPost() {
-        return this.postsRepository;
+    createPost(dto: CreatePostDto) {
+        return this.postsRepository.save({
+            ...dto,
+        })
     }
 
-    modifyPost() {
+    modifyPost(dto: CreatePostDto) {
         return this.postsRepository;   
     }
 
-    deletePost() {
-        return this.postsRepository;
+    deletePost(id: number) {
+        return this.postsRepository.delete({id});
     }
 }
