@@ -1,0 +1,93 @@
+### Health Check
+GET http://localhost:3000/health
+
+### 게시글 목록 조회
+GET http://localhost:3000/posts
+
+### 게시글 검색
+GET http://localhost:3000/posts?keyword=첫
+
+### 게시글 상세 조회
+GET http://localhost:3000/posts/1
+
+### 게시글 생성
+POST http://localhost:3000/posts
+Content-Type: application/json
+
+{
+  "title": "새 게시글",
+  "content": "새 게시글 내용입니다."
+}
+
+### 게시글 수정
+PATCH http://localhost:3000/posts/1
+Content-Type: application/json
+
+{
+  "title": "수정된 제목"
+}
+
+### 게시글 삭제
+DELETE http://localhost:3000/posts/1
+
+### 게시글 생성 - 정상
+POST http://localhost:3000/posts
+Content-Type: application/json
+
+{
+  "title": "DTO 테스트",
+  "content": "Validation Pipe를 적용했습니다."
+}
+
+### 게시글 생성 - 잘못된 타입
+POST http://localhost:3000/posts
+Content-Type: application/json
+
+{
+  "title": 123,
+  "content": true
+}
+
+### 게시글 생성 - 빈 문자열
+POST http://localhost:3000/posts
+Content-Type: application/json
+
+{
+  "title": "",
+  "content": ""
+}
+
+### 게시글 생성 - 허용되지 않은 속성
+POST http://localhost:3000/posts
+Content-Type: application/json
+
+{
+  "title": "제목",
+  "content": "내용",
+  "isAdmin": true
+}
+
+### 게시글 수정 - 정상
+PATCH http://localhost:3000/posts/1
+Content-Type: application/json
+
+{
+  "title": "수정된 제목"
+}
+
+### 게시글 상세 조회 - 존재하지 않는 id
+GET http://localhost:3000/posts/999
+
+### 게시글 상세 조회 - 잘못된 id 타입
+GET http://localhost:3000/posts/abc
+
+### 게시글 수정 - 존재하지 않는 id
+PATCH http://localhost:3000/posts/999
+Content-Type: application/json
+
+{
+  "title": "없는 글 수정"
+}
+
+### 게시글 삭제 - 존재하지 않는 id
+DELETE http://localhost:3000/posts/999
