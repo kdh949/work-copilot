@@ -175,3 +175,40 @@ Content-Type: application/json
   "password": "12345678",
   "nickname": "다른닉네임"
 }
+
+
+### 로그인 - 정상
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "12345678"
+}
+
+### 로그인 - 없는 이메일
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "none@example.com",
+  "password": "12345678"
+}
+
+### 로그인 - 틀린 비밀번호
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "wrongpassword"
+}
+
+### 로그인 - 잘못된 이메일 형식
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "not-email",
+  "password": "12345678"
+}
