@@ -1,14 +1,14 @@
 import { Body, Injectable } from '@nestjs/common';
 import { Repository } from 'typeorm'
-import { Post } from './posts.entity'
+import { PostEntity } from './posts.entity'
 import { InjectRepository } from '@nestjs/typeorm';
 
 @Injectable()
 export class PostService {
 
     constructor(
-        @InjectRepository(Post)
-        private postsRepository: Repository<Post>
+        @InjectRepository(PostEntity)
+        private postsRepository: Repository<PostEntity>
     ) {}
 
     viewAllPosts() {

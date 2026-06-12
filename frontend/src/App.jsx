@@ -1,8 +1,10 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
-import PostDetail from './pages/PostDetail';
 import Login from './pages/Login';
 import Join from './pages/join';
+import PostDetail from './pages/post/PostDetail';
+import AddPost from './pages/post/AddPost';
+import Modify from './pages/post/Modify';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -17,7 +19,9 @@ function App() {
         {/* 페이지는 프라이빗하게 운영 예정 */}
         <Route element = {<PrivateRoute />}>
           <Route path = "/" element={<Home />} />
+          <Route path = "/post/new" element={<AddPost />} />
           <Route path = "/post/:id" element={<PostDetail />} />
+          <Route path = "/post/:id/modify" element={<Modify />} />
         </Route>
       </Routes>
     </BrowserRouter>

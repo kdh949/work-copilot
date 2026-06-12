@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from "@nestjs/common";
-import { CreateMemberDto, EditMemberDto } from "./users.dto";
+import { CreateMemberDto, EditMemberDto } from "./member.dto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { MemberEntity } from './users.entity'
+import { MemberEntity } from './member.entity'
 import { Repository } from "typeorm";
 import * as bcrypt from 'bcrypt';
 
@@ -15,7 +15,7 @@ export class MemberService {
     // 현재 mvp 버전으로, 기본적인 요소만 검사.
     async join(dto: CreateMemberDto): Promise <void> {
         // 아이디 무결성 검사
-        const exists = await this.memberRepository.findOne({ where: {user_id: dto.user_id}})
+        const exists = await this.checkMember(dto.user_id)
         if (exists) throw new ConflictException('이미 사용중인 아이디입니다.')
  
         // 비밀번호 해싱
@@ -34,6 +34,11 @@ export class MemberService {
 
     deleteMember(id: number) {
 
+    }
+
+    // 로그인 시 사용할 메서드
+    checkMember(userId: string) {
+        return this.memberRepository.findOne({ where: {user_id: userId}})
     }
 
 

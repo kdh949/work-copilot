@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PostsController } from './posts.controller';
 import { PostService } from './posts.service';
-import { Post } from './posts.entity';
+import { PostEntity } from './posts.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Post])],
+  imports: [TypeOrmModule.forFeature([PostEntity])],
   controllers: [PostsController],
   providers: [PostService],
 })

@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
-import { Members } from '../account/member.entity';
+import { MemberEntity } from '../account/member/member.entity';
 
 export enum PostCategory {
     공지 = '공지',
@@ -11,31 +11,31 @@ export enum PostCategory {
 }
 
 @Entity('posts')
-export class Post {
+export class PostEntity {
 
     @PrimaryGeneratedColumn()
-    id: number;
+    id!: number;
 
-    @ManyToOne(() => Members)
+    @ManyToOne(() => MemberEntity)
     @JoinColumn({ name: 'author' })
-    author: Members;
+    author!: MemberEntity;
 
     @Column({
         type: 'enum',
         enum: PostCategory,
         enumName: 'post_category',
     })
-    category: PostCategory;
+    category!: PostCategory;
 
     @Column({ type: 'varchar', length: 100 })
-    title: string;
+    title!: string;
 
     @Column({ type: 'varchar', length: 100 })
-    location: string;
+    location!: string;
 
     @Column ({ type: 'int4'})
-    likes: number;
+    likes!: number;
 
     @CreateDateColumn({ type: 'timestamp' })
-    created_at: Date;
+    created_at!: Date;
 }

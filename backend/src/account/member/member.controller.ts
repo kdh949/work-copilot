@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Param, Post, Put } from "@nestjs/common";
-import { MemberService } from "./users.service";
-import { CreateMemberDto, EditMemberDto } from "./users.dto";
+import { MemberService } from "./member.service";
+import { CreateMemberDto, EditMemberDto } from "./member.dto";
 
 // 프론트에서 탐색하는 폴더 경로
 @Controller('account')
