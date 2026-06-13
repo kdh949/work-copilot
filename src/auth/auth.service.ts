@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { UsersService } from "../users/users.service";
 import { SignupDto } from "./dto/signup.dto";
 import { LoginDto } from "./dto/login.dto";
+import { JwtService } from "@nestjs/jwt";
 
 type SignupResponse = {
     id: number;
@@ -12,14 +13,15 @@ type SignupResponse = {
 };
 
 type LoginResponse = {
-    id: number;
-    email: string;
-    nickname: string;
+    accessToken: string;
 };
 
 @Injectable()
 export class AuthService {
-    constructor(private readonly usersService: UsersService) {}
+    constructor(
+        private readonly usersService: UsersService,
+        private readonly jwtService: JwtService,
+    ) {}
 
     async signup(signupDto: SignupDto): Promise<SignupResponse> {
         const hashedPassword = await bcrypt.hash(signupDto.password, 10);
@@ -52,10 +54,15 @@ export class AuthService {
             throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
         }
 
-        return {
-            id: user.id,
+        const payload = {
+            sub: user.id,
             email: user.email,
-            nickname: user.nickname,
+        };
+
+        const accessToken = await this.jwtService.signAsync(payload);
+
+        return {
+            accessToken,
         };
     }
 }
