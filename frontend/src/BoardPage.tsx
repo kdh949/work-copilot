@@ -26,6 +26,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   const isDisabled = title === "" || content === "" || tag === "";
 
   async function fetchBoards() {
+    // await는 fetch가 끝날 때까지 기다린다
+    // await가 없으면 서버 응답이 오기 전에 다음 코드가 실행 될 수 있다.
     const response = await fetch("http://localhost:3000/boards");
     const data = await response.json();
     setBoards(data);
