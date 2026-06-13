@@ -1,5 +1,7 @@
 import React from "react";
 
+const HTTP_STATUS_CONFLICT = 409;
+
 export const SignUpForm = () => {
   const [loginId, setLoginId] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -22,6 +24,12 @@ export const SignUpForm = () => {
     });
 
     if (!response.ok) {
+      const error = await response.json();
+      if (response.status === HTTP_STATUS_CONFLICT) {
+        setMessage(error.message);
+        return;
+      }
+
       setMessage("회원가입 실패");
       return;
     }

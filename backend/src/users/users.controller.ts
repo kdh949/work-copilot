@@ -1,5 +1,6 @@
 import {
   Controller,
+  ConflictException,
   Get,
   Post,
   Body,
@@ -16,7 +17,13 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  create(@Body() createUserDto: CreateUserDto) {
+  async create(@Body() createUserDto: CreateUserDto) {
+    const user = await this.usersService.findByLoginId(createUserDto.loginId);
+
+    if (user) {
+      throw new ConflictException('이미 사용 중인 아이디입니다.');
+    }
+
     return this.usersService.create(createUserDto);
   }
   // Todo

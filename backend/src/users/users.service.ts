@@ -33,6 +33,10 @@ export class UsersService {
   findOne(id: number) {
     return this.usersRepository.findOneBy({ id });
   }
+
+  findByLoginId(loginId: string) {
+    return this.usersRepository.findOneBy({ loginId });
+  }
   // Todo
   update(id: number, updateUserDto: UpdateUserDto) {
     return `This action updates a #${id} user`;
