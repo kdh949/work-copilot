@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { UsersModule } from "../users/users.module";
 import { JwtModule, JwtSignOptions } from "@nestjs/jwt";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 
 @Module({
     imports: [
@@ -20,6 +21,6 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
         }),
     ], // 필요한 모듈 가져오기
     controllers: [AuthController],
-    providers: [AuthService],
+    providers: [AuthService, JwtAuthGuard],
 })
 export class AuthModule {}

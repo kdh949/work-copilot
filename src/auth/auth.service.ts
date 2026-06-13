@@ -16,6 +16,12 @@ type LoginResponse = {
     accessToken: string;
 };
 
+type MeResponse = {
+    id: number;
+    email: string;
+    nickname: string;
+};
+
 @Injectable()
 export class AuthService {
     constructor(
@@ -63,6 +69,20 @@ export class AuthService {
 
         return {
             accessToken,
+        };
+    }
+
+    async me(userId: number): Promise<MeResponse> {
+        const user = await this.usersService.findById(userId);
+
+        if (!user) {
+            throw new UnauthorizedException();
+        }
+
+        return {
+            id: user.id,
+            email: user.email,
+            nickname: user.nickname,
         };
     }
 }

@@ -221,3 +221,11 @@ Content-Type: application/json
   "email": "test@example.com",
   "password": "12345678"
 }
+
+### 내 정보 조회 - 정상
+GET http://localhost:3000/auth/me
+Authorization: Bearer abc
+
+
+### 내 정보 조회 - 토큰 없음
+GET http://localhost:3000/auth/me
