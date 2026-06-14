@@ -40,8 +40,12 @@ export class BoardsController {
   }
 
   @Get()
-  findAll(@Query('page') page = '1', @Query('limit') limit = '10') {
-    return this.boardsService.findAll(Number(page), Number(limit));
+  findAll(
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('keyword') keyword = '',
+  ) {
+    return this.boardsService.findAll(Number(page), Number(limit), keyword);
   }
 
   @Get(':id')

@@ -42,6 +42,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     null,
   );
   const [selectedBoard, setSelectedBoard] = React.useState<Board | null>(null);
+  const [keyword, setKeyword] = React.useState("");
+  const [searchKeyword, setSearchKeyword] = React.useState("");
 
   const isDisabled = title === "" || content === "" || tag === "";
 
@@ -64,6 +66,7 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
+      keyword: searchKeyword,
     });
     // await는 fetch가 끝날 때까지 기다린다
     // await가 없으면 서버 응답이 오기 전에 다음 코드가 실행 될 수 있다.
@@ -76,7 +79,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   // page가 바뀔떄마다 목록을 다시 가져온다.
   React.useEffect(() => {
     fetchBoards();
-  }, [page]);
+    // 감시 목록 두개 둘중 어느 하나가 바뀌어도 fetchBoards() 실행
+  }, [page, searchKeyword]);
 
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,6 +171,22 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     <main className="board-page">
       <div className="board-header">
         <h1>게시판</h1>
+        {/* 검색용 form */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPage(1);
+            setSearchKeyword(keyword);
+          }}
+        >
+          <input
+            type="text"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="제목/내용 검색"
+          />
+          <button type="submit">검색</button>
+        </form>
         <button
           type="button"
           onClick={() => {

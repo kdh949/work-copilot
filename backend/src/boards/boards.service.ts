@@ -8,7 +8,7 @@ import { CreateBoardDto } from './dto/create-board.dto';
 import { UpdateBoardDto } from './dto/update-board.dto';
 import { Board } from './entities/board.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 
 type JwtPayload = {
@@ -40,7 +40,7 @@ export class BoardsService {
     return this.boardsRepository.save(board);
   }
 
-  async findAll(page: number, limit: number) {
+  async findAll(page: number, limit: number, keyword: string) {
     /*
     page=1, limit=10 -> skip=0
     page=2, limit=10 -> skip=10
@@ -48,11 +48,17 @@ export class BoardsService {
     */
     const skip = (page - 1) * limit;
 
+    // JavaScript 배열 안에 객체 2개가 들어있는 것
+    // TypeORM에서는 배열로 조건을 주면 보통 OR 조건처럼 동작
+    const where = keyword
+      ? [{ title: Like(`%${keyword}%`) }, { content: Like(`%${keyword}%`) }]
+      : undefined;
     /*
     items: 현재 페이지 게시글 목록
     total: 전체 게시글 개수
       */
     const [items, total] = await this.boardsRepository.findAndCount({
+      where,
       skip,
       take: limit,
       order: {
