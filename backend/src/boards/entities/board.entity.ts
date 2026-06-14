@@ -18,4 +18,7 @@ export class Board {
 
   @Column({ default: '' })
   writer!: string;
+
+  @Column({ default: 0 })
+  viewCount!: number;
 }

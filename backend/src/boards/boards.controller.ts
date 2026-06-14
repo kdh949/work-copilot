@@ -7,10 +7,27 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Headers,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { BoardsService } from './boards.service';
 import { CreateBoardDto } from './dto/create-board.dto';
 import { UpdateBoardDto } from './dto/update-board.dto';
+
+// 토큰 추출 helper
+function getTokenFromHeader(authorization?: string) {
+  if (!authorization) {
+    throw new UnauthorizedException('토큰이 없습니다.');
+  }
+
+  const [type, token] = authorization.split(' ');
+
+  if (type !== 'Bearer' || !token) {
+    throw new UnauthorizedException('토큰 형식이 올바르지 않습니다.');
+  }
+
+  return token;
+}
 
 @Controller('boards')
 export class BoardsController {
@@ -35,12 +52,18 @@ export class BoardsController {
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateBoardDto: UpdateBoardDto,
+    @Headers('authorization') authorization: string,
   ) {
-    return this.boardsService.update(id, updateBoardDto);
+    const token = getTokenFromHeader(authorization);
+    return this.boardsService.update(id, updateBoardDto, token);
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.boardsService.remove(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Headers('authorization') authorization: string,
+  ) {
+    const token = getTokenFromHeader(authorization);
+    return this.boardsService.remove(id, token);
   }
 }
