@@ -355,13 +355,33 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
 
       {selectedBoard && (
         <section className="board-detail">
-          <h2>{selectedBoard.title}</h2>
-          <p>{selectedBoard.content}</p>
+          <h2>상세보기</h2>
+          <table>
+            <tbody>
+              <tr>
+                <th>번호</th>
+                <td>{selectedBoard.id}</td>
+                <th>조회수</th>
+                <td>{selectedBoard.viewCount}</td>
+              </tr>
+              <tr>
+                <th>이름</th>
+                <td colSpan={3}>{selectedBoard.writer}</td>
+              </tr>
+              <tr>
+                <th>제목</th>
+                <td colSpan={3}>{selectedBoard.title}</td>
+              </tr>
+              <tr>
+                <th>태그</th>
+                <td colSpan={3}>{selectedBoard.tag}</td>
+              </tr>
+              <tr>
+                <td colSpan={4}>{selectedBoard.content}</td>
+              </tr>
+            </tbody>
+          </table>
           <div className="board-detail-meta">
-            <span>
-              {selectedBoard.tag} / 작성자: {selectedBoard.writer} / 조회수:{" "}
-              {selectedBoard.viewCount}
-            </span>
             <button type="button" onClick={() => setSelectedBoard(null)}>
               닫기
             </button>
