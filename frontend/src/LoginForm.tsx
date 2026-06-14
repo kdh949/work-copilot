@@ -30,9 +30,11 @@ export const LoginForm = ({ onLoginSuccess }: LoginFormProps) => {
       return;
     }
 
-    const user = await response.json();
+    const data = await response.json();
 
-    onLoginSuccess(user.loginId);
+    localStorage.setItem("accessToken", data.accessToken);
+
+    onLoginSuccess(data.user.loginId);
     setLoginId("");
     setPassword("");
   }

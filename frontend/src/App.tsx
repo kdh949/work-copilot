@@ -9,6 +9,7 @@ function App() {
   const [loginId, setLoginId] = useState<string | null>(null);
 
   function handleLogout() {
+    localStorage.removeItem("accessToken");
     setLoginId(null);
     setMode("login");
   }

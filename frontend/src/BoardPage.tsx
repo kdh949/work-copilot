@@ -1,4 +1,19 @@
 import React from "react";
+// 게시글 작성 수정 삭제에 공통된 코드 함수로 만듬
+function authJsonFetch(url: string, options: RequestInit = {}) {
+  const accessToken = localStorage.getItem("accessToken");
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+      // Bearer는 "토큰 인증 방식"이라는 표시
+      // Bearer 뒤에는 실제 accessToken을 붙임
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
 
 type Board = {
   id: number;
@@ -6,6 +21,7 @@ type Board = {
   content: string;
   tag: string;
   writer: string;
+  viewCount: number;
 };
 
 type BoardPageProps = {
@@ -22,8 +38,23 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [editingBoardId, setEditingBoardId] = React.useState<number | null>(
     null,
   );
+  const [selectedBoard, setSelectedBoard] = React.useState<Board | null>(null);
 
   const isDisabled = title === "" || content === "" || tag === "";
+
+  // 상세 조회 함수
+  async function handleSelectBoard(id: number) {
+    const response = await fetch(`http://localhost:3000/boards/${id}`);
+
+    if (!response.ok) {
+      setMessage("게시글 조회 실패");
+      return;
+    }
+
+    const data = await response.json();
+    setSelectedBoard(data);
+    fetchBoards();
+  }
 
   async function fetchBoards() {
     // await는 fetch가 끝날 때까지 기다린다
@@ -40,11 +71,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const response = await fetch("http://localhost:3000/boards", {
+    const response = await authJsonFetch("http://localhost:3000/boards", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         title,
         content,
@@ -89,13 +117,10 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
       return;
     }
 
-    const response = await fetch(
+    const response = await authJsonFetch(
       `http://localhost:3000/boards/${editingBoardId}`,
       {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           title,
           content,
@@ -115,7 +140,7 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   }
 
   async function handleDeleteBoard(id: number) {
-    const response = await fetch(`http://localhost:3000/boards/${id}`, {
+    const response = await authJsonFetch(`http://localhost:3000/boards/${id}`, {
       method: "DELETE",
     });
 
@@ -231,20 +256,45 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
 
       <p>{message}</p>
 
+      {selectedBoard && (
+        <section className="board-detail">
+          <h2>{selectedBoard.title}</h2>
+          <p>{selectedBoard.content}</p>
+          <div className="board-detail-meta">
+            <span>
+              {selectedBoard.tag} / 작성자: {selectedBoard.writer} / 조회수:{" "}
+              {selectedBoard.viewCount}
+            </span>
+            <button type="button" onClick={() => setSelectedBoard(null)}>
+              닫기
+            </button>
+          </div>
+        </section>
+      )}
+
       <ul className="board-list">
         {boards.map((board) => (
           <li key={board.id}>
-            <strong>{board.title}</strong>
+            <button
+              className="board-title-button"
+              type="button"
+              onClick={() => handleSelectBoard(board.id)}
+            >
+              {board.title}
+            </button>
             <span>
-              {board.tag} / 작성자: {board.writer}
+              {board.tag} / 작성자: {board.writer} / 조회수: {board.viewCount}
             </span>
-            <p>{board.content}</p>
+
             {board.writer === loginId && (
               <div className="board-actions">
                 <button type="button" onClick={() => startEdit(board)}>
                   수정
                 </button>
-                <button type="button" onClick={() => handleDeleteBoard(board.id)}>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteBoard(board.id)}
+                >
                   삭제
                 </button>
               </div>
