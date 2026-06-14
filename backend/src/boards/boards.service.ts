@@ -40,8 +40,32 @@ export class BoardsService {
     return this.boardsRepository.save(board);
   }
 
-  findAll() {
-    return this.boardsRepository.find();
+  async findAll(page: number, limit: number) {
+    /*
+    page=1, limit=10 -> skip=0
+    page=2, limit=10 -> skip=10
+    page=3, limit=10 -> skip=20
+    */
+    const skip = (page - 1) * limit;
+
+    /*
+    items: 현재 페이지 게시글 목록
+    total: 전체 게시글 개수
+      */
+    const [items, total] = await this.boardsRepository.findAndCount({
+      skip,
+      take: limit,
+      order: {
+        id: 'DESC',
+      },
+    });
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+    };
   }
 
   async findOne(id: number) {

@@ -30,6 +30,9 @@ type BoardPageProps = {
 
 export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [boards, setBoards] = React.useState<Board[]>([]);
+  const [page, setPage] = React.useState(1);
+  const [total, setTotal] = React.useState(0);
+  const limit = 10;
   const [isWriting, setIsWriting] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
@@ -57,16 +60,23 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   }
 
   async function fetchBoards() {
+    // URL 뒤에 붙는 query string을 만들기 위한 코드이다.
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
     // await는 fetch가 끝날 때까지 기다린다
     // await가 없으면 서버 응답이 오기 전에 다음 코드가 실행 될 수 있다.
-    const response = await fetch("http://localhost:3000/boards");
+    const response = await fetch(`http://localhost:3000/boards?${params}`);
     const data = await response.json();
-    setBoards(data);
-  }
 
+    setBoards(data.items);
+    setTotal(data.total);
+  }
+  // page가 바뀔떄마다 목록을 다시 가져온다.
   React.useEffect(() => {
     fetchBoards();
-  }, []);
+  }, [page]);
 
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -302,6 +312,28 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
           </li>
         ))}
       </ul>
+
+      <div className="board-pagination">
+        <button
+          type="button"
+          disabled={page === 1}
+          onClick={() => setPage(page - 1)}
+        >
+          이전
+        </button>
+
+        <span>
+          {page} / {Math.ceil(total / limit)}
+        </span>
+
+        <button
+          type="button"
+          disabled={page * limit >= total}
+          onClick={() => setPage(page + 1)}
+        >
+          다음
+        </button>
+      </div>
     </main>
   );
 };

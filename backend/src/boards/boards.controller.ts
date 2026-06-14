@@ -8,6 +8,7 @@ import {
   Delete,
   ParseIntPipe,
   Headers,
+  Query,
   UnauthorizedException,
 } from '@nestjs/common';
 import { BoardsService } from './boards.service';
@@ -39,8 +40,8 @@ export class BoardsController {
   }
 
   @Get()
-  findAll() {
-    return this.boardsService.findAll();
+  findAll(@Query('page') page = '1', @Query('limit') limit = '10') {
+    return this.boardsService.findAll(Number(page), Number(limit));
   }
 
   @Get(':id')
