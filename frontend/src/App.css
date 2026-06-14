@@ -157,6 +157,43 @@
   font-size: 14px;
 }
 
+/* 댓글 스타일 시작*/
+
+.comment-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.comment-section form {
+  display: flex;
+  gap: 8px;
+}
+
+.comment-section input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.comment-section ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.comment-section li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* 댓글 스타일 끝*/
+
 .counter {
   font-size: 16px;
   padding: 5px 10px;

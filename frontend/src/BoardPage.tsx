@@ -24,6 +24,13 @@ type Board = {
   viewCount: number;
 };
 
+type Comment = {
+  id: number;
+  boardId: number;
+  content: string;
+  writer: string;
+};
+
 type BoardPageProps = {
   loginId: string;
 };
@@ -42,6 +49,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     null,
   );
   const [selectedBoard, setSelectedBoard] = React.useState<Board | null>(null);
+  const [comments, setComments] = React.useState<Comment[]>([]);
+  const [commentContent, setCommentContent] = React.useState("");
   const [keyword, setKeyword] = React.useState("");
   const [searchKeyword, setSearchKeyword] = React.useState("");
 
@@ -58,7 +67,65 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
 
     const data = await response.json();
     setSelectedBoard(data);
+    fetchComments(data.id);
     fetchBoards();
+  }
+
+  async function handleCreateComment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedBoard) {
+      return;
+    }
+
+    const response = await authJsonFetch("http://localhost:3000/comments", {
+      method: "POST",
+      body: JSON.stringify({
+        boardId: selectedBoard.id,
+        content: commentContent,
+        writer: loginId,
+      }),
+    });
+
+    if (!response.ok) {
+      setMessage("댓글 작성 실패");
+      return;
+    }
+
+    setCommentContent("");
+    fetchComments(selectedBoard.id);
+  }
+
+  async function handleDeleteComment(id: number) {
+    const response = await authJsonFetch(
+      `http://localhost:3000/comments/${id}`,
+      {
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok) {
+      setMessage("댓글 삭제 실패");
+      return;
+    }
+
+    if (selectedBoard) {
+      fetchComments(selectedBoard.id);
+    }
+  }
+
+  async function fetchComments(boardId: number) {
+    const response = await fetch(
+      `http://localhost:3000/comments?boardId=${boardId}`,
+    );
+
+    if (!response.ok) {
+      setMessage("댓글 조회 실패");
+      return;
+    }
+
+    const data = await response.json();
+    setComments(data);
   }
 
   async function fetchBoards() {
@@ -298,6 +365,41 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
             <button type="button" onClick={() => setSelectedBoard(null)}>
               닫기
             </button>
+          </div>
+
+          <div className="comment-section">
+            <h3>댓글</h3>
+
+            <form onSubmit={handleCreateComment}>
+              <input
+                type="text"
+                value={commentContent}
+                onChange={(event) => setCommentContent(event.target.value)}
+                placeholder="댓글을 입력하세요"
+              />
+              <button type="submit" disabled={commentContent === ""}>
+                댓글 작성
+              </button>
+            </form>
+
+            <ul>
+              {comments.map((comment) => (
+                <li key={comment.id}>
+                  <span>
+                    {comment.writer}: {comment.content}
+                  </span>
+
+                  {comment.writer === loginId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteComment(comment.id)}
+                    >
+                      삭제
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}
