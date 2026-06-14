@@ -4,12 +4,14 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    private readonly jwtService: JwtService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -57,9 +59,19 @@ export class UsersService {
       throw new UnauthorizedException('아이디 또는 비밀번호가 틀렸습니다.');
     }
 
-    return {
-      id: user.id,
+    const payload = {
+      sub: user.id,
       loginId: user.loginId,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        loginId: user.loginId,
+      },
     };
   }
 }
