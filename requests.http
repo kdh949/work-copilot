@@ -229,3 +229,13 @@ Authorization: Bearer abc
 
 ### 내 정보 조회 - 토큰 없음
 GET http://localhost:3000/auth/me
+
+### 게시글 생성 - 인증 필요
+POST http://localhost:3000/posts
+Authorization: Bearer {{login.response.body.accessToken}}
+Content-Type: application/json
+
+{
+  "title": "인증된 사용자의 글",
+  "content": "JWT에서 작성자를 결정합니다."
+}
