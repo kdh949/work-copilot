@@ -22,5 +22,6 @@ import { JwtAuthGuard } from "./guards/jwt-auth.guard";
     ], // 필요한 모듈 가져오기
     controllers: [AuthController],
     providers: [AuthService, JwtAuthGuard],
+    exports: [JwtAuthGuard, JwtModule,], // JwtAuthGuard를 PostsModule에서도 쓸 수 있게 export
 })
 export class AuthModule {}

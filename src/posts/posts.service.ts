@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { CreatePostDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { ILike, Repository } from "typeorm";
+import { Column, ILike, Repository } from "typeorm";
 import { Post } from "./post.entity";
 import { UsersService } from "../users/users.service";
 
@@ -66,8 +66,10 @@ export class PostsService {
         return this.postRepository.save(post);
     }
 
-    async update(id: number, updatePostDto: UpdatePostDto): Promise<Post> {
+    async update(id: number, updatePostDto: UpdatePostDto, userId: number): Promise<Post> {
         const post = await this.findOne(id);
+
+        this.checkOwnership(post, userId);
 
         if (updatePostDto.title) {
             post.title = updatePostDto.title;
@@ -75,16 +77,24 @@ export class PostsService {
         if (updatePostDto.content) {
             post.content = updatePostDto.content;
         }
-        return post;
+        return this.postRepository.save(post);
     }
 
-    async remove(id: number): Promise<{ deleted: boolean }> {
+    async remove(id: number, userId: number): Promise<{ deleted: boolean }> {
         const post = await this.findOne(id);
+
+        this.checkOwnership(post, userId);
 
         await this.postRepository.delete(post.id);
 
         return {
             deleted: true,
         };
+    }
+
+    private checkOwnership(post: Post, userId: number): void {
+        if (post.author.id !== userId) {
+            throw new ForbiddenException('본인의 게시글만 수정/삭제할 수 있습니다.');
+        }
     }
 }

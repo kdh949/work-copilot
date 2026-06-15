@@ -230,12 +230,85 @@ Authorization: Bearer abc
 ### 내 정보 조회 - 토큰 없음
 GET http://localhost:3000/auth/me
 
-### 게시글 생성 - 인증 필요
-POST http://localhost:3000/posts
-Authorization: Bearer {{login.response.body.accessToken}}
+#### 게시글 생성 - 인증 필요
+#POST http://localhost:3000/posts
+#Authorization: Bearer {{login.response.body.accessToken}}
+#Content-Type: application/json
+#
+#{
+#  "title": "인증된 사용자의 글",
+#  "content": "JWT에서 작성자를 결정합니다."
+#}
+
+### 회원가입 - user1
+POST http://localhost:3000/auth/signup
 Content-Type: application/json
 
 {
-  "title": "인증된 사용자의 글",
-  "content": "JWT에서 작성자를 결정합니다."
+  "email": "user1@example.com",
+  "password": "12345678",
+  "nickname": "유저1"
 }
+
+### 회원가입 - user2
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
+
+{
+  "email": "user2@example.com",
+  "password": "12345678",
+  "nickname": "유저2"
+}
+
+### 로그인 - user1
+# @name loginUser1
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "user1@example.com",
+  "password": "12345678"
+}
+
+### 로그인 - user2
+# @name loginUser2
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "user2@example.com",
+  "password": "12345678"
+}
+
+### user1 게시글 작성
+# @name createPostByUser1
+POST http://localhost:3000/posts
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsImVtYWlsIjoidXNlcjFAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU0MDMsImV4cCI6MTc4MTUyOTAwM30.mH_DshaS1SPlZTdFUBaC2a7xOuHhfMMKcBl_KHGRPlY
+Content-Type: application/json
+
+{
+  "title": "user1의 게시글",
+  "content": "이 글은 user1이 작성했습니다."
+}
+
+### user1이 자기 글 수정 - 성공
+PATCH http://localhost:3000/posts/1709834
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8
+Content-Type: application/json
+
+{
+  "title": "user1이 수정한 제목"
+}
+
+### user2가 user1 글 수정 - 실패
+PATCH http://localhost:3000/posts/1709834
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8
+Content-Type: application/json
+
+{
+  "title": "user2가 몰래 수정 시도"
+}
+
+### user2가 user1 글 삭제 - 실패
+DELETE http://localhost:3000/posts/1709834
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8

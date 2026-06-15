@@ -41,16 +41,20 @@ export class PostsController {
         return this.postsService.create(createPostDto, request.user.sub);
     }
 
+    @UseGuards(JwtAuthGuard)
     @Patch(':id')
     update(
         @Param('id', ParseIntPipe) id: number,
         @Body() updatePostDto: UpdatePostDto,
+        @Req() request: AuthenticatedRequest,
     ): Promise<Post> {
-        return this.postsService.update(id, updatePostDto);
+        return this.postsService.update(id, updatePostDto, request.user.sub);
     }
 
+    @UseGuards(JwtAuthGuard)
     @Delete(':id')
-    remove(@Param('id', ParseIntPipe) id: number): Promise<{ deleted: boolean }> {
-        return this.postsService.remove(id);
+    remove(@Param('id', ParseIntPipe) id: number,
+           @Req() request: AuthenticatedRequest): Promise<{ deleted: boolean }> {
+        return this.postsService.remove(id, request.user.sub);
     }
 }

@@ -9,7 +9,7 @@ export class User {
     @Column({ unique: true }) // 중복으로 있을 수 없음을 표시
     email: string;
 
-    @Column()
+    @Column({ select: false })
     password: string;
 
     @Column()
