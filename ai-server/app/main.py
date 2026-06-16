@@ -1,7 +1,12 @@
+import asyncio
+from contextlib import suppress
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.services.agent_service import agent_ask
+from app.services.blog_search_service import sync_blogs_by_keywords
 from app.services.embedding_service import get_embedding, preview_embedding
 from app.services.github_mcp_service import analyze_github_repository
 from app.services.indexing_service import index_url, preview_index_url
@@ -10,6 +15,10 @@ from app.services.vector_store import preview_init_vector_tables, search_similar
 # FastAPI 앱을 만듭니다.
 # 이 앱이 AI 전용 서버의 입구 역할을 합니다.
 app = FastAPI(title="JG Mentor AI Server")
+
+# 서버가 켜져 있는 동안 24시간마다 돌아갈 블로그 동기화 작업입니다.
+# 처음에는 비어 있고, BLOG_SYNC_ENABLED=true일 때만 시작합니다.
+blog_sync_task: asyncio.Task | None = None
 
 
 class IndexUrlPreviewRequest(BaseModel):
@@ -55,6 +64,48 @@ class AskRequest(BaseModel):
 class GithubAnalyzeRequest(BaseModel):
     # 분석하고 싶은 GitHub repository 주소입니다.
     repository_url: str
+
+
+class BlogSyncRequest(BaseModel):
+    # 직접 검색하고 싶은 키워드 목록입니다.
+    # 비워두면 .env의 BLOG_SYNC_QUERIES를 사용합니다.
+    keywords: list[str] | None = None
+    # 키워드 하나당 검색 결과를 몇 개까지 가져올지 정합니다.
+    limit: int | None = None
+
+
+async def run_periodic_blog_sync():
+    # 서버가 켜져 있는 동안 같은 일을 반복하는 함수입니다.
+    # 한 번 검색/인덱싱하고, 정해진 시간만큼 쉬고, 다시 실행합니다.
+    while True:
+        try:
+            await sync_blogs_by_keywords()
+        except Exception as error:
+            # 자동 작업에서 오류가 나도 서버 전체가 꺼지면 안 됩니다.
+            print(f"[blog-sync] failed: {error}")
+
+        # 기본값은 24시간입니다.
+        await asyncio.sleep(settings.blog_sync_interval_hours * 60 * 60)
+
+
+@app.on_event("startup")
+async def start_blog_sync():
+    # .env에서 BLOG_SYNC_ENABLED=true로 켜면 자동 블로그 검색을 시작합니다.
+    global blog_sync_task
+
+    if settings.blog_sync_enabled:
+        blog_sync_task = asyncio.create_task(run_periodic_blog_sync())
+
+
+@app.on_event("shutdown")
+async def stop_blog_sync():
+    # 서버가 꺼질 때 자동 작업도 같이 멈춥니다.
+    if not blog_sync_task:
+        return
+
+    blog_sync_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await blog_sync_task
 
 
 @app.get("/health")
@@ -130,6 +181,16 @@ async def analyze_github(req: GithubAnalyzeRequest):
     # 참조 프로젝트의 GitHub MCP 분석 API에 해당합니다.
     # 실제 MCP stdio 대신 GitHub REST API adapter를 사용합니다.
     return await analyze_github_repository(req.repository_url)
+
+
+@app.post("/blogs/sync")
+async def sync_blogs(req: BlogSyncRequest):
+    # 블로그 키워드 검색을 수동으로 한 번 실행하는 API입니다.
+    # 자동 24시간 작업을 기다리지 않고 바로 테스트할 때 씁니다.
+    return await sync_blogs_by_keywords(
+        keywords=req.keywords,
+        limit=req.limit,
+    )
 
 
 @app.post("/db/init")

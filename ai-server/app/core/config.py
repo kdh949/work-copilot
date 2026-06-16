@@ -31,6 +31,34 @@ class Settings:
         "postgresql://jungle:jungle@localhost:5432/jungleboard",
     )
 
+    # 블로그 검색 방식입니다.
+    # off이면 자동 검색을 끄고, duckduckgo/naver_api이면 해당 검색을 사용합니다.
+    blog_search_mode: str = os.getenv("BLOG_SEARCH_MODE", "duckduckgo")
+
+    # 키워드 하나로 검색할 때 최대 몇 개의 블로그 URL을 가져올지 정합니다.
+    blog_search_max_results: int = int(os.getenv("BLOG_SEARCH_MAX_RESULTS", "5"))
+
+    # 서버가 켜져 있는 동안 24시간마다 자동 블로그 검색을 할지 정합니다.
+    blog_sync_enabled: bool = os.getenv("BLOG_SYNC_ENABLED", "false").lower() == "true"
+
+    # 자동 블로그 검색 주기입니다. 기본값은 24시간입니다.
+    blog_sync_interval_hours: int = int(os.getenv("BLOG_SYNC_INTERVAL_HOURS", "24"))
+
+    # 자동으로 검색할 크래프톤 정글 관련 키워드 목록입니다.
+    # | 기호로 여러 키워드를 나눕니다.
+    blog_sync_queries: list[str] = [
+        query.strip()
+        for query in os.getenv(
+            "BLOG_SYNC_QUERIES",
+            "크래프톤 정글 후기 블로그|크래프톤 정글 알고리즘 학습|크래프톤 정글 지원 후기|크래프톤 정글 입학 준비|크래프톤 정글 회고",
+        ).split("|")
+        if query.strip()
+    ]
+
+    # Naver Blog Search API를 쓸 때 필요한 값입니다.
+    naver_client_id: str = os.getenv("NAVER_CLIENT_ID", "")
+    naver_client_secret: str = os.getenv("NAVER_CLIENT_SECRET", "")
+
 
 # 다른 파일에서 settings.openai_api_key처럼 꺼내 쓸 수 있게 만든 객체입니다.
 settings = Settings()

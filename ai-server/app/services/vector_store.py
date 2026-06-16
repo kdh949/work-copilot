@@ -69,6 +69,15 @@ async def init_vector_tables() -> None:
             """
         )
 
+        # 글 내용 hash로도 중복 문서를 빠르게 찾기 위한 index입니다.
+        # URL이 달라도 본문이 같으면 content_hash가 같아서 중복 저장을 막을 수 있습니다.
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ai_documents_content_hash
+            ON ai_documents(content_hash);
+            """
+        )
+
         # vector 검색을 빠르게 하기 위한 index입니다.
         # ivvflat: 벡터들을 비슷한 그룹으로 나눠서 빠르게 찾는 방식
         # vector_cosine_ops: 벡터의 방향이 얼마나 비슷한지 비교하는 방식
@@ -177,6 +186,37 @@ async def save_indexed_document(
                 )
                 status = "updated"
             else:
+                # URL은 다르지만 글 내용이 완전히 같은 경우도 있습니다.
+                # 예: 검색 결과가 모바일 주소/PC 주소를 따로 보여줘도 본문은 같은 글일 수 있습니다.
+                same_content = await conn.fetchrow(
+                    """
+                    SELECT id::text AS id
+                    FROM ai_documents
+                    WHERE content_hash = $1
+                    LIMIT 1;
+                    """,
+                    content_hash,
+                )
+
+                if same_content:
+                    # 이미 같은 본문이 저장되어 있으면 또 저장하지 않습니다.
+                    # 이렇게 해야 24시간마다 검색해도 같은 글이 계속 쌓이지 않습니다.
+                    chunk_count = await conn.fetchval(
+                        """
+                        SELECT COUNT(*)
+                        FROM ai_document_chunks
+                        WHERE document_id = $1::uuid;
+                        """,
+                        same_content["id"],
+                    )
+
+                    return {
+                        "status": "skipped",
+                        "documentId": same_content["id"],
+                        "chunkCount": chunk_count,
+                        "reason": "same content already indexed",
+                    }
+
                 # 처음 보는 URL이면 새 문서로 저장합니다.
                 document_id = await conn.fetchval(
                     """
