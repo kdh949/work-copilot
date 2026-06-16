@@ -19,7 +19,10 @@ type Board = {
   id: number;
   title: string;
   content: string;
-  tag: string;
+  // tag는 예전 서버 응답과의 호환용입니다.
+  tag?: string;
+  // 새 구조에서는 글 하나가 여러 태그를 가질 수 있습니다.
+  tags: string[];
   writer: string;
   viewCount: number;
 };
@@ -37,6 +40,9 @@ type BoardPageProps = {
 
 type BoardView = "list" | "write" | "edit" | "detail";
 
+// DB에 아직 태그가 없어도 처음 화면에서 고를 수 있게 기본 태그를 준비합니다.
+const DEFAULT_TAG_OPTIONS = ["알고리즘", "정글", "입학준비", "후기", "질문"];
+
 export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [boards, setBoards] = React.useState<Board[]>([]);
   const [page, setPage] = React.useState(1);
@@ -45,7 +51,12 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [view, setView] = React.useState<BoardView>("list");
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
-  const [tag, setTag] = React.useState("");
+  // 사용자가 현재 글에 붙이기로 선택한 태그 목록입니다.
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
+  // 사용자가 새 태그를 직접 입력하는 임시 입력값입니다.
+  const [tagDraft, setTagDraft] = React.useState("");
+  // 선택 버튼으로 보여줄 태그 후보 목록입니다.
+  const [tagOptions, setTagOptions] = React.useState(DEFAULT_TAG_OPTIONS);
   const [message, setMessage] = React.useState("");
   const [editingBoardId, setEditingBoardId] = React.useState<number | null>(
     null,
@@ -57,8 +68,45 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [searchKeyword, setSearchKeyword] = React.useState("");
   const [deleteTarget, setDeleteTarget] = React.useState<Board | null>(null);
 
-  const isDisabled = title === "" || content === "" || tag === "";
+  const isDisabled = title === "" || content === "" || selectedTags.length === 0;
   const pageCount = Math.max(1, Math.ceil(total / limit));
+
+  function getBoardTags(board: Board) {
+    // 새 응답은 tags 배열을 쓰고, 예전 응답은 tag 문자열을 쓸 수 있어서 둘 다 처리합니다.
+    return board.tags?.length ? board.tags : board.tag ? [board.tag] : [];
+  }
+
+  function addTag(tagName: string) {
+    // 새 태그를 선택 목록에 추가합니다.
+    // 이미 선택한 태그면 중복으로 넣지 않습니다.
+    const nextTag = tagName.trim();
+
+    if (!nextTag) {
+      return;
+    }
+
+    setSelectedTags((current) =>
+      current.includes(nextTag) ? current : [...current, nextTag],
+    );
+    setTagOptions((current) =>
+      current.includes(nextTag) ? current : [...current, nextTag],
+    );
+    setTagDraft("");
+  }
+
+  function removeTag(tagName: string) {
+    // 선택된 태그 칩을 누르면 해당 태그를 선택 목록에서 뺍니다.
+    setSelectedTags((current) => current.filter((tag) => tag !== tagName));
+  }
+
+  function toggleTag(tagName: string) {
+    // 태그 버튼을 한 번 누르면 선택, 다시 누르면 해제합니다.
+    if (selectedTags.includes(tagName)) {
+      removeTag(tagName);
+    } else {
+      addTag(tagName);
+    }
+  }
 
   const fetchBoards = React.useCallback(async () => {
     // URL 뒤에 붙는 query string을 만들기 위한 코드이다.
@@ -75,6 +123,18 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setBoards(data.items);
     setTotal(data.total);
   }, [page, searchKeyword]);
+
+  const fetchTagOptions = React.useCallback(async () => {
+    // 서버에 저장된 태그 목록을 가져와서 기본 태그와 합칩니다.
+    const response = await fetch("http://localhost:3000/boards/tags");
+
+    if (!response.ok) {
+      return;
+    }
+
+    const data = await response.json();
+    setTagOptions([...new Set([...DEFAULT_TAG_OPTIONS, ...data])]);
+  }, []);
 
   function goToList() {
     setView("list");
@@ -164,6 +224,11 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     // 감시 목록 두개 둘중 어느 하나가 바뀌어도 fetchBoards() 실행
   }, [fetchBoards]);
 
+  React.useEffect(() => {
+    // 화면이 처음 열릴 때 태그 선택지를 가져옵니다.
+    void Promise.resolve().then(fetchTagOptions);
+  }, [fetchTagOptions]);
+
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -172,7 +237,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
       body: JSON.stringify({
         title,
         content,
-        tag,
+        // 서버에는 태그 여러 개를 배열로 보냅니다.
+        tags: selectedTags,
         writer: loginId,
       }),
     });
@@ -185,7 +251,7 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     const newBoard = await response.json();
     setTitle("");
     setContent("");
-    setTag("");
+    setSelectedTags([]);
     setMessage(`${loginId}님 게시글 작성 완료`);
     setSelectedBoard(newBoard);
     fetchComments(newBoard.id);
@@ -197,7 +263,7 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setEditingBoardId(board.id);
     setTitle(board.title);
     setContent(board.content);
-    setTag(board.tag);
+    setSelectedTags(getBoardTags(board));
     setView("edit");
     setMessage("");
   }
@@ -206,7 +272,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setEditingBoardId(null);
     setTitle("");
     setContent("");
-    setTag("");
+    setSelectedTags([]);
+    setTagDraft("");
   }
 
   async function handleUpdateBoard(event: React.SubmitEvent<HTMLFormElement>) {
@@ -223,7 +290,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
         body: JSON.stringify({
           title,
           content,
-          tag,
+          // 수정할 때도 선택된 태그 전체를 서버에 보냅니다.
+          tags: selectedTags,
         }),
       },
     );
@@ -328,7 +396,16 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
                       </button>
                     </td>
                     <td>{board.writer}</td>
-                    <td>{board.tag}</td>
+                    <td>
+                      <div className="board-tag-list">
+                        {/* 게시글마다 여러 태그를 작은 칩으로 보여줍니다. */}
+                        {getBoardTags(board).map((boardTag) => (
+                          <span className="board-tag" key={boardTag}>
+                            {boardTag}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td>{board.viewCount}</td>
                   </tr>
                 ))}
@@ -399,13 +476,55 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
 
             <div>
               <label htmlFor="board-tag-input">태그</label>
-              <input
-                id="board-tag-input"
-                type="text"
-                value={tag}
-                onChange={(event) => setTag(event.target.value)}
-                placeholder="태그를 입력하세요"
-              />
+              <div className="board-tag-picker">
+                <div className="board-tag-options">
+                  {tagOptions.map((tagName) => {
+                    // 이미 선택한 태그는 선택된 모양으로 보여줍니다.
+                    const isSelected = selectedTags.includes(tagName);
+
+                    return (
+                      <button
+                        className={`board-tag-option ${isSelected ? "is-selected" : ""}`}
+                        type="button"
+                        key={tagName}
+                        onClick={() => toggleTag(tagName)}
+                      >
+                        {tagName}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="board-tag-add">
+                  <input
+                    id="board-tag-input"
+                    type="text"
+                    value={tagDraft}
+                    onChange={(event) => setTagDraft(event.target.value)}
+                    placeholder="새 태그 추가"
+                  />
+                  <button type="button" onClick={() => addTag(tagDraft)}>
+                    추가
+                  </button>
+                </div>
+
+                <div className="board-selected-tags">
+                  {selectedTags.map((tagName) => (
+                    // 선택된 태그를 누르면 제거됩니다.
+                    <button
+                      className="board-tag is-removable"
+                      type="button"
+                      key={tagName}
+                      onClick={() => removeTag(tagName)}
+                    >
+                      {tagName}
+                    </button>
+                  ))}
+                  {selectedTags.length === 0 && (
+                    <span className="board-tag-empty">태그를 하나 이상 선택하세요.</span>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div>
@@ -435,7 +554,17 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
           <h1>{selectedBoard.title}</h1>
           <div className="board-detail-meta">
             <span>작성자 {selectedBoard.writer}</span>
-            <span>태그 {selectedBoard.tag}</span>
+            <span>
+              태그{" "}
+              <span className="board-tag-list">
+                {/* 상세 화면에서도 여러 태그를 한 줄에 보여줍니다. */}
+                {getBoardTags(selectedBoard).map((boardTag) => (
+                  <span className="board-tag" key={boardTag}>
+                    {boardTag}
+                  </span>
+                ))}
+              </span>
+            </span>
             <span>조회수 {selectedBoard.viewCount}</span>
           </div>
 
