@@ -17,15 +17,7 @@ function App() {
   return (
     <div>
       {loginId ? (
-        <>
-          <div className="user-menu">
-            <p>{loginId}님 환영합니다</p>
-            <button type="button" onClick={handleLogout}>
-              로그아웃
-            </button>
-          </div>
-          <BoardPage loginId={loginId} />
-        </>
+        <BoardPage loginId={loginId} onLogout={handleLogout} />
       ) : (
         <>
           {mode === "login" ? (
