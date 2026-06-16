@@ -2,6 +2,7 @@
   "name": "jungleboard",
   "private": true,
   "scripts": {
+    "server": "node scripts/dev.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:backend": "npm --prefix backend run start:dev",
     "dev:frontend": "npm --prefix frontend run dev",
