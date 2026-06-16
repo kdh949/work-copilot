@@ -1,4 +1,6 @@
+# asyncpg는 Python에서 PostgreSQL DB에 연결하는 도구입니다.
 import asyncpg
+
 
 from app.core.config import settings
 
@@ -68,6 +70,9 @@ async def init_vector_tables() -> None:
         )
 
         # vector 검색을 빠르게 하기 위한 index입니다.
+        # ivvflat: 벡터들을 비슷한 그룹으로 나눠서 빠르게 찾는 방식
+        # vector_cosine_ops: 벡터의 방향이 얼마나 비슷한지 비교하는 방식
+        # WITH (lists = 100): 벡터들을 100개의 큰 그룹으로 나눠서 관리해라
         await conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_ai_document_chunks_embedding
@@ -223,4 +228,56 @@ async def save_indexed_document(
             }
     finally:
         # 저장이 끝났으면 DB 연결을 닫습니다.
+        await conn.close()
+
+
+async def search_similar_chunks(
+    question_embedding: list[float],
+    limit: int = 5,
+) -> list[dict]:
+    # 질문도 embedding 숫자 벡터로 바꾼 뒤 이 함수에 들어옵니다.
+    # DB에 저장된 chunk embedding과 질문 embedding을 비교해서 가장 비슷한 chunk를 찾습니다.
+    # 1 - (c.embedding <=> $1::vector) AS score  
+    # 거리 0.1 => score 0.9 높음
+    # 거리 0.8 => score 0.2 비슷한 점수 낮음
+    conn = await get_connection()
+
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                d.id::text AS document_id,
+                d.title,
+                d.source_type,
+                d.source_url,
+                c.chunk_index,
+                c.chunk_text,
+                1 - (c.embedding <=> $1::vector) AS score
+            FROM ai_document_chunks c
+            INNER JOIN ai_documents d ON d.id = c.document_id
+            WHERE c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> $1::vector
+            LIMIT $2;
+            """,
+            to_pgvector(question_embedding),
+            limit,
+        )
+
+        # asyncpg가 돌려준 row를 API 응답으로 쓰기 쉬운 dict로 바꿉니다.
+        return [
+            {
+                "chunkId": row["chunk_id"],
+                "documentId": row["document_id"],
+                "title": row["title"],
+                "sourceType": row["source_type"],
+                "sourceUrl": row["source_url"],
+                "chunkIndex": row["chunk_index"],
+                "chunkText": row["chunk_text"],
+                "score": float(row["score"]),
+            }
+            for row in rows
+        ]
+    finally:
+        # 검색이 끝났으면 DB 연결을 닫습니다.
         await conn.close()

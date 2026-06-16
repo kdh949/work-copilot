@@ -3,9 +3,11 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from readability import Document
 
 from app.services.embedding_service import get_embedding
+from app.services.github_mcp_service import fetch_github_repository_text, parse_github_repo_url
 from app.services.vector_store import save_indexed_document
 
 
@@ -36,6 +38,11 @@ def normalize_url(url: str) -> str:
 # URL 페이지를 열어서 HTML 안의 본문 글만 뽑아냅니다.
 # RAG는 긴 웹페이지 전체가 아니라, 깨끗한 글 텍스트가 필요합니다.
 async def fetch_url_text(url: str) -> str:
+    # GitHub repo URL이면 일반 웹페이지 추출 대신 GitHub API로 README를 가져옵니다.
+    # 이렇게 해야 메뉴/버튼 같은 HTML 노이즈를 줄이고 진짜 repo 설명을 저장할 수 있습니다.
+    if parse_github_repo_url(url):
+        return await fetch_github_repository_text(url)
+
     # 웹페이지를 가져오는 HTTP 클라이언트입니다.
     # redirect가 있으면 따라가고, 15초 넘게 걸리면 멈춥니다.
     async with httpx.AsyncClient(timeout=15.0,
@@ -86,85 +93,17 @@ async def fetch_url_text(url: str) -> str:
 def chunk_text(text: str,
                chunk_size: int = 900,
                chunk_overlap: int = 150) -> list[str]:
-    # 줄바꿈 모양을 통일하고 앞뒤 빈칸을 지웁니다.
-    normalized = text.replace("\r\n", "\n").strip()
+    # LangChain의 RecursiveCharacterTextSplitter를 사용합니다.
+    # 긴 글을 문단 -> 줄 -> 문장 -> 글자 순서로 자연스럽게 쪼개주는 도구입니다.
+    # 직접 자르는 코드를 줄이고, RAG에서 자주 쓰는 검증된 방식으로 바꿉니다.
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", "? ", "! ", "다. ", "요. ", " ", ""],
+    )
 
-    if not normalized:
-        return []
-
-    chunks: list[str] = []
-    start = 0
-
-    # 글의 처음부터 끝까지 조금씩 잘라갑니다.
-    while start < len(normalized):
-        hard_end = min(start + chunk_size, len(normalized))
-        current = normalized[start:hard_end]
-
-        # 가능하면 문단 끝이나 문장 끝에서 자르려고 위치를 찾습니다.
-        paragraph_break = current.rfind("\n\n")
-        sentence_break = max(
-            current.rfind(". "),
-            current.rfind("? "),
-            current.rfind("! "),
-            current.rfind("다. "),
-            current.rfind("요. "),
-        )
-
-        # 1. 문단 끝 위치가 적당히 뒤쪽에 있으면 문단 끝에서 자릅니다.
-        # 2. 문단 끝이 없고, 문장 끝 위치가 적당히 뒤쪽에 있으면 문장 끝에서 자릅니다.
-        # 3. 둘 다 없으면 그냥 최대 길이까지 자릅니다.
-        # 너무 앞에서 자르면 chunk가 작아지므로, 글의 중간 이후에 있는 끊김만 사용합니다.
-        if paragraph_break > chunk_size * 0.45:
-            cut = paragraph_break
-        elif sentence_break > chunk_size * 0.45:
-            cut = sentence_break + 2
-        else:
-            cut = len(current)
-
-        # 이번 chunk가 글의 마지막 부분이면 hard_end를 그대로 사용
-        # 아직 뒤에 글이 남아 있으면 start + cut 위치에서 자름
-        # start    = 이번 chunk가 시작하는 위치
-        # hard_end = 최대한 자를 수 있는 끝 위치
-        # cut      = 실제로 자르기로 결정한 위치
-        # soft_end = 최종으로 자를 끝 위치
-        soft_end = hard_end if hard_end == len(normalized) else start + cut
-        chunk = normalized[start:soft_end].strip()
-
-        if chunk:
-            chunks.append(chunk)
-
-        # 글의 끝까지 다 잘랐으면 while 반복을 멈춘다
-        if soft_end >= len(normalized):
-            break
-        '''
-        [겹침 X]
-        chunk 1:
-        크래프톤 정글은 매일 알고리즘 문제를 풀고,
-
-        chunk 2:
-        동료들과 회고하면서 성장하는 과정입니다.
-        지원 전에는 자료구조와 기본 알고리즘을 준비하면 좋습니다.
-        
-        문장이 chunk 사이에서 끊겨도
-        다음 chunk가 앞 내용을 조금 기억하고 있어서
-        검색과 답변 품질이 좋아짐
-        
-        [겹침 O]
-        chunk 1:
-        크래프톤 정글은 매일 알고리즘 문제를 풀고,
-        동료들과 회고하면서 성장하는 과정입니다.
-
-        chunk 2:
-        동료들과 회고하면서 성장하는 과정입니다.
-        지원 전에는 자료구조와 기본 알고리즘을 준비하면 좋습니다.
-        
-        '''
-
-        # 이전 chunk의 끝부분을 조금 겹치게 가져갑니다.
-        # 그래야 중요한 문맥이 두 chunk 사이에서 끊겨도 덜 손해봅니다.
-        start = max(soft_end - chunk_overlap, start + 1)
-
-    return chunks
+    # split_text는 긴 문자열을 작은 chunk 리스트로 바꿉니다.
+    return [chunk.strip() for chunk in splitter.split_text(text) if chunk.strip()]
 
 
 # URL을 실제 vector DB에 저장하기 전에 미리 확인하는 함수입니다.
