@@ -1,7 +1,7 @@
 import hashlib
 import math
 
-import httpx
+from langchain_openai import OpenAIEmbeddings
 
 from app.core.config import settings
 
@@ -19,28 +19,13 @@ async def get_embedding(text: str) -> list[float]:
         return mock_embedding(text)
 
     try:
-        # OpenAI Embedding API에 문장을 보내서 숫자 벡터를 받아옵니다.
-        # 다른 서버에 요청을 보내는 친구
-        # async with를 쓰는 이유는 요청을 다 보낸 뒤 연결을 자동으로 정리하기 위해서
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/embeddings",
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": settings.openai_embedding_model,
-                    "input": text,
-                },
-            )
-
-        # API 호출이 실패하면 오류를 냅니다.
-        response.raise_for_status()
-        data = response.json()
-
-        # OpenAI가 돌려준 embedding 숫자 목록만 꺼냅니다.
-        return data["data"][0]["embedding"]
+        # LangChain의 OpenAIEmbeddings가 OpenAI embedding API 호출을 대신 처리합니다.
+        # 직접 HTTP 요청을 만들지 않아도 모델명, API key, 응답 파싱을 맡길 수 있습니다.
+        embeddings = OpenAIEmbeddings(
+            model=settings.openai_embedding_model,
+            api_key=settings.openai_api_key,
+        )
+        return await embeddings.aembed_query(text)
     except Exception:
         # 개발 중에는 API 오류 때문에 전체 서버가 죽지 않게 mock으로 대신합니다.
         return mock_embedding(text)
