@@ -48,6 +48,12 @@ export class BoardsController {
     return this.boardsService.findAll(Number(page), Number(limit), keyword);
   }
 
+  @Get('tags')
+  findTags() {
+    // 글쓰기 화면에서 보여줄 태그 선택지를 가져옵니다.
+    return this.boardsService.findTags();
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.boardsService.findOne(id);
