@@ -24,85 +24,149 @@
 }
 
 .board-page {
-  width: min(720px, calc(100% - 32px));
-  margin: 80px auto 40px;
+  width: min(960px, calc(100% - 32px));
+  margin: 76px auto 48px;
   text-align: left;
 }
 
-.board-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 20px;
+.board-page button {
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-page button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.board-page button:disabled {
+  color: var(--text);
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .board-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  min-height: 52px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--border);
 }
 
-.board-header h1 {
-  margin: 0;
+.board-brand {
+  padding: 0;
+  border: 0;
+  color: var(--text-h);
+  background: transparent;
+  font-size: 24px;
+  font-weight: 700;
 }
 
-.board-form {
+.board-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.board-message {
+  min-height: 24px;
+  margin: 14px 0;
+  color: var(--accent);
+  font-size: 14px;
+  text-align: center;
+}
+
+.board-panel {
+  min-height: 560px;
+}
+
+.board-panel h1 {
+  margin: 0 0 22px;
+  color: var(--text-h);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.board-list-header {
   display: grid;
-  gap: 12px;
-  margin: 24px 0;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
-.board-form div {
+.board-search {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
 }
 
+.board-search input,
 .board-form input,
-.board-form textarea {
+.board-form textarea,
+.comment-section input {
   box-sizing: border-box;
   width: 100%;
-  padding: 8px;
+  padding: 9px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
+  color: var(--text-h);
+  background: var(--bg);
   font: inherit;
 }
 
-.board-form textarea {
-  min-height: 120px;
-  resize: vertical;
-}
-
-.board-list {
-  display: grid;
-  gap: 12px;
-  padding: 0;
-  margin: 24px 0 0;
-  list-style: none;
-}
-
-.board-list li {
-  padding: 16px;
+.board-table-wrap {
+  overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
-.board-list strong {
-  display: block;
+.board-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
   color: var(--text-h);
-  font-size: 18px;
+  font-size: 15px;
+}
+
+.board-table th,
+.board-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.board-table th {
+  background: var(--social-bg);
+  font-weight: 700;
+}
+
+.board-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.board-table td:nth-child(2),
+.board-table th:nth-child(2) {
+  text-align: left;
 }
 
 .board-title-button {
-  display: block;
+  display: inline;
+  min-height: auto;
   padding: 0;
   border: 0;
   color: var(--text-h);
   background: none;
   font: inherit;
-  font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
@@ -116,36 +180,84 @@
   outline-offset: 3px;
 }
 
-.board-list span {
-  display: inline-block;
-  margin-top: 6px;
+.board-bottom-bar,
+.board-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.board-bottom-bar p {
   font-size: 14px;
 }
 
-.board-list p {
-  margin-top: 10px;
+.board-pagination {
+  justify-content: center;
 }
 
-.board-actions {
+.board-pagination span {
+  min-width: 72px;
+  color: var(--text-h);
+  text-align: center;
+}
+
+.board-form {
+  display: grid;
+  gap: 12px;
+  width: min(620px, 100%);
+  margin: 0 auto;
+}
+
+.board-form-panel {
+  display: grid;
+  align-content: start;
+  padding-top: 24px;
+}
+
+.board-form div {
+  display: grid;
+  gap: 6px;
+}
+
+.board-form label {
+  color: var(--text-h);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.board-form textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.board-form-actions,
+.board-detail-actions,
+.board-modal-actions {
   display: flex;
+  justify-content: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .board-detail {
   display: grid;
-  gap: 12px;
-  padding: 20px 0;
-  margin: 28px 0;
-  border-block: 1px solid var(--border);
+  gap: 14px;
 }
 
-.board-detail h2 {
-  margin: 0;
+.board-detail h1 {
+  margin-bottom: 0;
+  text-align: left;
 }
 
-.board-detail p {
+.board-content {
+  min-height: 150px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-h);
+  white-space: pre-wrap;
   line-height: 1.6;
 }
 
@@ -157,6 +269,18 @@
   font-size: 14px;
 }
 
+.board-detail-meta span + span::before {
+  padding-right: 10px;
+  color: var(--border);
+  content: "|";
+}
+
+.board-detail-actions {
+  justify-content: flex-end;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 /* 댓글 스타일 시작*/
 
 .comment-section {
@@ -166,16 +290,9 @@
 }
 
 .comment-section form {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 8px;
-}
-
-.comment-section input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
 }
 
 .comment-section ul {
@@ -191,8 +308,67 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-h);
 }
 /* 댓글 스타일 끝*/
+
+.board-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.board-modal {
+  width: min(420px, 100%);
+  padding: 34px 28px 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.board-modal h2 {
+  margin-bottom: 22px;
+  color: var(--text-h);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+@media (max-width: 720px) {
+  .user-menu {
+    position: static;
+    justify-content: flex-end;
+    padding: 12px 16px 0;
+  }
+
+  .board-page {
+    width: min(100% - 24px, 960px);
+    margin-top: 28px;
+  }
+
+  .board-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .board-search,
+  .comment-section form {
+    grid-template-columns: 1fr;
+  }
+
+  .board-bottom-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 
 .counter {
   font-size: 16px;

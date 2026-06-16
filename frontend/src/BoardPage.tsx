@@ -35,12 +35,14 @@ type BoardPageProps = {
   loginId: string;
 };
 
+type BoardView = "list" | "write" | "edit" | "detail";
+
 export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [boards, setBoards] = React.useState<Board[]>([]);
   const [page, setPage] = React.useState(1);
   const [total, setTotal] = React.useState(0);
   const limit = 10;
-  const [isWriting, setIsWriting] = React.useState(false);
+  const [view, setView] = React.useState<BoardView>("list");
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
   const [tag, setTag] = React.useState("");
@@ -53,8 +55,34 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
   const [commentContent, setCommentContent] = React.useState("");
   const [keyword, setKeyword] = React.useState("");
   const [searchKeyword, setSearchKeyword] = React.useState("");
+  const [deleteTarget, setDeleteTarget] = React.useState<Board | null>(null);
 
   const isDisabled = title === "" || content === "" || tag === "";
+  const pageCount = Math.max(1, Math.ceil(total / limit));
+
+  const fetchBoards = React.useCallback(async () => {
+    // URL 뒤에 붙는 query string을 만들기 위한 코드이다.
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      keyword: searchKeyword,
+    });
+    // await는 fetch가 끝날 때까지 기다린다
+    // await가 없으면 서버 응답이 오기 전에 다음 코드가 실행 될 수 있다.
+    const response = await fetch(`http://localhost:3000/boards?${params}`);
+    const data = await response.json();
+
+    setBoards(data.items);
+    setTotal(data.total);
+  }, [page, searchKeyword]);
+
+  function goToList() {
+    setView("list");
+    setSelectedBoard(null);
+    setDeleteTarget(null);
+    setCommentContent("");
+    resetForm();
+  }
 
   // 상세 조회 함수
   async function handleSelectBoard(id: number) {
@@ -69,6 +97,8 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setSelectedBoard(data);
     fetchComments(data.id);
     fetchBoards();
+    setView("detail");
+    setMessage("");
   }
 
   async function handleCreateComment(event: React.FormEvent<HTMLFormElement>) {
@@ -128,26 +158,11 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setComments(data);
   }
 
-  async function fetchBoards() {
-    // URL 뒤에 붙는 query string을 만들기 위한 코드이다.
-    const params = new URLSearchParams({
-      page: String(page),
-      limit: String(limit),
-      keyword: searchKeyword,
-    });
-    // await는 fetch가 끝날 때까지 기다린다
-    // await가 없으면 서버 응답이 오기 전에 다음 코드가 실행 될 수 있다.
-    const response = await fetch(`http://localhost:3000/boards?${params}`);
-    const data = await response.json();
-
-    setBoards(data.items);
-    setTotal(data.total);
-  }
   // page가 바뀔떄마다 목록을 다시 가져온다.
   React.useEffect(() => {
-    fetchBoards();
+    void Promise.resolve().then(fetchBoards);
     // 감시 목록 두개 둘중 어느 하나가 바뀌어도 fetchBoards() 실행
-  }, [page, searchKeyword]);
+  }, [fetchBoards]);
 
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,11 +182,14 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
       return;
     }
 
+    const newBoard = await response.json();
     setTitle("");
     setContent("");
     setTag("");
     setMessage(`${loginId}님 게시글 작성 완료`);
-    setIsWriting(false);
+    setSelectedBoard(newBoard);
+    fetchComments(newBoard.id);
+    setView("detail");
     fetchBoards();
   }
 
@@ -180,7 +198,7 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     setTitle(board.title);
     setContent(board.content);
     setTag(board.tag);
-    setIsWriting(false);
+    setView("edit");
     setMessage("");
   }
 
@@ -217,11 +235,20 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
 
     resetForm();
     setMessage("게시글 수정 완료");
+    if (selectedBoard?.id === editingBoardId) {
+      handleSelectBoard(editingBoardId);
+    } else {
+      setView("list");
+    }
     fetchBoards();
   }
 
-  async function handleDeleteBoard(id: number) {
-    const response = await authJsonFetch(`http://localhost:3000/boards/${id}`, {
+  async function handleDeleteBoard() {
+    if (!deleteTarget) {
+      return;
+    }
+
+    const response = await authJsonFetch(`http://localhost:3000/boards/${deleteTarget.id}`, {
       method: "DELETE",
     });
 
@@ -231,159 +258,205 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
     }
 
     setMessage("게시글 삭제 완료");
+    goToList();
     fetchBoards();
   }
 
   return (
     <main className="board-page">
       <div className="board-header">
-        <h1>게시판</h1>
-        {/* 검색용 form */}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            setPage(1);
-            setSearchKeyword(keyword);
-          }}
-        >
-          <input
-            type="text"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="제목/내용 검색"
-          />
-          <button type="submit">검색</button>
-        </form>
-        <button
-          type="button"
-          onClick={() => {
-            resetForm();
-            setIsWriting(true);
-          }}
-        >
-          글쓰기
+        <button className="board-brand" type="button" onClick={goToList}>
+          게시판
         </button>
+        <div className="board-header-actions">
+          <span>{loginId}님</span>
+          {view !== "list" && (
+            <button type="button" onClick={goToList}>
+              목록
+            </button>
+          )}
+        </div>
       </div>
 
-      {isWriting && (
-        <form className="board-form" onSubmit={handleCreateBoard}>
-          <div>
-            <label htmlFor="board-title-input">제목:</label>
-            <input
-              id="board-title-input"
-              type="text"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
+      <p className="board-message">{message}</p>
+
+      {view === "list" && (
+        <section className="board-panel">
+          <div className="board-list-header">
+            <h1>게시글 목록</h1>
+            {/* 검색용 form */}
+            <form
+              className="board-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setPage(1);
+                setSearchKeyword(keyword);
+              }}
+            >
+              <input
+                type="text"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="검색어를 입력하세요"
+              />
+              <button type="submit">검색</button>
+            </form>
           </div>
 
-          <div>
-            <label htmlFor="board-tag-input">태그:</label>
-            <input
-              id="board-tag-input"
-              type="text"
-              value={tag}
-              onChange={(event) => setTag(event.target.value)}
-            />
+          <div className="board-table-wrap">
+            <table className="board-table">
+              <thead>
+                <tr>
+                  <th>번호</th>
+                  <th>제목</th>
+                  <th>작성자</th>
+                  <th>태그</th>
+                  <th>조회수</th>
+                </tr>
+              </thead>
+              <tbody>
+                {boards.map((board) => (
+                  <tr key={board.id}>
+                    <td>{board.id}</td>
+                    <td>
+                      <button
+                        className="board-title-button"
+                        type="button"
+                        onClick={() => handleSelectBoard(board.id)}
+                      >
+                        {board.title}
+                      </button>
+                    </td>
+                    <td>{board.writer}</td>
+                    <td>{board.tag}</td>
+                    <td>{board.viewCount}</td>
+                  </tr>
+                ))}
+                {boards.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>게시글이 없습니다.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
-          <div>
-            <label htmlFor="board-content-input">내용:</label>
-            <textarea
-              id="board-content-input"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-            />
+          <div className="board-bottom-bar">
+            <p>글쓰기는 로그인 후 이용 가능합니다.</p>
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setMessage("");
+                setView("write");
+              }}
+            >
+              글쓰기
+            </button>
           </div>
 
-          <button type="submit" disabled={isDisabled}>
-            저장
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setIsWriting(false);
-            }}
+          <div className="board-pagination">
+            <button
+              type="button"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+            >
+              이전
+            </button>
+
+            <span>
+              {page} / {pageCount}
+            </span>
+
+            <button
+              type="button"
+              disabled={page * limit >= total}
+              onClick={() => setPage(page + 1)}
+            >
+              다음
+            </button>
+          </div>
+        </section>
+      )}
+
+      {(view === "write" || view === "edit") && (
+        <section className="board-panel board-form-panel">
+          <h1>{view === "write" ? "글쓰기" : "게시글 수정"}</h1>
+          <form
+            className="board-form"
+            onSubmit={view === "write" ? handleCreateBoard : handleUpdateBoard}
           >
-            취소
-          </button>
-        </form>
+            <div>
+              <label htmlFor="board-title-input">제목</label>
+              <input
+                id="board-title-input"
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="제목을 입력하세요"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="board-tag-input">태그</label>
+              <input
+                id="board-tag-input"
+                type="text"
+                value={tag}
+                onChange={(event) => setTag(event.target.value)}
+                placeholder="태그를 입력하세요"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="board-content-input">내용</label>
+              <textarea
+                id="board-content-input"
+                value={content}
+                onChange={(event) => setContent(event.target.value)}
+                placeholder="내용을 입력하세요"
+              />
+            </div>
+
+            <div className="board-form-actions">
+              <button type="submit" disabled={isDisabled}>
+                {view === "write" ? "등록" : "수정 저장"}
+              </button>
+              <button type="button" onClick={goToList}>
+                취소
+              </button>
+            </div>
+          </form>
+        </section>
       )}
 
-      {editingBoardId !== null && (
-        <form className="board-form" onSubmit={handleUpdateBoard}>
-          <div>
-            <label htmlFor="edit-board-title-input">제목:</label>
-            <input
-              id="edit-board-title-input"
-              type="text"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="edit-board-tag-input">태그:</label>
-            <input
-              id="edit-board-tag-input"
-              type="text"
-              value={tag}
-              onChange={(event) => setTag(event.target.value)}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="edit-board-content-input">내용:</label>
-            <textarea
-              id="edit-board-content-input"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-            />
-          </div>
-
-          <button type="submit" disabled={isDisabled}>
-            수정 저장
-          </button>
-          <button type="button" onClick={resetForm}>
-            취소
-          </button>
-        </form>
-      )}
-
-      <p>{message}</p>
-
-      {selectedBoard && (
-        <section className="board-detail">
-          <h2>상세보기</h2>
-          <table>
-            <tbody>
-              <tr>
-                <th>번호</th>
-                <td>{selectedBoard.id}</td>
-                <th>조회수</th>
-                <td>{selectedBoard.viewCount}</td>
-              </tr>
-              <tr>
-                <th>이름</th>
-                <td colSpan={3}>{selectedBoard.writer}</td>
-              </tr>
-              <tr>
-                <th>제목</th>
-                <td colSpan={3}>{selectedBoard.title}</td>
-              </tr>
-              <tr>
-                <th>태그</th>
-                <td colSpan={3}>{selectedBoard.tag}</td>
-              </tr>
-              <tr>
-                <td colSpan={4}>{selectedBoard.content}</td>
-              </tr>
-            </tbody>
-          </table>
+      {view === "detail" && selectedBoard && (
+        <section className="board-panel board-detail">
+          <h1>{selectedBoard.title}</h1>
           <div className="board-detail-meta">
-            <button type="button" onClick={() => setSelectedBoard(null)}>
-              닫기
+            <span>작성자 {selectedBoard.writer}</span>
+            <span>태그 {selectedBoard.tag}</span>
+            <span>조회수 {selectedBoard.viewCount}</span>
+          </div>
+
+          <article className="board-content">{selectedBoard.content}</article>
+
+          <div className="board-detail-actions">
+            {selectedBoard.writer === loginId && (
+              <>
+                <button type="button" onClick={() => startEdit(selectedBoard)}>
+                  수정
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(selectedBoard)}
+                >
+                  삭제
+                </button>
+              </>
+            )}
+            <button type="button" onClick={goToList}>
+              목록
             </button>
           </div>
 
@@ -424,58 +497,26 @@ export const BoardPage = ({ loginId }: BoardPageProps) => {
         </section>
       )}
 
-      <ul className="board-list">
-        {boards.map((board) => (
-          <li key={board.id}>
-            <button
-              className="board-title-button"
-              type="button"
-              onClick={() => handleSelectBoard(board.id)}
-            >
-              {board.title}
-            </button>
-            <span>
-              {board.tag} / 작성자: {board.writer} / 조회수: {board.viewCount}
-            </span>
-
-            {board.writer === loginId && (
-              <div className="board-actions">
-                <button type="button" onClick={() => startEdit(board)}>
-                  수정
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteBoard(board.id)}
-                >
-                  삭제
-                </button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      <div className="board-pagination">
-        <button
-          type="button"
-          disabled={page === 1}
-          onClick={() => setPage(page - 1)}
-        >
-          이전
-        </button>
-
-        <span>
-          {page} / {Math.ceil(total / limit)}
-        </span>
-
-        <button
-          type="button"
-          disabled={page * limit >= total}
-          onClick={() => setPage(page + 1)}
-        >
-          다음
-        </button>
-      </div>
+      {deleteTarget && (
+        <div className="board-modal-backdrop" role="presentation">
+          <div
+            className="board-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-board-title"
+          >
+            <h2 id="delete-board-title">게시글을 삭제하시겠습니까?</h2>
+            <div className="board-modal-actions">
+              <button type="button" onClick={handleDeleteBoard}>
+                삭제
+              </button>
+              <button type="button" onClick={() => setDeleteTarget(null)}>
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };
