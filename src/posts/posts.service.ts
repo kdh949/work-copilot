@@ -200,7 +200,7 @@ export class PostsService {
         await this.postRepository.delete(post.id);
 
         if (post.boardType === 'wiki') {
-            await this.aiService.deletePost(post.id);
+            await this.aiService.deletePost(post);
         }
 
         return {

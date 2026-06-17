@@ -34,7 +34,7 @@ export class AiService {
 
     async syncPost(post: Post): Promise<void> {
         const document: AiDocument = {
-            sourceId: `post-${post.id}`,
+            sourceId: this.getPostSourceId(post),
             title: post.title,
             content: post.content,
             department: post.department || '공통',
@@ -48,9 +48,9 @@ export class AiService {
         }
     }
 
-    async deletePost(postId: number): Promise<void> {
+    async deletePost(post: Post): Promise<void> {
         try {
-            await fetch(`${this.getAiUrl()}/documents/post-${postId}`, {
+            await fetch(`${this.getAiUrl()}/documents/${this.getPostSourceId(post)}`, {
                 method: 'DELETE',
             });
         } catch (error) {
@@ -91,5 +91,9 @@ export class AiService {
         }
 
         return `https://${aiUrl}`;
+    }
+
+    private getPostSourceId(post: Post): string {
+        return post.sourceId || `post-${post.id}`;
     }
 }

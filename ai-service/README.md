@@ -20,3 +20,19 @@ uvicorn main:app --reload --port 8000
 ```
 
 `OPENAI_API_KEY`가 있으면 LangChain으로 OpenAI 모델과 임베딩을 사용합니다. 키가 없으면 게시글 내용을 바탕으로 간단한 로컬 응답을 반환합니다.
+
+## 위키 더미 데이터 적재
+
+로컬 zip 파일을 검증한 뒤 Render Postgres 외부 URL로 직접 적재합니다.
+
+```bash
+python scripts/import_wiki_dataset.py --dry-run
+WIKI_IMPORT_DATABASE_URL="postgresql://..." OPENAI_API_KEY="..." python scripts/import_wiki_dataset.py
+```
+
+로컬 Docker Postgres에서만 OpenAI 없이 테스트하려면 `--allow-fake-embeddings`를 사용할 수 있습니다.
+
+```bash
+python scripts/import_wiki_dataset.py --allow-fake-embeddings
+python scripts/import_wiki_dataset.py --rollback
+```

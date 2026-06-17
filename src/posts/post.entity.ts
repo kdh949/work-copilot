@@ -1,11 +1,15 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn, ManyToOne, OneToMany } from "typeorm";
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn, ManyToOne, OneToMany } from "typeorm";
 import { User } from "../users/user.entity";
 import { Comment } from "./comment.entity";
 
+@Index('IDX_post_source_id_unique', ['sourceId'], { unique: true, where: '"sourceId" IS NOT NULL' })
 @Entity()
 export class Post {
     @PrimaryGeneratedColumn() // id는 기본키이고 자동 증가한다.
     id: number;
+
+    @Column({ type: 'varchar', nullable: true })
+    sourceId: string | null;
 
     @Column() // title 컬럼을 만든다.
     title: string;
