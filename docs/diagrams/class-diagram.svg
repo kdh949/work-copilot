@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1210" height="880" viewBox="0 0 1210 880">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155" />
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans KR", "Malgun Gothic", Arial, sans-serif; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="32" y="42" font-size="24" font-weight="800" fill="#0f172a">Class / Component Diagram</text>
+  <rect x="40" y="90" width="240" height="180" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+<text x="56" y="118" font-size="16" font-weight="700" fill="#0f172a">App</text>
+<text x="56" y="146" font-size="13" fill="#475569">state mode</text>
+<text x="56" y="165" font-size="13" fill="#475569">state loginId</text>
+<text x="56" y="184" font-size="13" fill="#475569">handleLogout()</text>
+<text x="56" y="203" font-size="13" fill="#475569">renders auth or</text>
+<text x="56" y="222" font-size="13" fill="#475569">BoardPage</text>
+<rect x="330" y="90" width="260" height="180" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+<text x="346" y="118" font-size="16" font-weight="700" fill="#0f172a">BoardPage</text>
+<text x="346" y="146" font-size="13" fill="#475569">view/router state</text>
+<text x="346" y="165" font-size="13" fill="#475569">loadBoards()</text>
+<text x="346" y="184" font-size="13" fill="#475569">openDetail()</text>
+<text x="346" y="203" font-size="13" fill="#475569">submitBoard()</text>
+<text x="346" y="222" font-size="13" fill="#475569">askAi()</text>
+<rect x="640" y="90" width="240" height="150" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+<text x="656" y="118" font-size="16" font-weight="700" fill="#0f172a">Auth Forms</text>
+<text x="656" y="146" font-size="13" fill="#475569">LoginForm</text>
+<text x="656" y="165" font-size="13" fill="#475569">SignUpForm</text>
+<text x="656" y="184" font-size="13" fill="#475569">POST /users/login</text>
+<text x="656" y="203" font-size="13" fill="#475569">POST /users</text>
+<rect x="40" y="340" width="250" height="210" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+<text x="56" y="368" font-size="16" font-weight="700" fill="#0f172a">UsersController/Service</text>
+<text x="56" y="396" font-size="13" fill="#475569">create()</text>
+<text x="56" y="415" font-size="13" fill="#475569">login()</text>
+<text x="56" y="434" font-size="13" fill="#475569">findByLoginId()</text>
+<text x="56" y="453" font-size="13" fill="#475569">JWT signAsync()</text>
+<text x="56" y="472" font-size="13" fill="#475569">User repository</text>
+<rect x="330" y="340" width="250" height="230" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+<text x="346" y="368" font-size="16" font-weight="700" fill="#0f172a">BoardsController/Service</text>
+<text x="346" y="396" font-size="13" fill="#475569">create()</text>
+<text x="346" y="415" font-size="13" fill="#475569">findAll()</text>
+<text x="346" y="434" font-size="13" fill="#475569">findOne()</text>
+<text x="346" y="453" font-size="13" fill="#475569">update()</text>
+<text x="346" y="472" font-size="13" fill="#475569">remove()</text>
+<text x="346" y="491" font-size="13" fill="#475569">findPopularTags()</text>
+<text x="346" y="510" font-size="13" fill="#475569">Board/Tag repositories</text>
+<rect x="620" y="340" width="250" height="190" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+<text x="636" y="368" font-size="16" font-weight="700" fill="#0f172a">CommentsController/Service</text>
+<text x="636" y="396" font-size="13" fill="#475569">findByBoardId()</text>
+<text x="636" y="415" font-size="13" fill="#475569">findRecent()</text>
+<text x="636" y="434" font-size="13" fill="#475569">create()</text>
+<text x="636" y="453" font-size="13" fill="#475569">remove()</text>
+<text x="636" y="472" font-size="13" fill="#475569">Comment repository</text>
+<rect x="910" y="340" width="250" height="210" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+<text x="926" y="368" font-size="16" font-weight="700" fill="#0f172a">AiController/Service</text>
+<text x="926" y="396" font-size="13" fill="#475569">initVectorDb()</text>
+<text x="926" y="415" font-size="13" fill="#475569">syncBlogs()</text>
+<text x="926" y="434" font-size="13" fill="#475569">ask()</text>
+<text x="926" y="453" font-size="13" fill="#475569">getKnowledgeSummary()</text>
+<text x="926" y="472" font-size="13" fill="#475569">getKnowledgeResources()</text>
+<text x="926" y="491" font-size="13" fill="#475569">DataSource SQL</text>
+<rect x="330" y="650" width="250" height="170" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.6"/>
+<text x="346" y="678" font-size="16" font-weight="700" fill="#0f172a">TypeORM Entities</text>
+<text x="346" y="706" font-size="13" fill="#475569">User</text>
+<text x="346" y="725" font-size="13" fill="#475569">Board</text>
+<text x="346" y="744" font-size="13" fill="#475569">Tag</text>
+<text x="346" y="763" font-size="13" fill="#475569">Comment</text>
+<text x="346" y="782" font-size="13" fill="#475569">board_tags join table</text>
+<rect x="720" y="650" width="280" height="190" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+<text x="736" y="678" font-size="16" font-weight="700" fill="#0f172a">FastAPI Services</text>
+<text x="736" y="706" font-size="13" fill="#475569">agent_service</text>
+<text x="736" y="725" font-size="13" fill="#475569">vector_store</text>
+<text x="736" y="744" font-size="13" fill="#475569">embedding_service</text>
+<text x="736" y="763" font-size="13" fill="#475569">llm_service</text>
+<text x="736" y="782" font-size="13" fill="#475569">indexing/blog/github</text>
+<text x="736" y="801" font-size="13" fill="#475569">services</text>
+<line x1="280" y1="180" x2="330" y2="180" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="247.0" y="162.0" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="305.0" y="177.0" text-anchor="middle" font-size="12" fill="#475569">props</text>
+<line x1="590" y1="180" x2="640" y2="165" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="557.0" y="154.5" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="615.0" y="169.5" text-anchor="middle" font-size="12" fill="#475569">auth</text>
+<line x1="460" y1="270" x2="455" y2="340" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="399.5" y="287.0" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="457.5" y="302.0" text-anchor="middle" font-size="12" fill="#475569">REST</text>
+<line x1="455" y1="570" x2="455" y2="650" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="397.0" y="592.0" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="455.0" y="607.0" text-anchor="middle" font-size="12" fill="#475569">repositories</text>
+<line x1="870" y1="445" x2="910" y2="445" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="832.0" y="427.0" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="890.0" y="442.0" text-anchor="middle" font-size="12" fill="#475569">AI routes</text>
+<line x1="1035" y1="550" x2="860" y2="650" stroke="#334155" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="889.5" y="582.0" width="116" height="22" rx="11" fill="#f8fafc" opacity="0.92"/>
+<text x="947.5" y="597.0" text-anchor="middle" font-size="12" fill="#475569">fetch</text>
+</svg>
