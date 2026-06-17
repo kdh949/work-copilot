@@ -12,6 +12,7 @@ const ComponentPreviews = () => {
                     menu="posts"
                     user={null}
                     onMenuClick={() => undefined}
+                    onChatClick={() => undefined}
                     onLogout={() => undefined}
                 />
             </ComponentPreview>
