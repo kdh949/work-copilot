@@ -637,7 +637,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
 
     const newBoard = await response.json();
     resetForm();
-    setMessage("게시글 작성 완료");
+    setMessage("");
     setSelectedBoard(newBoard);
     fetchComments(newBoard.id);
     navigate(`/board/${newBoard.id}`);
@@ -829,9 +829,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
                 <h1>게시판</h1>
                 <p>정글 학습과 프로젝트, 궁금한 내용을 자유롭게 나눠보세요.</p>
               </div>
-              <button className="primary-action" type="button" onClick={() => navigate("/board/new")}>
-                글쓰기
-              </button>
             </div>
 
             <div className="board-grid">
@@ -855,19 +852,25 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
                   </button>
                 </form>
 
-                <div className="filter-row">
-                  {["전체", "질문", "학습", "알고리즘", "프로젝트", "GitHub", "자료공유", "기타"].map(
-                    (tag) => (
-                      <button
-                        className={activeTag === tag ? "is-active" : ""}
-                        type="button"
-                        key={tag}
-                        onClick={() => setActiveTag(tag)}
-                      >
-                        {tag}
-                      </button>
-                    ),
-                  )}
+                <div className="board-list-toolbar">
+                  <div className="filter-row">
+                    {["전체", "질문", "학습", "알고리즘", "프로젝트", "GitHub", "자료공유", "기타"].map(
+                      (tag) => (
+                        <button
+                          className={activeTag === tag ? "is-active" : ""}
+                          type="button"
+                          key={tag}
+                          onClick={() => setActiveTag(tag)}
+                        >
+                          {tag}
+                        </button>
+                      ),
+                    )}
+                  </div>
+
+                  <button className="board-write-button" type="button" onClick={() => navigate("/board/new")}>
+                    글쓰기
+                  </button>
                 </div>
 
                 <div className="table-card">
