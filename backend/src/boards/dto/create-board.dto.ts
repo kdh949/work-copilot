@@ -20,8 +20,4 @@ export class CreateBoardDto {
   @IsOptional()
   @IsString()
   tag?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  writer!: string;
 }

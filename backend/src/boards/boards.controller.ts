@@ -35,8 +35,12 @@ export class BoardsController {
   constructor(private readonly boardsService: BoardsService) {}
 
   @Post()
-  create(@Body() createBoardDto: CreateBoardDto) {
-    return this.boardsService.create(createBoardDto);
+  create(
+    @Body() createBoardDto: CreateBoardDto,
+    @Headers('authorization') authorization: string,
+  ) {
+    const token = getTokenFromHeader(authorization);
+    return this.boardsService.create(createBoardDto, token);
   }
 
   @Get()

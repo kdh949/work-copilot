@@ -1,11 +1,14 @@
 import {
   Column,
   Entity,
+  JoinColumn,
   JoinTable,
   ManyToMany,
+  ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Tag } from './tag.entity';
+import { User } from '../../users/entities/user.entity';
 
 @Entity()
 export class Board {
@@ -31,6 +34,15 @@ export class Board {
     inverseJoinColumn: { name: 'tag_id', referencedColumnName: 'id' },
   })
   tags!: Tag[];
+
+  @Column({ nullable: true })
+  userId!: number | null;
+
+  // 게시글 작성자는 userId로 User 테이블을 참조합니다.
+  // 기존 writer 문자열은 예전 데이터와 화면 표시 호환을 위해 남겨둡니다.
+  @ManyToOne(() => User, (user) => user.boards, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'userId' })
+  user!: User | null;
 
   @Column({ default: '' })
   writer!: string;

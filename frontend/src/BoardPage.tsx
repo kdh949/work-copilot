@@ -627,7 +627,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
         title,
         content,
         tags: selectedTags,
-        writer: loginId,
       }),
     });
 
@@ -713,7 +712,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       body: JSON.stringify({
         boardId: selectedBoard.id,
         content: commentContent,
-        writer: loginId,
       }),
     });
 

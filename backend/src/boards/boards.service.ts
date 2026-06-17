@@ -31,11 +31,10 @@ export class BoardsService {
     private readonly aiService: AiService,
   ) {}
 
-  // 토큰에서 loginId 꺼내는 함수
-  private async getLoginIdFromToken(token: string) {
+  // 토큰에서 userId와 loginId를 꺼내는 함수입니다.
+  private async getUserFromToken(token: string) {
     try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      return payload.loginId;
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
     } catch {
       throw new UnauthorizedException('토큰이 유효하지 않습니다.');
     }
@@ -70,8 +69,15 @@ export class BoardsService {
     // 프론트가 쓰기 쉽게 tags 배열을 내려줍니다.
     // tag 문자열은 예전 화면 코드와의 호환용으로 함께 제공합니다.
     const tagNames = board.tags?.map((tag) => tag.name) ?? [];
+    const writer = board.user?.loginId ?? board.writer;
+
     return {
-      ...board,
+      id: board.id,
+      title: board.title,
+      content: board.content,
+      userId: board.userId,
+      writer,
+      viewCount: board.viewCount,
       tags: tagNames,
       tag: tagNames.join(', '),
     };
@@ -80,12 +86,14 @@ export class BoardsService {
   private indexBoardInBackground(board: Board) {
     // 게시글 저장 직후 해당 글만 인덱싱합니다. 실패해도 게시글 저장은 유지합니다.
     const tagNames = board.tags?.map((tag) => tag.name) ?? [];
+    const writer = board.user?.loginId ?? board.writer;
+
     void this.aiService
       .indexBoardDocument({
         id: board.id,
         title: board.title,
         content: board.content,
-        writer: board.writer,
+        writer,
         tags: tagNames,
       })
       .catch((error: unknown) => {
@@ -93,7 +101,8 @@ export class BoardsService {
       });
   }
 
-  async create(createBoardDto: CreateBoardDto) {
+  async create(createBoardDto: CreateBoardDto, token: string) {
+    const user = await this.getUserFromToken(token);
     // 요청으로 받은 태그 이름들을 실제 Tag 엔티티 목록으로 바꿉니다.
     const tags = await this.findOrCreateTags(
       this.normalizeTagNames(createBoardDto),
@@ -101,7 +110,9 @@ export class BoardsService {
     const board = this.boardsRepository.create({
       title: createBoardDto.title,
       content: createBoardDto.content,
-      writer: createBoardDto.writer,
+      // 작성자는 클라이언트 body가 아니라 검증된 JWT payload에서만 정합니다.
+      userId: user.sub,
+      writer: user.loginId,
       tags,
     });
     const saved = await this.boardsRepository.save(board);
@@ -121,6 +132,7 @@ export class BoardsService {
       .createQueryBuilder('board')
       // 게시글을 가져올 때 연결된 태그도 같이 가져옵니다.
       .leftJoinAndSelect('board.tags', 'tag')
+      .leftJoinAndSelect('board.user', 'user')
       .orderBy('board.id', 'DESC')
       .skip(skip)
       .take(limit);
@@ -147,7 +159,7 @@ export class BoardsService {
     const board = await this.boardsRepository.findOne({
       where: { id },
       // 상세 화면에서도 태그 이름을 보여줘야 해서 tags 관계를 같이 가져옵니다.
-      relations: { tags: true },
+      relations: { tags: true, user: true },
     });
 
     if (!board) {
@@ -163,18 +175,18 @@ export class BoardsService {
   }
 
   async update(id: number, updateBoardDto: UpdateBoardDto, token: string) {
-    const loginId = await this.getLoginIdFromToken(token);
+    const user = await this.getUserFromToken(token);
     const board = await this.boardsRepository.findOne({
       where: { id },
       // 수정할 때 기존 태그를 새 태그 목록으로 바꾸기 위해 같이 가져옵니다.
-      relations: { tags: true },
+      relations: { tags: true, user: true },
     });
 
     if (!board) {
       throw new NotFoundException('게시글을 찾을 수 없습니다.');
     }
 
-    if (board.writer !== loginId) {
+    if (board.userId !== user.sub && board.writer !== user.loginId) {
       throw new ForbiddenException('작성자만 수정할 수 있습니다.');
     }
 
@@ -197,14 +209,17 @@ export class BoardsService {
   }
 
   async remove(id: number, token: string) {
-    const loginId = await this.getLoginIdFromToken(token);
-    const board = await this.boardsRepository.findOneBy({ id });
+    const user = await this.getUserFromToken(token);
+    const board = await this.boardsRepository.findOne({
+      where: { id },
+      relations: { user: true },
+    });
 
     if (!board) {
       throw new NotFoundException('게시글을 찾을 수 없습니다.');
     }
 
-    if (board.writer !== loginId) {
+    if (board.userId !== user.sub && board.writer !== user.loginId) {
       throw new ForbiddenException('작성자만 삭제할 수 있습니다.');
     }
 

@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { CommentsService } from './comments.service';
 import { Comment } from './entities/comment.entity';
 import { AiService } from '../ai/ai.service';
+import { JwtService } from '@nestjs/jwt';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -13,6 +14,7 @@ describe('CommentsService', () => {
         CommentsService,
         { provide: getRepositoryToken(Comment), useValue: {} },
         { provide: AiService, useValue: { indexCommentDocument: jest.fn() } },
+        { provide: JwtService, useValue: {} },
       ],
     }).compile();
 

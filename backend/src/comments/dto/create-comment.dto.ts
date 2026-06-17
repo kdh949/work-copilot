@@ -7,8 +7,4 @@ export class CreateCommentDto {
   @IsString()
   @IsNotEmpty()
   content!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  writer!: string;
 }
