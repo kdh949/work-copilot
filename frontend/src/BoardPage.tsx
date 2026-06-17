@@ -977,6 +977,17 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
 
                 <div className="question-actions">
                   <small>{aiQuestion.length}/2000</small>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => {
+                      setAiQuestion("");
+                      setAiError("");
+                    }}
+                    disabled={isAiLoading || !aiQuestion}
+                  >
+                    지우기
+                  </button>
                   <button className="primary-action" type="submit" disabled={isAiLoading || !aiQuestion}>
                     {isAiLoading ? "답변 생성 중" : "질문하기"}
                   </button>

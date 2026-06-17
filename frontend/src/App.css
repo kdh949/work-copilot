@@ -679,6 +679,16 @@ button:disabled {
   padding-inline: 26px;
 }
 
+.question-actions .secondary-action {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #d7e4df;
+  border-radius: 7px;
+  color: var(--accent-dark);
+  background: #ffffff;
+  font-weight: 900;
+}
+
 .notice-box {
   display: grid;
   gap: 6px;
