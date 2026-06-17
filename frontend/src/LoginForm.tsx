@@ -86,6 +86,8 @@ export const LoginForm = ({ onLoginSuccess, onSwitchToSignUp }: LoginFormProps) 
     const data = await response.json();
 
     localStorage.setItem("accessToken", data.accessToken);
+    // 새로고침 후에도 현재 사용자를 알 수 있도록 토큰과 함께 loginId를 저장한다.
+    localStorage.setItem("loginId", data.user.loginId);
 
     onLoginSuccess(data.user.loginId);
     setLoginId("");
