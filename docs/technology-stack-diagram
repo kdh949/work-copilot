@@ -1,0 +1,77 @@
+digraph "JungleBoard Technology Stack" {
+	graph [fontcolor="#2D3436" fontname="Sans-Serif" fontsize=20 label="JungleBoard Technology Stack" nodesep=0.60 pad=2.0 rankdir=LR ranksep=0.75 splines=ortho]
+	node [fixedsize=true fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13 height=1.4 imagescale=true labelloc=b shape=box style=rounded width=1.4]
+	edge [color="#7B8894"]
+	"05622ae0d7904aefb07bda7600322e88" [label=Users height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/client/users.png" shape=none]
+	"535c38673617421db319f83ef2cb6a17" [label="Web Browser" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/network/internet.png" shape=none]
+	b86402c9f9a94b759912a93759917ba7 -> "46af658765874d23be88c83d0be7635b" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	b86402c9f9a94b759912a93759917ba7 -> "7bbc6484f1204c8ea38d74186375db87" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	b86402c9f9a94b759912a93759917ba7 -> "4daf6a3cfadd4b6b85281c6482c6eac3" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	subgraph cluster_Frontend {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label=Frontend labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		b86402c9f9a94b759912a93759917ba7 [label="React 19" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/compute/server.png" shape=none]
+		"46af658765874d23be88c83d0be7635b" [label="Vite 8" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"7bbc6484f1204c8ea38d74186375db87" [label="React Router 7" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"4daf6a3cfadd4b6b85281c6482c6eac3" [label="TypeScript 6" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+	}
+	beda09d815cd4075bc41fd79dc605c85 -> "0779bec08aae4974b2053cb33ed2bfe5" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "8000ca1c95c24f9d95d772242aa3e3fd" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "1da4b185630148b1bac2b61958b85798" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "95de988ba7fb46ce97039a8177389d76" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "8f87ac8d95924eef92d77eaa4f85e03f" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	subgraph "cluster_Backend API" {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label="Backend API" labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		"0779bec08aae4974b2053cb33ed2bfe5" [label="NestJS 11" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/compute/server.png" shape=none]
+		beda09d815cd4075bc41fd79dc605c85 [label="Node.js" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"8000ca1c95c24f9d95d772242aa3e3fd" [label="TypeORM 0.3" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"1da4b185630148b1bac2b61958b85798" [label="JWT Auth" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"95de988ba7fb46ce97039a8177389d76" [label="class-validator" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"8f87ac8d95924eef92d77eaa4f85e03f" [label="TypeScript 5" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+	}
+	a4233c9b693043bfae24e3f12b27db51 -> "2f76267b619c4e50ab0a1a7102e0b33c" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "1f1e7c14249d45d59b5eb4a26d13411c" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "3ab19720abfd442e9c866901aad3a6e2" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "2a15ff627e5f480cae99338b3a80fe5a" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "09febda0706c4a46911c945a8336fb69" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	subgraph "cluster_AI Server" {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label="AI Server" labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		a4233c9b693043bfae24e3f12b27db51 [label=Python height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"2f76267b619c4e50ab0a1a7102e0b33c" [label=FastAPI height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/compute/server.png" shape=none]
+		"1f1e7c14249d45d59b5eb4a26d13411c" [label=LangChain height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"3ab19720abfd442e9c866901aad3a6e2" [label="OpenAI SDK" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"2a15ff627e5f480cae99338b3a80fe5a" [label=asyncpg height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"09febda0706c4a46911c945a8336fb69" [label="httpx / bs4" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+	}
+	subgraph "cluster_External Knowledge / AI" {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label="External Knowledge / AI" labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		"2ef030a5a9e84bc5a6bc1d58b8614269" [label="OpenAI API" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/network/internet.png" shape=none]
+		"9ce289d6e84748b187c4b8436bac5397" [label="Blogs / GitHub / Web" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/network/internet.png" shape=none]
+	}
+	"5deae68c046f415e8ad7b710d1a0529e" -> "556d1f58549445b28d31e1ed5d4765f0" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"5deae68c046f415e8ad7b710d1a0529e" -> "09917e9b7b2e4a609df391a97ec879a6" [dir=none fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	subgraph "cluster_Data Layer" {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label="Data Layer" labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		"5deae68c046f415e8ad7b710d1a0529e" [label="PostgreSQL 16" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/onprem/database/postgresql.png" shape=none]
+		"556d1f58549445b28d31e1ed5d4765f0" [label=pgvector height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"09917e9b7b2e4a609df391a97ec879a6" [label="init.sql" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+	}
+	subgraph "cluster_Local Tooling" {
+		graph [bgcolor="#E5F5FD" fontname="Sans-Serif" fontsize=12 label="Local Tooling" labeljust=l pencolor="#AEB6BE" rankdir=LR shape=box style=rounded]
+		"50bf998f4903472db6383093a01fd6a0" [label="Docker Compose" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		"52849389b836463199e4792995d53ff9" [label="Jest 30" height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		cdd4ff24ff6f4bb1aa69c26c4d62796b [label=ESLint height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+		ef652bbdc5a440489e2168880da403b8 [label=Prettier height=1.9 image="/home/shawn/jungle/week15-16/my-jg-mentor/.venv-diagrams/lib/python3.12/site-packages/resources/generic/blank/blank.png" shape=none]
+	}
+	"05622ae0d7904aefb07bda7600322e88" -> "535c38673617421db319f83ef2cb6a17" [dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"535c38673617421db319f83ef2cb6a17" -> b86402c9f9a94b759912a93759917ba7 [label=SPA dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	b86402c9f9a94b759912a93759917ba7 -> "0779bec08aae4974b2053cb33ed2bfe5" [label="HTTP API" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "5deae68c046f415e8ad7b710d1a0529e" [label="SQL / ORM" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "2f76267b619c4e50ab0a1a7102e0b33c" [label="AI requests" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "5deae68c046f415e8ad7b710d1a0529e" [label="vector SQL" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "2ef030a5a9e84bc5a6bc1d58b8614269" [label="embeddings / chat" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"2f76267b619c4e50ab0a1a7102e0b33c" -> "9ce289d6e84748b187c4b8436bac5397" [label=indexing dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"50bf998f4903472db6383093a01fd6a0" -> "5deae68c046f415e8ad7b710d1a0529e" [label=runs dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> "52849389b836463199e4792995d53ff9" [label="tested by" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	b86402c9f9a94b759912a93759917ba7 -> cdd4ff24ff6f4bb1aa69c26c4d62796b [label="lint/build" dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+	"0779bec08aae4974b2053cb33ed2bfe5" -> ef652bbdc5a440489e2168880da403b8 [label=format dir=forward fontcolor="#2D3436" fontname="Sans-Serif" fontsize=13]
+}

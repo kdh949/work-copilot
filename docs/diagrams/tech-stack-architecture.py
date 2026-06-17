@@ -2,17 +2,29 @@ from diagrams import Cluster, Diagram, Edge
 from diagrams.onprem.client import Users
 from diagrams.onprem.container import Docker
 from diagrams.onprem.database import PostgreSQL
-from diagrams.onprem.network import Internet, Nginx
+from diagrams.onprem.network import Internet
 from diagrams.programming.framework import FastAPI, React
-from diagrams.programming.language import Nodejs, Python, TypeScript
+from diagrams.programming.language import Nodejs
 from diagrams.saas.cdn import Cloudflare
 
 
 graph_attr = {
     "splines": "ortho",
-    "nodesep": "0.60",
-    "ranksep": "0.80",
+    "nodesep": "1.10",
+    "ranksep": "1.20",
+    "fontsize": "28",
+    "dpi": "180",
+    "pad": "0.45",
+}
+
+node_attr = {
     "fontsize": "18",
+    "fontname": "Arial",
+}
+
+edge_attr = {
+    "fontsize": "16",
+    "fontname": "Arial",
 }
 
 with Diagram(
@@ -22,64 +34,39 @@ with Diagram(
     show=False,
     direction="LR",
     graph_attr=graph_attr,
+    node_attr=node_attr,
+    edge_attr=edge_attr,
 ):
     users = Users("Browser Users")
 
     with Cluster("Frontend"):
-        react = React("React 19")
-        vite = TypeScript("Vite + TypeScript")
-        router = React("React Router")
-        nginx = Nginx("Nginx\nproduction")
+        frontend = React("React 19\nVite + TypeScript\nRouter + Nginx")
 
     with Cluster("Backend API"):
-        nest = Nodejs("NestJS 11")
-        modules = TypeScript("Users / Boards\nComments / AI")
-        orm = TypeScript("TypeORM")
-        jwt = TypeScript("JWT auth/config")
+        backend = Nodejs("NestJS 11 API\nJWT auth/config\nUsers / Boards / Comments")
 
     with Cluster("AI Server"):
-        fastapi = FastAPI("FastAPI")
-        langchain = Python("LangChain")
-        rag = Python("RAG agent\nsearch + guardrails")
-        indexers = Python("Indexers\nblogs, boards, exhibits")
+        ai_server = FastAPI("FastAPI AI Server\nRAG + LangChain\nIndexers / Guardrails")
 
     with Cluster("Data Layer"):
-        postgres = PostgreSQL("PostgreSQL 16\npgvector")
-        vector_tables = PostgreSQL("ai_documents\nai_document_chunks")
-        app_tables = PostgreSQL("users, boards\ncomments, tags")
+        postgres = PostgreSQL("PostgreSQL 16 + pgvector\napp tables + vector chunks")
 
     with Cluster("External APIs"):
         openai = Cloudflare("OpenAI\nLLM/embeddings/vision")
-        github = Internet("GitHub")
-        blog_search = Internet("Naver / Blog Search")
+        external_content = Internet("GitHub + Naver\nBlog Search")
 
     with Cluster("Local/Container Runtime"):
-        frontend_image = Docker("frontend Dockerfile")
-        backend_image = Docker("backend Dockerfile")
-        ai_image = Docker("ai-server Dockerfile")
-        compose = Docker("docker-compose\npgvector DB")
+        containers = Docker("Docker Compose\nfrontend / backend / ai-server\npgvector DB")
 
-    users >> Edge(label="SPA") >> react >> vite >> router >> nginx
-    nginx >> Edge(label="REST API") >> nest
+    users >> Edge(label="SPA") >> frontend
+    frontend >> Edge(label="REST API") >> backend
+    backend >> Edge(label="/ai/* proxy") >> ai_server
+    backend >> Edge(label="CRUD via TypeORM") >> postgres
+    ai_server >> Edge(label="asyncpg + similarity search") >> postgres
+    ai_server >> Edge(label="completion / embedding") >> openai
+    ai_server >> Edge(label="repository + content discovery") >> external_content
 
-    nest >> modules
-    modules >> Edge(label="CRUD") >> orm >> app_tables
-    modules >> Edge(label="/ai/* proxy") >> fastapi
-    jwt >> nest
-
-    fastapi >> rag
-    rag >> langchain
-    rag >> Edge(label="similarity search") >> vector_tables
-    indexers >> Edge(label="chunk + upsert") >> vector_tables
-    fastapi >> Edge(label="asyncpg") >> postgres
-    postgres >> app_tables
-    postgres >> vector_tables
-
-    rag >> Edge(label="completion/embedding") >> openai
-    indexers >> Edge(label="repository analysis") >> github
-    indexers >> Edge(label="content discovery") >> blog_search
-
-    frontend_image >> nginx
-    backend_image >> nest
-    ai_image >> fastapi
-    compose >> postgres
+    containers >> frontend
+    containers >> backend
+    containers >> ai_server
+    containers >> postgres

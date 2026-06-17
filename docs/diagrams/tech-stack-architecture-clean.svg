@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">JG Mentor Technology Stack Architecture</title>
+  <desc id="desc">Technology architecture diagram for the JG Mentor project showing frontend, backend API, AI server, data layer, container runtime, and external API integrations.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fbff; }
+      .panel { fill: #eef7ff; stroke: #79aee8; stroke-width: 2; rx: 14; }
+      .panel-soft { fill: #f6fbff; stroke: #9cc4ec; stroke-width: 2; rx: 12; }
+      .runtime { fill: #f3f8ff; stroke: #5b9de0; stroke-width: 2; rx: 14; }
+      .node { fill: #ffffff; stroke: #9cb7d4; stroke-width: 1.5; rx: 10; }
+      .title { font: 700 46px Arial, sans-serif; fill: #111827; }
+      .section { font: 700 22px Arial, sans-serif; fill: #0757b8; }
+      .label { font: 600 16px Arial, sans-serif; fill: #172033; }
+      .small { font: 14px Arial, sans-serif; fill: #2f3b52; }
+      .tiny { font: 12px Arial, sans-serif; fill: #526174; }
+      .arrow { stroke: #5b6b80; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .arrow-dashed { stroke: #2d8ee8; stroke-width: 2; fill: none; stroke-dasharray: 8 8; marker-end: url(#arrowBlue); }
+      .api { stroke: #0f766e; }
+      .db { stroke: #1d4ed8; }
+      .external { stroke: #7c3aed; }
+      .accent-blue { fill: #0ea5e9; }
+      .accent-green { fill: #10b981; }
+      .accent-navy { fill: #1d4ed8; }
+      .accent-yellow { fill: #f59e0b; }
+      .accent-purple { fill: #7c3aed; }
+      .white { fill: #ffffff; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6b80"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2d8ee8"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1000"/>
+  <text x="800" y="64" text-anchor="middle" class="title">JG Mentor Technology Stack Architecture</text>
+
+  <!-- Browser users -->
+  <g transform="translate(55 335)">
+    <circle cx="38" cy="24" r="19" fill="none" stroke="#1f2937" stroke-width="4"/>
+    <circle cx="86" cy="24" r="19" fill="none" stroke="#1f2937" stroke-width="4"/>
+    <circle cx="62" cy="62" r="21" fill="none" stroke="#1f2937" stroke-width="4"/>
+    <path d="M8 100 C14 72 62 72 68 100" fill="none" stroke="#1f2937" stroke-width="4"/>
+    <path d="M58 100 C64 72 112 72 118 100" fill="none" stroke="#1f2937" stroke-width="4"/>
+    <text x="62" y="132" text-anchor="middle" class="label">Browser Users</text>
+  </g>
+
+  <!-- Frontend -->
+  <rect x="180" y="120" width="220" height="620" class="panel"/>
+  <text x="290" y="152" text-anchor="middle" class="section">Frontend</text>
+  <g transform="translate(230 185)">
+    <rect width="120" height="88" class="node"/>
+    <text x="60" y="34" text-anchor="middle" class="label">React 19</text>
+    <text x="60" y="58" text-anchor="middle" class="tiny">SPA UI</text>
+  </g>
+  <g transform="translate(230 325)">
+    <rect width="120" height="88" class="node"/>
+    <rect x="33" y="18" width="54" height="54" rx="6" fill="#1877c9"/>
+    <text x="60" y="58" text-anchor="middle" font-family="Arial" font-size="36" font-weight="700" fill="#fff">TS</text>
+    <text x="60" y="108" text-anchor="middle" class="label">Vite + TypeScript</text>
+  </g>
+  <g transform="translate(230 500)">
+    <rect width="120" height="88" class="node"/>
+    <circle cx="60" cy="33" r="8" class="accent-blue"/>
+    <circle cx="32" cy="62" r="8" class="accent-blue"/>
+    <circle cx="88" cy="62" r="8" class="accent-blue"/>
+    <path d="M60 41 L32 54 M60 41 L88 54" stroke="#0ea5e9" stroke-width="6" stroke-linecap="round"/>
+    <text x="60" y="108" text-anchor="middle" class="label">React Router</text>
+  </g>
+  <g transform="translate(230 650)">
+    <rect width="120" height="70" class="node"/>
+    <rect x="32" y="16" width="56" height="38" rx="6" class="accent-green"/>
+    <text x="60" y="45" text-anchor="middle" font-family="Arial" font-size="30" font-weight="700" fill="#fff">N</text>
+    <text x="60" y="90" text-anchor="middle" class="label">Nginx production</text>
+  </g>
+  <path class="arrow" d="M290 273 L290 325"/>
+  <path class="arrow" d="M290 433 L290 500"/>
+  <path class="arrow" d="M290 608 L290 650"/>
+
+  <!-- Backend API -->
+  <rect x="500" y="150" width="380" height="330" class="panel"/>
+  <text x="690" y="184" text-anchor="middle" class="section">Backend API</text>
+  <g transform="translate(535 255)">
+    <rect width="100" height="100" class="node"/>
+    <circle cx="50" cy="50" r="36" fill="#3c873a"/>
+    <text x="50" y="60" text-anchor="middle" font-family="Arial" font-size="30" font-weight="700" fill="#fff">JS</text>
+    <text x="50" y="125" text-anchor="middle" class="label">NestJS 11</text>
+    <text x="50" y="146" text-anchor="middle" class="small">JWT auth / config</text>
+  </g>
+  <g transform="translate(675 255)">
+    <rect width="120" height="115" class="node"/>
+    <rect x="34" y="24" width="52" height="52" class="accent-navy"/>
+    <path d="M47 24 V76 M60 24 V76 M73 24 V76 M34 37 H86 M34 50 H86 M34 63 H86" stroke="#fff" stroke-width="4"/>
+    <text x="60" y="140" text-anchor="middle" class="label">Users / Boards</text>
+    <text x="60" y="160" text-anchor="middle" class="label">Comments / AI</text>
+  </g>
+  <g transform="translate(815 265)">
+    <rect width="50" height="74" class="node"/>
+    <ellipse cx="25" cy="16" rx="25" ry="12" class="accent-navy"/>
+    <path d="M0 16 V58 C0 67 50 67 50 58 V16" fill="#1d4ed8"/>
+    <ellipse cx="25" cy="58" rx="25" ry="12" fill="#2563eb"/>
+    <text x="25" y="112" text-anchor="middle" class="label">TypeORM</text>
+  </g>
+  <path class="arrow" d="M635 305 L675 305"/>
+  <path class="arrow" d="M795 305 L815 305"/>
+  <text x="805" y="292" text-anchor="middle" class="tiny">CRUD</text>
+
+  <!-- AI Server -->
+  <rect x="995" y="120" width="230" height="430" class="panel"/>
+  <text x="1110" y="152" text-anchor="middle" class="section">AI Server</text>
+  <g transform="translate(1030 185)">
+    <circle cx="80" cy="42" r="36" fill="#0f9f8a"/>
+    <path d="M84 13 L60 50 H82 L74 78 L101 38 H80 Z" fill="#fff"/>
+    <text x="80" y="98" text-anchor="middle" class="label">FastAPI</text>
+  </g>
+  <g transform="translate(1030 310)">
+    <rect width="160" height="72" class="node"/>
+    <circle cx="80" cy="36" r="28" fill="#2563eb"/>
+    <rect x="53" y="25" width="54" height="28" rx="12" fill="#fff"/>
+    <circle cx="70" cy="39" r="4" fill="#2563eb"/>
+    <circle cx="90" cy="39" r="4" fill="#2563eb"/>
+    <text x="80" y="96" text-anchor="middle" class="label">RAG agent</text>
+  </g>
+  <g transform="translate(1030 445)">
+    <rect width="160" height="72" class="node"/>
+    <path d="M62 45 C42 60 24 35 43 20 L58 8 C76 -8 101 13 84 32" fill="none" stroke="#10b981" stroke-width="10" stroke-linecap="round"/>
+    <path d="M98 27 C118 12 136 37 117 52 L102 64 C84 80 59 59 76 40" fill="none" stroke="#0f766e" stroke-width="10" stroke-linecap="round"/>
+    <text x="80" y="96" text-anchor="middle" class="label">LangChain</text>
+  </g>
+  <g transform="translate(945 350)">
+    <rect width="70" height="78" class="node"/>
+    <ellipse cx="35" cy="18" rx="24" ry="10" class="accent-yellow"/>
+    <path d="M11 18 V55 C11 64 59 64 59 55 V18" fill="#f59e0b"/>
+    <text x="35" y="100" text-anchor="middle" class="label">Indexers</text>
+  </g>
+  <path class="arrow" d="M1110 283 L1110 310"/>
+  <path class="arrow" d="M1110 382 L1110 445"/>
+  <path class="arrow" d="M1015 389 L1030 389"/>
+
+  <!-- External APIs -->
+  <rect x="1370" y="120" width="180" height="430" class="panel"/>
+  <text x="1460" y="152" text-anchor="middle" class="section">External APIs</text>
+  <g transform="translate(1400 190)">
+    <rect width="120" height="75" class="node"/>
+    <circle cx="60" cy="32" r="28" fill="#111827"/>
+    <text x="60" y="41" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#fff">GH</text>
+    <text x="60" y="98" text-anchor="middle" class="label">GitHub</text>
+  </g>
+  <g transform="translate(1400 335)">
+    <rect width="120" height="75" class="node"/>
+    <rect x="28" y="18" width="64" height="42" rx="8" fill="#03c75a"/>
+    <text x="60" y="49" text-anchor="middle" font-family="Arial" font-size="32" font-weight="700" fill="#fff">N</text>
+    <text x="60" y="98" text-anchor="middle" class="label">Naver / Blog Search</text>
+  </g>
+  <g transform="translate(1400 470)">
+    <rect width="120" height="75" class="node"/>
+    <circle cx="60" cy="38" r="28" fill="none" stroke="#111827" stroke-width="5"/>
+    <text x="60" y="102" text-anchor="middle" class="label">OpenAI</text>
+    <text x="60" y="122" text-anchor="middle" class="small">LLM / embeddings / vision</text>
+  </g>
+
+  <!-- Data Layer -->
+  <rect x="800" y="615" width="470" height="250" class="panel"/>
+  <text x="1035" y="648" text-anchor="middle" class="section">Data Layer</text>
+  <g transform="translate(835 705)">
+    <rect width="150" height="95" class="node"/>
+    <ellipse cx="75" cy="32" rx="42" ry="25" fill="none" stroke="#1d4ed8" stroke-width="5"/>
+    <path d="M43 32 C31 59 50 82 75 78 C100 82 119 59 107 32" fill="none" stroke="#1d4ed8" stroke-width="5"/>
+    <text x="75" y="122" text-anchor="middle" class="label">PostgreSQL 16</text>
+    <text x="75" y="143" text-anchor="middle" class="label">+ pgvector</text>
+  </g>
+  <g transform="translate(1045 690)">
+    <rect width="185" height="140" class="node"/>
+    <rect x="24" y="28" width="34" height="42" rx="4" fill="#334155"/>
+    <text x="72" y="55" class="label">ai_documents</text>
+    <line x1="18" y1="82" x2="167" y2="82" stroke="#b6c7da"/>
+    <rect x="25" y="99" width="32" height="32" class="accent-navy"/>
+    <text x="72" y="122" class="label">ai_document_chunks</text>
+  </g>
+  <text x="1035" y="842" text-anchor="middle" class="small">users, boards, comments, tags</text>
+
+  <!-- Local runtime -->
+  <rect x="85" y="820" width="890" height="140" class="runtime"/>
+  <text x="530" y="852" text-anchor="middle" class="section">Local / Container Runtime</text>
+  <g transform="translate(120 875)">
+    <rect width="150" height="52" class="node"/>
+    <text x="75" y="33" text-anchor="middle" class="label">Docker Compose</text>
+  </g>
+  <g transform="translate(350 875)">
+    <rect width="170" height="52" class="node"/>
+    <text x="85" y="24" text-anchor="middle" class="label">frontend</text>
+    <text x="85" y="42" text-anchor="middle" class="label">Dockerfile</text>
+  </g>
+  <g transform="translate(570 875)">
+    <rect width="170" height="52" class="node"/>
+    <text x="85" y="24" text-anchor="middle" class="label">backend</text>
+    <text x="85" y="42" text-anchor="middle" class="label">Dockerfile</text>
+  </g>
+  <g transform="translate(790 875)">
+    <rect width="170" height="52" class="node"/>
+    <text x="85" y="24" text-anchor="middle" class="label">ai-server</text>
+    <text x="85" y="42" text-anchor="middle" class="label">Dockerfile</text>
+  </g>
+
+  <!-- Main flow connectors -->
+  <path class="arrow" d="M160 400 L180 400"/>
+  <text x="170" y="386" text-anchor="middle" class="small">SPA</text>
+  <path class="arrow" d="M400 360 L500 360"/>
+  <text x="450" y="346" text-anchor="middle" class="small">REST API</text>
+  <path class="arrow api" d="M880 275 L995 275"/>
+  <text x="936" y="260" text-anchor="middle" class="small">/ai/* proxy</text>
+  <path class="arrow db" d="M860 380 C910 470 930 555 900 615"/>
+  <text x="925" y="526" text-anchor="middle" class="small">asyncpg</text>
+  <path class="arrow db" d="M985 752 L1045 752"/>
+
+  <!-- AI to data and external connectors -->
+  <path class="arrow db" d="M1110 550 L1110 615"/>
+  <text x="1170" y="592" text-anchor="middle" class="small">similarity search</text>
+  <path class="arrow external" d="M1190 345 L1370 230"/>
+  <text x="1280" y="260" text-anchor="middle" class="small">repository analysis</text>
+  <path class="arrow external" d="M1190 382 L1370 372"/>
+  <text x="1280" y="365" text-anchor="middle" class="small">content discovery</text>
+  <path class="arrow external" d="M1190 490 L1370 505"/>
+  <text x="1280" y="485" text-anchor="middle" class="small">completion / embedding</text>
+  <path class="arrow external" d="M1230 760 C1345 760 1460 705 1460 545"/>
+  <text x="1340" y="742" text-anchor="middle" class="small">chunk + upsert</text>
+
+  <!-- Runtime deployment links -->
+  <path class="arrow-dashed" d="M435 875 L290 740"/>
+  <path class="arrow-dashed" d="M655 875 L690 480"/>
+  <path class="arrow-dashed" d="M875 875 L1110 550"/>
+</svg>
