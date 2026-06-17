@@ -64,62 +64,11 @@ jobs:
           docker push "$ECR_REGISTRY/$ECR_AI_REPOSITORY:$IMAGE_TAG"
           docker push "$ECR_REGISTRY/$ECR_AI_REPOSITORY:latest"
 
-      - name: Remove GitHub token from ECS task definition
-        id: task-definition
-        run: |
-          TASK_DEFINITION_ARN="$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
-            --query 'services[0].taskDefinition' \
-            --output text)"
-
-          aws ecs describe-task-definition \
-            --task-definition "$TASK_DEFINITION_ARN" \
-            --query taskDefinition \
-            > task-definition.json
-
-          jq '
-            {
-              family,
-              taskRoleArn,
-              executionRoleArn,
-              networkMode,
-              containerDefinitions,
-              volumes,
-              placementConstraints,
-              requiresCompatibilities,
-              cpu,
-              memory,
-              tags,
-              pidMode,
-              ipcMode,
-              proxyConfiguration,
-              inferenceAccelerators,
-              ephemeralStorage,
-              runtimePlatform
-            }
-            | with_entries(select(.value != null))
-            | .containerDefinitions |= map(
-                .environment = ((.environment // []) | map(
-                  if .name == "GITHUB_TOKEN" then .value = "" else . end
-                ))
-                | .secrets = ((.secrets // []) | map(select(.name != "GITHUB_TOKEN")))
-              )
-          ' task-definition.json > task-definition-without-github-token.json
-
-          NEW_TASK_DEFINITION_ARN="$(aws ecs register-task-definition \
-            --cli-input-json file://task-definition-without-github-token.json \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)"
-
-          echo "task-definition-arn=$NEW_TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy ECS task definition
+      - name: Force ECS rolling deployment
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \
-            --task-definition "${{ steps.task-definition.outputs.task-definition-arn }}" \
             --force-new-deployment
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
