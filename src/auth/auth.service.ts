@@ -9,6 +9,7 @@ type SignupResponse = {
     id: number;
     email: string;
     nickname: string;
+    employeeNumber: string | null;
     role: string;
     createdAt: Date;
 };
@@ -21,6 +22,7 @@ type MeResponse = {
     id: number;
     email: string;
     nickname: string;
+    employeeNumber: string | null;
     role: string;
 };
 
@@ -40,6 +42,7 @@ export class AuthService {
             email: signupDto.email,
             password: hashedPassword,
             nickname: signupDto.nickname,
+            employeeNumber: signupDto.employeeNumber,
             role,
         });
 
@@ -47,6 +50,7 @@ export class AuthService {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            employeeNumber: user.employeeNumber,
             role: user.role,
             createdAt: user.createdAt,
         }; // UsersService의 반환값을 그대로 반환하지 않고, AuthService에서 응답 객체를 직접 만들어 반환함
@@ -90,6 +94,7 @@ export class AuthService {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            employeeNumber: user.employeeNumber,
             role: user.role,
         };
     }

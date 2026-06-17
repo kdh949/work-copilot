@@ -7,6 +7,7 @@ type CreateUserInput = {
     email: string;
     password: string;
     nickname: string;
+    employeeNumber: string;
     role?: string;
 };
 
@@ -26,6 +27,12 @@ export class UsersService {
             .addSelect('user.password')
             .where('user.email = :email', { email })
             .getOne();
+    }
+
+    async findByEmployeeNumber(employeeNumber: string): Promise<User | null> {
+        return this.userRepository.findOne({
+            where: { employeeNumber },
+        });
     }
 
     async findById(id: number): Promise<User | null> {
@@ -51,10 +58,17 @@ export class UsersService {
             throw new ConflictException('이미 사용 중인 이메일입니다.');
         }
 
+        const existingEmployee = await this.findByEmployeeNumber(input.employeeNumber);
+
+        if (existingEmployee) {
+            throw new ConflictException('이미 사용 중인 사번입니다.');
+        }
+
         const user = this.userRepository.create({
             email: input.email,
             password: input.password,
             nickname: input.nickname,
+            employeeNumber: input.employeeNumber,
             role: input.role || 'employee',
         });
 

@@ -3,6 +3,7 @@ POST http://localhost:3000/auth/signup
 Content-Type: application/json
 
 {
+  "employeeNumber": "A0001",
   "email": "admin@example.com",
   "password": "12345678",
   "nickname": "관리자"
@@ -13,6 +14,7 @@ POST http://localhost:3000/auth/signup
 Content-Type: application/json
 
 {
+  "employeeNumber": "E0001",
   "email": "newbie@example.com",
   "password": "12345678",
   "nickname": "신입사원"
