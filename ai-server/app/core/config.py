@@ -21,6 +21,9 @@ class Settings:
     # 나중에 답변을 생성할 때 사용할 LLM 모델 이름입니다.
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
+    # 이미지 안의 글자와 내용을 읽을 때 사용할 vision 모델 이름입니다.
+    openai_vision_model: str = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+
     # GitHub 공개 repo를 읽을 때 사용할 token입니다.
     # 비어 있어도 공개 repo는 읽을 수 있지만, token이 있으면 요청 제한에 덜 걸립니다.
     github_token: str = os.getenv("GITHUB_TOKEN", "")
@@ -32,10 +35,10 @@ class Settings:
     )
 
     # 블로그 검색 방식입니다.
-    # off이면 자동 검색을 끄고, duckduckgo/naver_api이면 해당 검색을 사용합니다.
-    blog_search_mode: str = os.getenv("BLOG_SEARCH_MODE", "duckduckgo")
+    # all이면 Naver와 DuckDuckGo를 둘 다 쓰고, off이면 자동 검색을 끕니다.
+    blog_search_mode: str = os.getenv("BLOG_SEARCH_MODE", "all")
 
-    # 키워드 하나로 검색할 때 최대 몇 개의 블로그 URL을 가져올지 정합니다.
+    # 키워드 하나로 검색할 때 검색기 하나당 최대 몇 개의 블로그 URL을 가져올지 정합니다.
     blog_search_max_results: int = int(os.getenv("BLOG_SEARCH_MAX_RESULTS", "5"))
 
     # 서버가 켜져 있는 동안 24시간마다 자동 블로그 검색을 할지 정합니다.

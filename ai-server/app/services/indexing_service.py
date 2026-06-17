@@ -1,5 +1,5 @@
 import hashlib
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -35,6 +35,36 @@ def normalize_url(url: str) -> str:
     return trimmed
 
 
+def normalize_naver_blog_url(url: str) -> str:
+    # 네이버 블로그는 겉 페이지와 실제 글 본문 페이지가 다를 때가 많습니다.
+    # 예: https://blog.naver.com/user/123
+    # 위 주소를 실제 본문을 읽기 쉬운 PostView 주소로 바꿉니다.
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+
+    if host not in ("blog.naver.com", "m.blog.naver.com"):
+        return url
+
+    if parsed.path.endswith("/PostView.naver"):
+        query = parse_qs(parsed.query)
+        blog_id = (query.get("blogId") or [""])[0]
+        log_no = (query.get("logNo") or [""])[0]
+
+        if blog_id and log_no:
+            return f"https://blog.naver.com/PostView.naver?{urlencode({'blogId': blog_id, 'logNo': log_no})}"
+
+        return url
+
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) >= 2 and parts[1].isdigit():
+        blog_id = parts[0]
+        log_no = parts[1]
+        return f"https://blog.naver.com/PostView.naver?{urlencode({'blogId': blog_id, 'logNo': log_no})}"
+
+    return url
+
+
 # URL 페이지를 열어서 HTML 안의 본문 글만 뽑아냅니다.
 # RAG는 긴 웹페이지 전체가 아니라, 깨끗한 글 텍스트가 필요합니다.
 async def fetch_url_text(url: str) -> str:
@@ -43,12 +73,16 @@ async def fetch_url_text(url: str) -> str:
     if parse_github_repo_url(url):
         return await fetch_github_repository_text(url)
 
+    # 네이버 블로그는 실제 본문이 PostView 주소에 있는 경우가 많습니다.
+    # 그래서 먼저 본문을 읽기 쉬운 주소로 바꿔서 요청합니다.
+    fetch_url = normalize_naver_blog_url(url)
+
     # 웹페이지를 가져오는 HTTP 클라이언트입니다.
     # redirect가 있으면 따라가고, 15초 넘게 걸리면 멈춥니다.
     async with httpx.AsyncClient(timeout=15.0,
                                  follow_redirects=True) as client:
         response = await client.get(
-            url,
+            fetch_url,
             headers={
                 "User-Agent": "Mozilla/5.0 JG-Mentor-AI-Indexer",
             },
@@ -185,6 +219,50 @@ async def index_url(
     return {
         "url": normalized_url,
         "title": title,
+        "sourceType": source_type,
+        "textLength": len(text),
+        "contentHash": content_hash,
+        **saved,
+    }
+
+
+async def index_text_document(
+    title: str,
+    content: str,
+    source_type: str,
+    source_url: str,
+    discovered_by: str = "manual",
+    search_keyword: str | None = None,
+) -> dict:
+    # URL이 아니라 DB에서 온 게시글/댓글 텍스트를 바로 인덱싱합니다.
+    # source_url을 board://1 처럼 고정하면 같은 글은 변경될 때만 chunk가 교체됩니다.
+    text = content.strip()
+    if not text:
+        raise ValueError("Content is empty")
+
+    safe_title = title.strip() or source_url
+    content_hash = make_content_hash(text)
+    chunks = chunk_text(text)
+
+    embeddings = []
+    for chunk in chunks:
+        embeddings.append(await get_embedding(chunk))
+
+    saved = await save_indexed_document(
+        title=safe_title,
+        content=text,
+        source_type=source_type,
+        source_url=source_url,
+        content_hash=content_hash,
+        chunks=chunks,
+        embeddings=embeddings,
+        discovered_by=discovered_by,
+        search_keyword=search_keyword,
+    )
+
+    return {
+        "url": source_url,
+        "title": safe_title,
         "sourceType": source_type,
         "textLength": len(text),
         "contentHash": content_hash,

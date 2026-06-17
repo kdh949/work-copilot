@@ -8,3 +8,4 @@ asyncpg
 langchain-core
 langchain-openai
 langchain-text-splitters
+openai

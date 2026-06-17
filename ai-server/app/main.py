@@ -8,8 +8,10 @@ from app.core.config import settings
 from app.services.agent_service import agent_ask
 from app.services.blog_search_service import sync_blogs_by_keywords
 from app.services.embedding_service import get_embedding, preview_embedding
+from app.services.exhibition_indexing_service import index_exhibition_pages
 from app.services.github_mcp_service import analyze_github_repository
-from app.services.indexing_service import index_url, preview_index_url
+from app.services.indexing_service import index_text_document, index_url, preview_index_url
+from app.services.local_content_indexing_service import sync_boards_and_comments
 from app.services.vector_store import preview_init_vector_tables, search_similar_chunks
 
 # FastAPI 앱을 만듭니다.
@@ -36,6 +38,16 @@ class IndexUrlRequest(BaseModel):
     # 이 URL을 어떻게 찾았는지 표시합니다. 직접 입력이면 manual입니다.
     discovered_by: str = "manual"
     # 나중에 키워드 검색 자동화로 찾은 URL이면 검색 키워드를 여기에 넣습니다.
+    search_keyword: str | None = None
+
+
+class IndexTextRequest(BaseModel):
+    # 백엔드 DB에 저장된 게시글/댓글처럼 이미 텍스트가 있는 자료를 바로 인덱싱합니다.
+    title: str
+    content: str
+    source_type: str
+    source_url: str
+    discovered_by: str = "backend"
     search_keyword: str | None = None
 
 
@@ -74,15 +86,41 @@ class BlogSyncRequest(BaseModel):
     limit: int | None = None
 
 
+class ExhibitionIndexRequest(BaseModel):
+    # 전시회 목록 몇 페이지부터 읽을지 정합니다.
+    start_page: int = 1
+    # 전시회 목록 몇 페이지까지 읽을지 정합니다.
+    end_page: int = 4
+
+
 async def run_periodic_blog_sync():
-    # 서버가 켜져 있는 동안 같은 일을 반복하는 함수입니다.
-    # 한 번 검색/인덱싱하고, 정해진 시간만큼 쉬고, 다시 실행합니다.
+    # 서버가 켜져 있는 동안 24시간마다 외부/내부 지식 자료를 다시 확인합니다.
+    # 각 저장 함수가 content_hash를 비교하므로 변경된 문서만 실제 chunk가 교체됩니다.
     while True:
         try:
-            await sync_blogs_by_keywords()
+            blog_result = await sync_blogs_by_keywords()
+            print(f"[periodic-index] blog sync: {blog_result['indexedCount']} indexed")
         except Exception as error:
             # 자동 작업에서 오류가 나도 서버 전체가 꺼지면 안 됩니다.
             print(f"[blog-sync] failed: {error}")
+
+        try:
+            local_result = await sync_boards_and_comments()
+            print(
+                "[periodic-index] board/comment sync: "
+                f"{local_result['indexedCount']} indexed"
+            )
+        except Exception as error:
+            print(f"[board-comment-sync] failed: {error}")
+
+        try:
+            exhibition_result = await index_exhibition_pages()
+            print(
+                "[periodic-index] exhibition sync: "
+                f"{exhibition_result['indexedCount']} indexed"
+            )
+        except Exception as error:
+            print(f"[exhibition-sync] failed: {error}")
 
         # 기본값은 24시간입니다.
         await asyncio.sleep(settings.blog_sync_interval_hours * 60 * 60)
@@ -131,6 +169,20 @@ async def index_url_api(req: IndexUrlRequest):
     return await index_url(
         url=req.url,
         source_type=req.source_type,
+        discovered_by=req.discovered_by,
+        search_keyword=req.search_keyword,
+    )
+
+
+@app.post("/index-text")
+async def index_text_api(req: IndexTextRequest):
+    # 게시글/댓글 저장 직후 백엔드가 호출하는 API입니다.
+    # source_url이 같으면 새 내용일 때만 기존 chunk를 갈아끼웁니다.
+    return await index_text_document(
+        title=req.title,
+        content=req.content,
+        source_type=req.source_type,
+        source_url=req.source_url,
         discovered_by=req.discovered_by,
         search_keyword=req.search_keyword,
     )
@@ -190,6 +242,22 @@ async def sync_blogs(req: BlogSyncRequest):
     return await sync_blogs_by_keywords(
         keywords=req.keywords,
         limit=req.limit,
+    )
+
+
+@app.post("/local-content/sync")
+async def sync_local_content():
+    # 게시글/댓글 전체를 다시 훑습니다. 변경 없는 항목은 vector_store에서 skipped 됩니다.
+    return await sync_boards_and_comments()
+
+
+@app.post("/exhibitions/index")
+async def index_exhibitions(req: ExhibitionIndexRequest):
+    # 크래프톤 정글 프로젝트 전시회 상세 페이지를 인덱싱합니다.
+    # 상세 페이지 이미지도 OpenAI vision으로 읽어서 vector DB에 넣습니다.
+    return await index_exhibition_pages(
+        start_page=req.start_page,
+        end_page=req.end_page,
     )
 
 

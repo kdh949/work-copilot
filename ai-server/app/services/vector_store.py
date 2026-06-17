@@ -297,7 +297,9 @@ async def search_similar_chunks(
             FROM ai_document_chunks c
             INNER JOIN ai_documents d ON d.id = c.document_id
             WHERE c.embedding IS NOT NULL
-            ORDER BY c.embedding <=> $1::vector
+            -- + 0을 붙이면 작은 데이터에서 ivfflat index가 0건을 돌려주는 문제를 피하고,
+            -- 모든 chunk를 직접 비교해서 가장 비슷한 자료를 찾습니다.
+            ORDER BY (c.embedding <=> $1::vector) + 0
             LIMIT $2;
             """,
             to_pgvector(question_embedding),
@@ -315,6 +317,66 @@ async def search_similar_chunks(
                 "chunkIndex": row["chunk_index"],
                 "chunkText": row["chunk_text"],
                 "score": float(row["score"]),
+            }
+            for row in rows
+        ]
+    finally:
+        # 검색이 끝났으면 DB 연결을 닫습니다.
+        await conn.close()
+
+
+async def search_keyword_chunks(
+    keyword: str,
+    limit: int = 3,
+    source_type: str | None = None,
+) -> list[dict]:
+    # 프로젝트명처럼 정확한 단어가 질문에 있을 때 사용하는 검색입니다.
+    # 예: "CloszIT"는 embedding 유사도보다 title/content 문자열 검색이 더 정확합니다.
+    conn = await get_connection()
+    search_text = f"%{keyword}%"
+
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                d.id::text AS document_id,
+                d.title,
+                d.source_type,
+                d.source_url,
+                c.chunk_index,
+                c.chunk_text,
+                1.0 AS score
+            FROM ai_document_chunks c
+            INNER JOIN ai_documents d ON d.id = c.document_id
+            WHERE ($2::text IS NULL OR d.source_type = $2)
+              AND (
+                d.title ILIKE $1
+                OR d.content ILIKE $1
+                OR c.chunk_text ILIKE $1
+              )
+            ORDER BY
+                CASE WHEN d.title ILIKE $1 THEN 0 ELSE 1 END,
+                c.chunk_index ASC
+            LIMIT $3;
+            """,
+            search_text,
+            source_type,
+            limit,
+        )
+
+        # vector 검색 결과와 같은 모양으로 맞춰서 Agent가 섞어 쓰기 쉽게 합니다.
+        return [
+            {
+                "chunkId": row["chunk_id"],
+                "documentId": row["document_id"],
+                "title": row["title"],
+                "sourceType": row["source_type"],
+                "sourceUrl": row["source_url"],
+                "chunkIndex": row["chunk_index"],
+                "chunkText": row["chunk_text"],
+                "score": float(row["score"]),
+                "matchType": "keyword",
             }
             for row in rows
         ]
