@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Header, type MenuName } from "./components/Header";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const CHAT_SUGGESTIONS = ['입사 첫날 해야 할 일', '급여일과 휴가 규정', '우리 부서 온보딩', '필요한 계정 신청'];
 
 type User = {
     id: number;
@@ -87,12 +88,15 @@ function App() {
 
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isChatLoading, setIsChatLoading] = useState(false);
+    const [isChatSignalVisible, setIsChatSignalVisible] = useState(true);
     const [chatQuestion, setChatQuestion] = useState('');
+    const [chatSubmittedQuestion, setChatSubmittedQuestion] = useState('');
     const [chatDepartment, setChatDepartment] = useState('인사');
     const [chatAnswer, setChatAnswer] = useState('');
     const [chatSources, setChatSources] = useState<AiResponse['sources']>([]);
     const [chatNoteTitle, setChatNoteTitle] = useState('');
     const [selectedNoteId, setSelectedNoteId] = useState('');
+    const [chatError, setChatError] = useState('');
 
     useEffect(() => {
         if (menu === 'posts') {
@@ -348,16 +352,24 @@ function App() {
 
     async function handleChatSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const question = chatQuestion.trim();
+
+        if (!question) {
+            setChatError('질문을 입력해주세요.');
+            return;
+        }
 
         try {
             setIsChatLoading(true);
+            setChatError('');
+            setChatSubmittedQuestion(question);
             setChatAnswer('');
             setChatSources([]);
 
             const data = await request<AiResponse>('/ai/chat', {
                 method: 'POST',
                 body: JSON.stringify({
-                    question: chatQuestion,
+                    question,
                     department: chatDepartment,
                 }),
             });
@@ -366,9 +378,14 @@ function App() {
             setChatSources(data.sources || []);
 
             if (!chatNoteTitle) {
-                setChatNoteTitle(chatQuestion.slice(0, 30) || 'AI 정리 노트');
+                setChatNoteTitle(question.slice(0, 30) || 'AI 정리 노트');
             }
         } catch (error) {
+            if (error instanceof Error) {
+                setChatError(error.message);
+            } else {
+                setChatError('오류가 발생했습니다.');
+            }
             showError(error);
         } finally {
             setIsChatLoading(false);
@@ -431,7 +448,7 @@ function App() {
     }
 
     function makeAiNoteContent(oldContent: string) {
-        const nextContent = `[질문]\n${chatQuestion}\n\n[AI 정리]\n${chatAnswer}`;
+        const nextContent = `[질문]\n${chatSubmittedQuestion || chatQuestion}\n\n[AI 정리]\n${chatAnswer}`;
 
         if (!oldContent) {
             return nextContent;
@@ -645,14 +662,29 @@ function App() {
 
     function openChatModal() {
         setIsChatOpen(true);
+        setIsChatSignalVisible(false);
 
         if (token) {
             loadNotes();
         }
     }
 
+    function toggleChatWidget() {
+        if (isChatOpen) {
+            setIsChatOpen(false);
+            return;
+        }
+
+        openChatModal();
+    }
+
     function closeChatModal() {
         setIsChatOpen(false);
+    }
+
+    function handleChatSuggestionClick(question: string) {
+        setChatQuestion(question);
+        setChatError('');
     }
 
     function renderSearchFilters(posts: BoardPost[]) {
@@ -953,80 +985,136 @@ function App() {
                 )}
             </main>
 
-            <button type="button" className="chat-floating-button" onClick={openChatModal}>
-                AI
-            </button>
-
-            {isChatOpen && (
-                <div className="modal-backdrop">
-                    <section className="chat-modal">
-                        <div className="modal-head">
+            <div className="chat-widget-area">
+                {isChatOpen && (
+                    <section className="chat-widget">
+                        <div className="chat-widget-head">
                             <div>
                                 <h2>AI 챗봇</h2>
-                                <p>회사 위키를 바탕으로 질문하고 필요한 답변을 내 노트에 저장합니다.</p>
+                                <p>회사 위키 기반 답변</p>
                             </div>
-                            <button type="button" className="secondary" onClick={closeChatModal}>닫기</button>
+                            <button type="button" className="text-button" onClick={closeChatModal}>닫기</button>
                         </div>
 
-                        <div className="chat-modal-grid">
-                            <section>
-                                {!user && <p>로그인하면 회사 위키를 바탕으로 질문할 수 있습니다.</p>}
-
-                                {user && (
-                                    <form onSubmit={handleChatSubmit}>
-                                        <label htmlFor="chat-department">부서</label>
-                                        <input id="chat-department" type="text" value={chatDepartment} onChange={(event) => setChatDepartment(event.target.value)} />
-
-                                        <label htmlFor="chat-question">질문</label>
-                                        <textarea id="chat-question" value={chatQuestion} onChange={(event) => setChatQuestion(event.target.value)} />
-
-                                        <button type="submit" disabled={isChatLoading}>
-                                            {isChatLoading ? '답변 생성 중' : '질문하기'}
-                                        </button>
-                                    </form>
-                                )}
-                            </section>
-
-                            <section>
-                                <h3>AI 답변</h3>
-                                <pre className="answer">{isChatLoading ? '답변을 생성하고 있습니다.' : chatAnswer || '아직 답변이 없습니다.'}</pre>
-
-                                {chatSources && chatSources.length > 0 && (
-                                    <>
-                                        <h3>참고 문서</h3>
-                                        {chatSources.map((source) => (
-                                            <p key={source.sourceId}>{source.title} · {source.department}</p>
-                                        ))}
-                                    </>
-                                )}
-
-                                {user && chatAnswer && (
-                                    <div className="note-save">
-                                        <label htmlFor="chat-note-title">새 노트 제목</label>
-                                        <input id="chat-note-title" type="text" value={chatNoteTitle} onChange={(event) => setChatNoteTitle(event.target.value)} />
-
-                                        <div className="button-row">
-                                            <button type="button" onClick={handleSaveChatAsNewNote}>새 노트로 저장</button>
-                                        </div>
-
-                                        <label htmlFor="target-note">기존 노트 선택</label>
-                                        <select id="target-note" value={selectedNoteId} onChange={(event) => setSelectedNoteId(event.target.value)}>
-                                            <option value="">노트 선택</option>
-                                            {notes.map((note) => (
-                                                <option key={note.id} value={note.id}>{note.title}</option>
-                                            ))}
-                                        </select>
-
-                                        <div className="button-row">
-                                            <button type="button" className="secondary" onClick={handleAppendChatToNote}>선택한 노트에 추가</button>
-                                        </div>
-                                    </div>
-                                )}
-                            </section>
+                        <div className="chat-greeting">
+                            <div className="chat-avatar">AI</div>
+                            <p>회사 위키를 기준으로 답변하고, 필요한 답변은 내 노트에 저장할 수 있어요.</p>
                         </div>
+
+                        {user && (
+                            <div className="chat-suggestions">
+                                {CHAT_SUGGESTIONS.map((question) => (
+                                    <button type="button" key={question} onClick={() => handleChatSuggestionClick(question)}>
+                                        {question}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="chat-messages">
+                            {!user && (
+                                <div className="chat-bubble ai-bubble">
+                                    로그인하면 회사 위키를 바탕으로 질문할 수 있습니다.
+                                </div>
+                            )}
+
+                            {user && !chatSubmittedQuestion && !chatAnswer && !isChatLoading && (
+                                <div className="chat-bubble ai-bubble">
+                                    궁금한 내용을 입력하거나 추천 질문을 선택해주세요.
+                                </div>
+                            )}
+
+                            {chatSubmittedQuestion && (
+                                <div className="chat-bubble user-bubble">
+                                    {chatSubmittedQuestion}
+                                </div>
+                            )}
+
+                            {isChatLoading && (
+                                <div className="chat-bubble ai-bubble">
+                                    답변을 찾고 있습니다.
+                                </div>
+                            )}
+
+                            {chatError && (
+                                <div className="chat-bubble error-bubble">
+                                    {chatError}
+                                </div>
+                            )}
+
+                            {chatAnswer && (
+                                <div className="chat-bubble ai-bubble">
+                                    {chatAnswer}
+                                </div>
+                            )}
+
+                            {chatSources && chatSources.length > 0 && (
+                                <div className="chat-sources">
+                                    <strong>참고 문서</strong>
+                                    {chatSources.map((source) => (
+                                        <p key={source.sourceId}>{source.title} · {source.department}</p>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {user && (
+                            <form className="chat-input-form" onSubmit={handleChatSubmit}>
+                                <div className="chat-department-row">
+                                    <label htmlFor="chat-department">부서</label>
+                                    <input id="chat-department" type="text" value={chatDepartment} onChange={(event) => setChatDepartment(event.target.value)} />
+                                </div>
+
+                                <div className="chat-input-row">
+                                    <textarea
+                                        id="chat-question"
+                                        placeholder="메시지를 입력하세요"
+                                        value={chatQuestion}
+                                        onChange={(event) => setChatQuestion(event.target.value)}
+                                    />
+                                    <button type="submit" disabled={isChatLoading}>
+                                        전송
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        {user && chatAnswer && (
+                            <div className="chat-note-save">
+                                <label htmlFor="chat-note-title">새 노트 제목</label>
+                                <input id="chat-note-title" type="text" value={chatNoteTitle} onChange={(event) => setChatNoteTitle(event.target.value)} />
+
+                                <div className="chat-note-actions">
+                                    <button type="button" onClick={handleSaveChatAsNewNote}>새 노트로 저장</button>
+                                </div>
+
+                                <label htmlFor="target-note">기존 노트 선택</label>
+                                <select id="target-note" value={selectedNoteId} onChange={(event) => setSelectedNoteId(event.target.value)}>
+                                    <option value="">노트 선택</option>
+                                    {notes.map((note) => (
+                                        <option key={note.id} value={note.id}>{note.title}</option>
+                                    ))}
+                                </select>
+
+                                <div className="chat-note-actions">
+                                    <button type="button" className="secondary" onClick={handleAppendChatToNote}>기존 노트에 추가</button>
+                                </div>
+                            </div>
+                        )}
                     </section>
-                </div>
-            )}
+                )}
+
+                {isChatSignalVisible && !isChatOpen && (
+                    <div className="chat-signal">
+                        <span>궁금한 점은 AI에게 물어보세요.</span>
+                        <button type="button" onClick={() => setIsChatSignalVisible(false)}>닫기</button>
+                    </div>
+                )}
+
+                <button type="button" className={isChatOpen ? 'chat-floating-button active' : 'chat-floating-button'} onClick={toggleChatWidget}>
+                    AI
+                </button>
+            </div>
         </>
     );
 }

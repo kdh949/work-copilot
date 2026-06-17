@@ -327,11 +327,18 @@ main {
   margin-top: 18px;
 }
 
-.chat-floating-button {
+.chat-widget-area {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 20;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.chat-floating-button {
   width: 58px;
   height: 58px;
   border-radius: 50%;
@@ -339,48 +346,199 @@ main {
   font-weight: 800;
 }
 
-.modal-backdrop {
-  position: fixed;
-  z-index: 30;
-  inset: 0;
+.chat-floating-button.active {
+  background: #1d4ed8;
+}
+
+.chat-signal {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background: rgba(15, 23, 42, 0.48);
-}
-
-.chat-modal {
-  width: min(960px, 100%);
-  max-height: calc(100vh - 40px);
-  overflow: auto;
+  gap: 8px;
+  max-width: 300px;
+  padding: 9px 10px;
+  border: 1px solid #bfdbfe;
   border-radius: 8px;
-  padding: 20px;
   background: white;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  color: #1f2937;
+  font-size: 13px;
 }
 
-.modal-head {
+.chat-signal button {
+  padding: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.chat-widget {
+  width: 360px;
+  max-height: calc(100vh - 112px);
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  padding: 14px;
+  background: white;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+}
+
+.chat-widget-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: 12px;
 }
 
-.modal-head h2,
-.modal-head p {
+.chat-widget-head h2,
+.chat-widget-head p {
   margin: 0;
 }
 
-.modal-head p {
-  margin-top: 4px;
+.chat-widget-head h2 {
+  font-size: 18px;
+}
+
+.chat-widget-head p {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.chat-widget-head .text-button {
   color: #64748b;
 }
 
-.chat-modal-grid {
+.chat-greeting {
   display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 18px;
+  grid-template-columns: 42px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.chat-avatar {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #2563eb;
+  color: white;
+  font-weight: 800;
+}
+
+.chat-greeting p {
+  margin: 0;
+  line-height: 1.45;
+  color: #334155;
+  font-size: 14px;
+}
+
+.chat-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.chat-suggestions button {
+  min-height: 44px;
+  padding: 9px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-align: left;
+}
+
+.chat-messages {
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.chat-bubble {
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.ai-bubble {
+  justify-self: start;
+  background: #f1f5f9;
+  color: #1f2937;
+}
+
+.user-bubble {
+  justify-self: end;
+  background: #2563eb;
+  color: white;
+}
+
+.error-bubble {
+  justify-self: start;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.chat-sources {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+}
+
+.chat-sources p {
+  margin: 6px 0 0;
+}
+
+.chat-input-form {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-department-row {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-department-row label,
+.chat-note-save label {
+  margin: 0;
+  font-size: 13px;
+}
+
+.chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr 58px;
+  gap: 8px;
+  align-items: end;
+}
+
+.chat-input-row textarea {
+  min-height: 44px;
+  max-height: 90px;
+}
+
+.chat-note-save {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.chat-note-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 820px) {
@@ -397,13 +555,19 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .chat-modal-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .chat-floating-button {
+  .chat-widget-area {
+    left: 16px;
     right: 16px;
     bottom: 16px;
+  }
+
+  .chat-widget {
+    width: 100%;
+    max-height: calc(100vh - 96px);
+  }
+
+  .chat-signal {
+    max-width: 100%;
   }
 
   .post-head,
