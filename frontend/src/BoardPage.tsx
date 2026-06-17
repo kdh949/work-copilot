@@ -356,6 +356,7 @@ function MarkdownAnswer({ text }: { text: string }) {
 export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const skipNextDetailFetchBoardId = React.useRef<number | null>(null);
   const [boards, setBoards] = React.useState<Board[]>([]);
   const [page, setPage] = React.useState(1);
   const [total, setTotal] = React.useState(0);
@@ -502,6 +503,13 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     const boardId = getBoardIdFromPath(location.pathname);
 
     if (boardId === null) {
+      return;
+    }
+
+    if (!location.pathname.endsWith("/edit") && skipNextDetailFetchBoardId.current === boardId) {
+      // 수정 완료 후 상세 화면으로 돌아갈 때는 이미 PATCH 응답으로 화면을 갱신했으므로,
+      // 조회수를 올리는 상세 조회 API를 다시 호출하지 않는다.
+      skipNextDetailFetchBoardId.current = null;
       return;
     }
 
@@ -663,10 +671,14 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       return;
     }
 
+    const updatedBoard = await response.json();
+
+    // 수정 응답에 최신 게시글 정보가 들어 있으므로 재조회 없이 상세 화면 상태를 바로 갱신한다.
+    setSelectedBoard(updatedBoard);
+    skipNextDetailFetchBoardId.current = updatedBoard.id;
     resetForm();
     setMessage("게시글 수정 완료");
-    navigate(`/board/${editingBoardId}`);
-    handleSelectBoard(editingBoardId);
+    navigate(`/board/${updatedBoard.id}`);
     fetchBoards();
   }
 
