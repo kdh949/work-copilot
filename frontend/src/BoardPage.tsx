@@ -373,6 +373,10 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const [comments, setComments] = React.useState<Comment[]>([]);
   const [popularTags, setPopularTags] = React.useState<PopularTag[]>([]);
   const [recentComments, setRecentComments] = React.useState<RecentComment[]>([]);
+  const [activityBoards, setActivityBoards] = React.useState<Board[]>([]);
+  const [activityComments, setActivityComments] = React.useState<RecentComment[]>([]);
+  const [activityError, setActivityError] = React.useState("");
+  const [isActivityLoading, setIsActivityLoading] = React.useState(false);
   const [commentContent, setCommentContent] = React.useState("");
   const [keyword, setKeyword] = React.useState("");
   const [searchKeyword, setSearchKeyword] = React.useState("");
@@ -398,7 +402,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const limit = 10;
   const pageCount = Math.max(1, Math.ceil(total / limit));
   const isBoardFormDisabled = title === "" || content === "" || selectedTags.length === 0;
-  const myBoards = boards.filter((board) => board.writer === loginId);
   const boardFilterOptions = ["전체", ...filterTagOptions];
   const visibleBoards =
     activeTag === "전체"
@@ -466,6 +469,43 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       }
     });
   }, []);
+
+  React.useEffect(() => {
+    if (view !== "activity") {
+      return;
+    }
+
+    void Promise.resolve().then(async () => {
+      const accessToken = localStorage.getItem("accessToken");
+
+      if (!accessToken) {
+        setActivityBoards([]);
+        setActivityComments([]);
+        setActivityError("로그인이 필요합니다.");
+        return;
+      }
+
+      setIsActivityLoading(true);
+      setActivityError("");
+
+      try {
+        const [boardsResponse, commentsResponse] = await Promise.all([
+          authJsonFetch(apiUrl("/boards/me")),
+          authJsonFetch(apiUrl("/comments/me")),
+        ]);
+
+        if (!boardsResponse.ok || !commentsResponse.ok) {
+          setActivityError("내 활동을 불러오지 못했습니다.");
+          return;
+        }
+
+        setActivityBoards(await boardsResponse.json());
+        setActivityComments(await commentsResponse.json());
+      } finally {
+        setIsActivityLoading(false);
+      }
+    });
+  }, [view]);
 
   React.useEffect(() => {
     void Promise.resolve().then(async () => {
@@ -1185,15 +1225,14 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
             <div className="screen-heading">
               <div>
                 <h1>내 활동</h1>
-                <p>내가 작성한 글, 댓글, AI 질문, 저장한 자료를 한눈에 확인하세요.</p>
+                <p>내가 작성한 글과 댓글을 한눈에 확인하세요.</p>
               </div>
             </div>
 
             <div className="stat-grid">
               {([
-                { icon: "posts", label: "내가 쓴 글", value: myBoards.length || 24, hint: "전체 게시글" },
-                { icon: "comments", label: "내 댓글", value: comments.length || 87, hint: "전체 댓글" },
-                { icon: "ai", label: "AI 질문", value: aiAnswer ? 1 : 18, hint: "전체 질문" },
+                { icon: "posts", label: "내가 쓴 글", value: activityBoards.length, hint: "작성한 게시글" },
+                { icon: "comments", label: "내 댓글", value: activityComments.length, hint: "작성한 댓글" },
               ] satisfies StatCardData[]).map(({ icon, label, value, hint }) => (
                 <article className="stat-card" key={label}>
                   <CardIconBadge name={icon} label={`${label} 아이콘`} />
@@ -1204,6 +1243,67 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
               ))}
             </div>
 
+            {activityError && <p className="status-message">{activityError}</p>}
+
+            <div className="activity-layout">
+              <section className="preview-panel activity-panel">
+                <div className="panel-title-row">
+                  <div>
+                    <h2>내가 쓴 글</h2>
+                    <p>{isActivityLoading ? "불러오는 중입니다." : "최근 작성한 게시글입니다."}</p>
+                  </div>
+                </div>
+                <div className="activity-list">
+                  {!isActivityLoading && activityBoards.length === 0 && (
+                    <p className="activity-empty">아직 작성한 글이 없습니다.</p>
+                  )}
+                  {activityBoards.map((board) => (
+                    <button
+                      className="activity-item"
+                      type="button"
+                      key={board.id}
+                      onClick={() => handleSelectBoard(board.id)}
+                    >
+                      <span className="activity-item-head">
+                        <strong>{board.title}</strong>
+                        <small>조회 {board.viewCount}</small>
+                      </span>
+                      <p>{board.content}</p>
+                      <span className="activity-meta">{getBoardTags(board).join(", ") || "태그 없음"}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="preview-panel activity-panel">
+                <div className="panel-title-row">
+                  <div>
+                    <h2>내 댓글</h2>
+                    <p>{isActivityLoading ? "불러오는 중입니다." : "최근 작성한 댓글입니다."}</p>
+                  </div>
+                </div>
+                <div className="activity-list">
+                  {!isActivityLoading && activityComments.length === 0 && (
+                    <p className="activity-empty">아직 작성한 댓글이 없습니다.</p>
+                  )}
+                  {activityComments.map((comment) => (
+                    <button
+                      className="activity-item"
+                      type="button"
+                      key={comment.id}
+                      onClick={() => handleSelectBoard(comment.boardId)}
+                    >
+                      <span className="activity-item-head">
+                        <strong>{comment.boardTitle || "게시글"}</strong>
+                        <small>댓글</small>
+                      </span>
+                      <p>{comment.content}</p>
+                      <span className="activity-meta">게시글로 이동</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
           </section>
         )}
 

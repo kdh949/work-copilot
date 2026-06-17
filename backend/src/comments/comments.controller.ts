@@ -36,6 +36,12 @@ export class CommentsController {
     return this.commentsService.findRecent();
   }
 
+  @Get('me')
+  findMine(@Headers('authorization') authorization: string) {
+    const token = getTokenFromHeader(authorization);
+    return this.commentsService.findMine(token);
+  }
+
   @Get()
   findByBoardId(@Query('boardId', ParseIntPipe) boardId: number) {
     return this.commentsService.findByBoardId(boardId);

@@ -69,6 +69,21 @@ export class CommentsService {
     }));
   }
 
+  async findMine(token: string) {
+    const user = await this.getUserFromToken(token);
+    const comments = await this.commentsRepository.find({
+      where: [{ userId: user.sub }, { writer: user.loginId }],
+      relations: { board: true, user: true },
+      order: { id: 'DESC' },
+      take: 50,
+    });
+
+    return comments.map((comment) => ({
+      ...this.toCommentResponse(comment),
+      boardTitle: comment.board?.title ?? '',
+    }));
+  }
+
   async create(createCommentDto: CreateCommentDto, token: string) {
     const user = await this.getUserFromToken(token);
     // Typeorm 형식의 객체로 만든다

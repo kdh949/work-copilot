@@ -895,6 +895,80 @@ a.reference-mini:hover {
   font-size: 15px;
 }
 
+.activity-screen .activity-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-screen .stat-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-panel {
+  align-content: start;
+}
+
+.activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fbfa;
+  color: var(--text-h);
+  text-align: left;
+}
+
+.activity-item:hover {
+  border-color: var(--accent);
+  background: #f3fffa;
+}
+
+.activity-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.activity-item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-item-head small,
+.activity-meta,
+.activity-empty {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.activity-item p,
+.activity-empty {
+  margin: 0;
+}
+
+.activity-item p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .preview-table {
   display: grid;
   overflow-x: auto;
@@ -1034,7 +1108,7 @@ a.reference-mini:hover {
 .board-form {
   display: grid;
   gap: 12px;
-  width: min(760px, 100%);
+  width: min(1040px, 100%);
   padding: 24px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1054,7 +1128,11 @@ a.reference-mini:hover {
 }
 
 .board-tag-options {
-  grid-template-columns: repeat(auto-fit, minmax(88px, max-content));
+  grid-template-columns: repeat(auto-fit, minmax(112px, max-content));
+}
+
+.board-tag-options button {
+  white-space: nowrap;
 }
 
 .tag-add-row,
@@ -1169,6 +1247,10 @@ a.reference-mini:hover {
   .reference-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .activity-screen .activity-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1212,6 +1294,10 @@ a.reference-mini:hover {
   .knowledge-card-grid,
   .stat-grid,
   .reference-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-screen .stat-grid {
     grid-template-columns: 1fr;
   }
 

@@ -155,6 +155,18 @@ export class BoardsService {
     };
   }
 
+  async findMine(token: string) {
+    const user = await this.getUserFromToken(token);
+    const boards = await this.boardsRepository.find({
+      where: [{ userId: user.sub }, { writer: user.loginId }],
+      relations: { tags: true, user: true },
+      order: { id: 'DESC' },
+      take: 50,
+    });
+
+    return boards.map((board) => this.toBoardResponse(board));
+  }
+
   async findOne(id: number) {
     const board = await this.boardsRepository.findOne({
       where: { id },

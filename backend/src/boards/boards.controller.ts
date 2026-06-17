@@ -63,6 +63,12 @@ export class BoardsController {
     return this.boardsService.findPopularTags();
   }
 
+  @Get('me')
+  findMine(@Headers('authorization') authorization: string) {
+    const token = getTokenFromHeader(authorization);
+    return this.boardsService.findMine(token);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.boardsService.findOne(id);
