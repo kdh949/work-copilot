@@ -366,6 +366,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
   const [tagDraft, setTagDraft] = React.useState("");
   const [tagOptions, setTagOptions] = React.useState(DEFAULT_TAG_OPTIONS);
+  const [filterTagOptions, setFilterTagOptions] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState("");
   const [editingBoardId, setEditingBoardId] = React.useState<number | null>(null);
   const [selectedBoard, setSelectedBoard] = React.useState<Board | null>(null);
@@ -398,6 +399,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const pageCount = Math.max(1, Math.ceil(total / limit));
   const isBoardFormDisabled = title === "" || content === "" || selectedTags.length === 0;
   const myBoards = boards.filter((board) => board.writer === loginId);
+  const boardFilterOptions = ["전체", ...filterTagOptions];
   const visibleBoards =
     activeTag === "전체"
       ? boards
@@ -429,7 +431,9 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     }
 
     const data = await response.json();
-    setTagOptions([...new Set([...DEFAULT_TAG_OPTIONS, ...data])]);
+    const dbTagOptions = Array.isArray(data) ? data : [];
+    setTagOptions([...new Set([...DEFAULT_TAG_OPTIONS, ...dbTagOptions])]);
+    setFilterTagOptions(dbTagOptions);
   }, []);
 
   React.useEffect(() => {
@@ -439,6 +443,12 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   React.useEffect(() => {
     void Promise.resolve().then(fetchTagOptions);
   }, [fetchTagOptions]);
+
+  React.useEffect(() => {
+    if (activeTag !== "전체" && !filterTagOptions.includes(activeTag)) {
+      setActiveTag("전체");
+    }
+  }, [activeTag, filterTagOptions]);
 
   React.useEffect(() => {
     void Promise.resolve().then(async () => {
@@ -642,6 +652,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     fetchComments(newBoard.id);
     navigate(`/board/${newBoard.id}`);
     fetchBoards();
+    fetchTagOptions();
   }
 
   function startEdit(board: Board) {
@@ -679,6 +690,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     setMessage("게시글 수정 완료");
     navigate(`/board/${updatedBoard.id}`);
     fetchBoards();
+    fetchTagOptions();
   }
 
   async function handleDeleteBoard() {
@@ -698,6 +710,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     setMessage("게시글 삭제 완료");
     goToBoard();
     fetchBoards();
+    fetchTagOptions();
   }
 
   async function handleCreateComment(event: React.FormEvent<HTMLFormElement>) {
@@ -854,18 +867,16 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
 
                 <div className="board-list-toolbar">
                   <div className="filter-row">
-                    {["전체", "질문", "학습", "알고리즘", "프로젝트", "GitHub", "자료공유", "기타"].map(
-                      (tag) => (
-                        <button
-                          className={activeTag === tag ? "is-active" : ""}
-                          type="button"
-                          key={tag}
-                          onClick={() => setActiveTag(tag)}
-                        >
-                          {tag}
-                        </button>
-                      ),
-                    )}
+                    {boardFilterOptions.map((tag) => (
+                      <button
+                        className={activeTag === tag ? "is-active" : ""}
+                        type="button"
+                        key={tag}
+                        onClick={() => setActiveTag(tag)}
+                      >
+                        {tag}
+                      </button>
+                    ))}
                   </div>
 
                   <button className="board-write-button" type="button" onClick={() => navigate("/board/new")}>
