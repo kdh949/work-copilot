@@ -8,6 +8,7 @@ type User = {
     id: number;
     email: string;
     nickname: string;
+    employeeNumber?: string | null;
     role: string;
 };
 
@@ -49,11 +50,12 @@ type AiResponse = {
 };
 
 function App() {
-    const [menu, setMenu] = useState<MenuName>('posts');
+    const [menu, setMenu] = useState<MenuName>('login');
     const [token, setToken] = useState(localStorage.getItem('accessToken') || '');
     const [user, setUser] = useState<User | null>(null);
     const [message, setMessage] = useState('');
 
+    const [signupEmployeeNumber, setSignupEmployeeNumber] = useState('');
     const [signupEmail, setSignupEmail] = useState('');
     const [signupPassword, setSignupPassword] = useState('');
     const [signupNickname, setSignupNickname] = useState('');
@@ -141,6 +143,10 @@ function App() {
         try {
             const me = await request<User>('/auth/me');
             setUser(me);
+
+            if (menu === 'login') {
+                setMenu('posts');
+            }
         } catch {
             handleLogout();
         }
@@ -241,6 +247,7 @@ function App() {
             const newUser = await request<User>('/auth/signup', {
                 method: 'POST',
                 body: JSON.stringify({
+                    employeeNumber: signupEmployeeNumber,
                     email: signupEmail,
                     password: signupPassword,
                     nickname: signupNickname,
@@ -248,6 +255,10 @@ function App() {
             });
 
             setMessage(`회원가입이 완료되었습니다. 역할: ${newUser.role}`);
+            setSignupEmployeeNumber('');
+            setSignupEmail('');
+            setSignupPassword('');
+            setSignupNickname('');
             setMenu('login');
         } catch (error) {
             showError(error);
@@ -280,6 +291,8 @@ function App() {
         setToken('');
         setUser(null);
         setNotes([]);
+        setIsChatOpen(false);
+        setMenu('login');
         setMessage('로그아웃되었습니다.');
     }
 
@@ -738,36 +751,40 @@ function App() {
             <main>
                 {message && <p className="message">{message}</p>}
 
-                {menu === 'signup' && (
-                    <section className="panel">
-                        <h2>회원가입</h2>
-                        <form onSubmit={handleSignupSubmit}>
-                            <label htmlFor="signup-email">이메일</label>
-                            <input id="signup-email" type="email" value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} />
-
-                            <label htmlFor="signup-password">비밀번호</label>
-                            <input id="signup-password" type="password" value={signupPassword} onChange={(event) => setSignupPassword(event.target.value)} />
-
-                            <label htmlFor="signup-nickname">닉네임</label>
-                            <input id="signup-nickname" type="text" value={signupNickname} onChange={(event) => setSignupNickname(event.target.value)} />
-
-                            <button type="submit">가입하기</button>
-                        </form>
-                    </section>
-                )}
-
                 {menu === 'login' && (
-                    <section className="panel">
-                        <h2>로그인</h2>
-                        <form onSubmit={handleLoginSubmit}>
-                            <label htmlFor="login-email">이메일</label>
-                            <input id="login-email" type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
+                    <section className="auth-layout">
+                        <section className="panel auth-card">
+                            <h2>로그인</h2>
+                            <p className="auth-subtitle">회사 내부 위키는 직원 로그인 후 사용할 수 있습니다.</p>
+                            <form onSubmit={handleLoginSubmit}>
+                                <label htmlFor="login-email">이메일</label>
+                                <input id="login-email" type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
 
-                            <label htmlFor="login-password">비밀번호</label>
-                            <input id="login-password" type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} />
+                                <label htmlFor="login-password">비밀번호</label>
+                                <input id="login-password" type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} />
 
-                            <button type="submit">로그인</button>
-                        </form>
+                                <button type="submit">로그인</button>
+                            </form>
+                        </section>
+
+                        <section className="panel signup-small">
+                            <h2>회원가입</h2>
+                            <form onSubmit={handleSignupSubmit}>
+                                <label htmlFor="signup-employee-number">사번</label>
+                                <input id="signup-employee-number" type="text" value={signupEmployeeNumber} onChange={(event) => setSignupEmployeeNumber(event.target.value)} />
+
+                                <label htmlFor="signup-email">이메일</label>
+                                <input id="signup-email" type="email" value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} />
+
+                                <label htmlFor="signup-password">비밀번호</label>
+                                <input id="signup-password" type="password" value={signupPassword} onChange={(event) => setSignupPassword(event.target.value)} />
+
+                                <label htmlFor="signup-nickname">닉네임</label>
+                                <input id="signup-nickname" type="text" value={signupNickname} onChange={(event) => setSignupNickname(event.target.value)} />
+
+                                <button type="submit" className="secondary">가입하기</button>
+                            </form>
+                        </section>
                     </section>
                 )}
 
@@ -985,6 +1002,7 @@ function App() {
                 )}
             </main>
 
+            {user && (
             <div className="chat-widget-area">
                 {isChatOpen && (
                     <section className="chat-widget">
@@ -1115,6 +1133,7 @@ function App() {
                     AI
                 </button>
             </div>
+            )}
         </>
     );
 }

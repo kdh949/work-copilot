@@ -123,6 +123,40 @@ main {
   gap: 18px;
 }
 
+.auth-layout {
+  max-width: 440px;
+  display: grid;
+  gap: 14px;
+  margin: 40px auto 0;
+}
+
+.auth-card h2,
+.signup-small h2 {
+  margin-bottom: 6px;
+}
+
+.auth-subtitle {
+  margin-top: 0;
+  color: #64748b;
+}
+
+.signup-small {
+  padding: 14px;
+}
+
+.signup-small h2 {
+  font-size: 16px;
+}
+
+.signup-small label {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.signup-small button {
+  margin-top: 12px;
+}
+
 .wiki-layout {
   display: grid;
   grid-template-columns: 300px 1fr;
