@@ -16,6 +16,9 @@ export class User {
     @Column()
     nickname: string;
 
+    @Column({ default: 'employee' })
+    role: string;
+
     @OneToMany(() => Post, (post) => post.author)
     posts: Post[];
 

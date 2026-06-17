@@ -9,6 +9,7 @@ type SignupResponse = {
     id: number;
     email: string;
     nickname: string;
+    role: string;
     createdAt: Date;
 };
 
@@ -20,6 +21,7 @@ type MeResponse = {
     id: number;
     email: string;
     nickname: string;
+    role: string;
 };
 
 @Injectable()
@@ -31,17 +33,21 @@ export class AuthService {
 
     async signup(signupDto: SignupDto): Promise<SignupResponse> {
         const hashedPassword = await bcrypt.hash(signupDto.password, 10);
+        const userCount = await this.usersService.count();
+        const role = userCount === 0 ? 'admin' : 'employee';
 
         const user = await this.usersService.create({
             email: signupDto.email,
             password: hashedPassword,
             nickname: signupDto.nickname,
+            role,
         });
 
         return {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            role: user.role,
             createdAt: user.createdAt,
         }; // UsersService의 반환값을 그대로 반환하지 않고, AuthService에서 응답 객체를 직접 만들어 반환함
            // 이를 통해 password를 반환에 포함시키지 않을 수 있음
@@ -63,6 +69,7 @@ export class AuthService {
         const payload = {
             sub: user.id,
             email: user.email,
+            role: user.role,
         };
 
         const accessToken = await this.jwtService.signAsync(payload);
@@ -83,6 +90,7 @@ export class AuthService {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            role: user.role,
         };
     }
 }

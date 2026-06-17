@@ -21,6 +21,7 @@ type FindAllPostsOptions = {
     boardType?: string;
     mine?: boolean;
     userId?: number;
+    includeQuestions?: boolean;
 };
 
 type PagedPostsResponse = {
@@ -63,9 +64,16 @@ export class PostsService {
         }
 
         if (options.boardType) {
-            query.andWhere('post.boardType = :boardType', {
-                boardType: options.boardType,
-            });
+            if (options.boardType === 'note' && options.includeQuestions) {
+                query.andWhere('(post.boardType = :boardType OR post.boardType = :questionType)', {
+                    boardType: 'note',
+                    questionType: 'question',
+                });
+            } else {
+                query.andWhere('post.boardType = :boardType', {
+                    boardType: options.boardType,
+                });
+            }
         }
 
         if (options.mine && options.userId) {
@@ -75,8 +83,8 @@ export class PostsService {
         }
 
         if (options.department) {
-            query.andWhere('post.department = :department', {
-                department: options.department,
+            query.andWhere('post.department ILIKE :department', {
+                department: `%${options.department}%`,
             });
         }
 
@@ -97,7 +105,7 @@ export class PostsService {
         };
     }
 
-    async findOne(id: number): Promise<Post> {
+    async findOne(id: number, userId?: number): Promise<Post> {
         const post = await this.postRepository.findOne({
             where: { id },
             relations: {
@@ -110,10 +118,17 @@ export class PostsService {
         if (!post) {
             throw new NotFoundException('게시글을 찾을 수 없습니다.');
         }
+
+        if ((post.boardType === 'note' || post.boardType === 'question') && post.author.id !== userId) {
+            throw new ForbiddenException('본인의 노트만 볼 수 있습니다.');
+        }
+
         return post;
     }
 
-    async create(createPostDto: CreatePostDto, authorId: number): Promise<Post> {
+    async create(createPostDto: CreatePostDto, authorId: number, userRole: string): Promise<Post> {
+        this.checkAdmin(userRole);
+
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const post = this.postRepository.create({
@@ -132,39 +147,28 @@ export class PostsService {
     }
 
     async createQuestion(createPostDto: CreatePostDto, authorId: number): Promise<Post> {
+        return this.createNote(createPostDto, authorId);
+    }
+
+    async createNote(createPostDto: CreatePostDto, authorId: number): Promise<Post> {
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const post = this.postRepository.create({
             title: createPostDto.title,
             content: createPostDto.content,
-            boardType: 'question',
+            boardType: 'note',
             department: this.normalizeDepartment(createPostDto.department),
             tags: this.normalizeTags(createPostDto.tags),
             author,
         });
 
-        const savedPost = await this.postRepository.save(post);
-        const aiResponse = await this.aiService.chat({
-            question: `${savedPost.title}\n${savedPost.content}`,
-            department: savedPost.department,
-        });
-
-        const aiComment = this.commentRepository.create({
-            content: this.getAiAnswer(aiResponse),
-            isAi: true,
-            post: savedPost,
-            author: null,
-        });
-
-        await this.commentRepository.save(aiComment);
-
-        return this.findOne(savedPost.id);
+        return this.postRepository.save(post);
     }
 
-    async update(id: number, updatePostDto: UpdatePostDto, userId: number): Promise<Post> {
-        const post = await this.findOne(id);
+    async update(id: number, updatePostDto: UpdatePostDto, userId: number, userRole: string): Promise<Post> {
+        const post = await this.findOne(id, userId);
 
-        this.checkOwnership(post, userId);
+        this.checkPostPermission(post, userId, userRole);
 
         if (updatePostDto.title) {
             post.title = updatePostDto.title;
@@ -188,10 +192,10 @@ export class PostsService {
         return savedPost;
     }
 
-    async remove(id: number, userId: number): Promise<{ deleted: boolean }> {
-        const post = await this.findOne(id);
+    async remove(id: number, userId: number, userRole: string): Promise<{ deleted: boolean }> {
+        const post = await this.findOne(id, userId);
 
-        this.checkOwnership(post, userId);
+        this.checkPostPermission(post, userId, userRole);
 
         await this.postRepository.delete(post.id);
 
@@ -205,7 +209,7 @@ export class PostsService {
     }
 
     async createComment(postId: number, createCommentDto: CreateCommentDto, authorId: number): Promise<Comment> {
-        const post = await this.findOne(postId);
+        const post = await this.findOne(postId, authorId);
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const comment = this.commentRepository.create({
@@ -228,10 +232,10 @@ export class PostsService {
         return this.commentRepository.save(comment);
     }
 
-    async removeComment(commentId: number, userId: number): Promise<{ deleted: boolean }> {
+    async removeComment(commentId: number, userId: number, userRole: string): Promise<{ deleted: boolean }> {
         const comment = await this.findComment(commentId);
 
-        this.checkCommentOwnership(comment, userId);
+        this.checkCommentOwnership(comment, userId, userRole);
 
         await this.commentRepository.delete(comment.id);
 
@@ -246,7 +250,26 @@ export class PostsService {
         }
     }
 
-    private checkCommentOwnership(comment: Comment, userId: number): void {
+    private checkAdmin(userRole: string): void {
+        if (userRole !== 'admin') {
+            throw new ForbiddenException('관리자만 사용할 수 있습니다.');
+        }
+    }
+
+    private checkPostPermission(post: Post, userId: number, userRole: string): void {
+        if (post.boardType === 'wiki') {
+            this.checkAdmin(userRole);
+            return;
+        }
+
+        this.checkOwnership(post, userId);
+    }
+
+    private checkCommentOwnership(comment: Comment, userId: number, userRole = 'employee'): void {
+        if (userRole === 'admin') {
+            return;
+        }
+
         if (!comment.author || comment.author.id !== userId) {
             throw new ForbiddenException('본인의 댓글만 수정/삭제할 수 있습니다.');
         }
@@ -298,17 +321,5 @@ export class PostsService {
         }
 
         return numberValue;
-    }
-
-    private getAiAnswer(aiResponse: unknown): string {
-        if (aiResponse && typeof aiResponse === 'object' && 'answer' in aiResponse) {
-            const answer = (aiResponse as { answer?: unknown }).answer;
-
-            if (typeof answer === 'string') {
-                return answer;
-            }
-        }
-
-        return 'AI 답변을 생성하지 못했습니다. AI 서비스 실행 상태를 확인해주세요.';
     }
 }

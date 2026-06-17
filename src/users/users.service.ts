@@ -7,6 +7,7 @@ type CreateUserInput = {
     email: string;
     password: string;
     nickname: string;
+    role?: string;
 };
 
 @Injectable()
@@ -54,8 +55,13 @@ export class UsersService {
             email: input.email,
             password: input.password,
             nickname: input.nickname,
+            role: input.role || 'employee',
         });
 
         return this.userRepository.save(user);
+    }
+
+    async count(): Promise<number> {
+        return this.userRepository.count();
     }
 }

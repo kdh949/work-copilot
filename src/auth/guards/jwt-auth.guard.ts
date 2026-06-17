@@ -6,6 +6,7 @@ import { Request } from "express";
 type JwtPayload = {
     sub: number;
     email: string;
+    role: string;
 };
 
 export type AuthenticatedRequest = Request & {

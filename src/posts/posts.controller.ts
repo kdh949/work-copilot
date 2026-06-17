@@ -57,12 +57,40 @@ export class PostsController {
             boardType: 'question',
             mine: true,
             userId: request.user.sub,
+            includeQuestions: true,
         });
     }
 
+    @UseGuards(JwtAuthGuard)
+    @Get('notes/my')
+    findMyNotes(
+        @Query('keyword') keyword: string | undefined,
+        @Query('page') page: string | undefined,
+        @Query('limit') limit: string | undefined,
+        @Query('tag') tag: string | undefined,
+        @Query('department') department: string | undefined,
+        @Req() request: AuthenticatedRequest,
+    ) {
+        return this.postsService.findAll({
+            keyword,
+            page,
+            limit,
+            tag,
+            department,
+            boardType: 'note',
+            mine: true,
+            userId: request.user.sub,
+            includeQuestions: true,
+        });
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Get(':id')
-    findOne(@Param('id', ParseIntPipe) id: number): Promise<Post> {
-        return this.postsService.findOne(id);
+    findOne(
+        @Param('id', ParseIntPipe) id: number,
+        @Req() request: AuthenticatedRequest,
+    ): Promise<Post> {
+        return this.postsService.findOne(id, request.user.sub);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -70,7 +98,7 @@ export class PostsController {
     create(@Body() createPostDto: CreatePostDto,
            @Req() request: AuthenticatedRequest,
     ): Promise<Post> {
-        return this.postsService.create(createPostDto, request.user.sub);
+        return this.postsService.create(createPostDto, request.user.sub, request.user.role);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -83,20 +111,29 @@ export class PostsController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @HttpPost('notes')
+    createNote(
+        @Body() createPostDto: CreatePostDto,
+        @Req() request: AuthenticatedRequest,
+    ): Promise<Post> {
+        return this.postsService.createNote(createPostDto, request.user.sub);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Patch(':id')
     update(
         @Param('id', ParseIntPipe) id: number,
         @Body() updatePostDto: UpdatePostDto,
         @Req() request: AuthenticatedRequest,
     ): Promise<Post> {
-        return this.postsService.update(id, updatePostDto, request.user.sub);
+        return this.postsService.update(id, updatePostDto, request.user.sub, request.user.role);
     }
 
     @UseGuards(JwtAuthGuard)
     @Delete(':id')
     remove(@Param('id', ParseIntPipe) id: number,
            @Req() request: AuthenticatedRequest): Promise<{ deleted: boolean }> {
-        return this.postsService.remove(id, request.user.sub);
+        return this.postsService.remove(id, request.user.sub, request.user.role);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -125,6 +162,6 @@ export class PostsController {
         @Param('commentId', ParseIntPipe) commentId: number,
         @Req() request: AuthenticatedRequest,
     ): Promise<{ deleted: boolean }> {
-        return this.postsService.removeComment(commentId, request.user.sub);
+        return this.postsService.removeComment(commentId, request.user.sub, request.user.role);
     }
 }
