@@ -1,5 +1,6 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { apiUrl } from "./api";
 
 function authJsonFetch(url: string, options: RequestInit = {}) {
   const accessToken = localStorage.getItem("accessToken");
@@ -31,6 +32,15 @@ type Comment = {
   writer: string;
 };
 
+type PopularTag = {
+  name: string;
+  count: number;
+};
+
+type RecentComment = Comment & {
+  boardTitle: string;
+};
+
 type AiReference = {
   title?: string;
   sourceUrl?: string;
@@ -58,6 +68,131 @@ type BoardPageProps = {
 };
 
 type View = "board" | "ai" | "knowledge" | "activity" | "write" | "edit" | "detail";
+type KnowledgeId = "blog" | "official" | "board" | "comment";
+type CardIconName = KnowledgeId | "faq" | "github" | "posts" | "comments" | "ai" | "saved";
+type KnowledgeSummary = {
+  blogCount: number;
+  officialCount: number;
+  chunkCount: number;
+  boardCount: number;
+  commentCount: number;
+};
+type KnowledgeResource = {
+  id: string;
+  title: string;
+  source: string;
+  summary: string;
+  status: string;
+};
+type StatCardData = {
+  icon: CardIconName;
+  label: string;
+  value: number;
+  hint: string;
+};
+
+function CardIconBadge({ name, label }: { name: CardIconName; label: string }) {
+  const commonProps: React.SVGProps<SVGSVGElement> = {
+    viewBox: "0 0 24 24",
+    width: 19,
+    height: 19,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    role: "img",
+    "aria-label": label,
+  };
+
+  const icons: Record<CardIconName, React.ReactElement> = {
+    faq: (
+      <svg {...commonProps}>
+        <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+        <path d="M10 9a2 2 0 1 1 3.2 1.6c-.7.5-1.2.9-1.2 1.9" />
+        <path d="M12 16h.01" />
+      </svg>
+    ),
+    blog: (
+      <svg {...commonProps}>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m16.5 16.5 4 4" />
+        <path d="M8.5 10h5" />
+        <path d="M8.5 13h3" />
+      </svg>
+    ),
+    github: (
+      <svg {...commonProps}>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="M6 8v2a4 4 0 0 0 4 4h2" />
+        <path d="M18 8v2a4 4 0 0 1-4 4h-2" />
+        <path d="M12 14v2" />
+      </svg>
+    ),
+    official: (
+      <svg {...commonProps}>
+        <path d="M4 20h16" />
+        <path d="M6 20V9l6-5 6 5v11" />
+        <path d="M9 20v-6h6v6" />
+        <path d="M9 10h.01" />
+        <path d="M15 10h.01" />
+      </svg>
+    ),
+    board: (
+      <svg {...commonProps}>
+        <rect x="5" y="4" width="14" height="16" rx="2" />
+        <path d="M9 8h6" />
+        <path d="M9 12h6" />
+        <path d="M9 16h4" />
+      </svg>
+    ),
+    comment: (
+      <svg {...commonProps}>
+        <path d="M21 14a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+        <path d="M8 9h8" />
+        <path d="M8 13h5" />
+      </svg>
+    ),
+    posts: (
+      <svg {...commonProps}>
+        <path d="M7 3h7l4 4v14H7z" />
+        <path d="M14 3v5h5" />
+        <path d="M10 13h6" />
+        <path d="M10 17h4" />
+      </svg>
+    ),
+    comments: (
+      <svg {...commonProps}>
+        <path d="M21 14a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+        <path d="M8 9h8" />
+        <path d="M8 13h5" />
+      </svg>
+    ),
+    ai: (
+      <svg {...commonProps}>
+        <path d="M12 2v4" />
+        <path d="M12 18v4" />
+        <path d="m4.93 4.93 2.83 2.83" />
+        <path d="m16.24 16.24 2.83 2.83" />
+        <path d="M2 12h4" />
+        <path d="M18 12h4" />
+        <path d="m4.93 19.07 2.83-2.83" />
+        <path d="m16.24 7.76 2.83-2.83" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+    saved: (
+      <svg {...commonProps}>
+        <path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4z" />
+        <path d="m9.5 11.5 1.7 1.7 3.8-4" />
+      </svg>
+    ),
+  };
+
+  return <span className="card-icon">{icons[name]}</span>;
+}
 
 const VIEW_PATHS: Record<Exclude<View, "edit" | "detail">, string> = {
   board: "/board",
@@ -105,37 +240,45 @@ function getBoardIdFromPath(pathname: string) {
 }
 
 const DEFAULT_TAG_OPTIONS = ["알고리즘", "프로젝트", "GitHub", "백엔드", "NestJS", "React"];
-const KNOWLEDGE_CARDS = [
-  { id: "faq", title: "FAQ Bot", description: "자주 묻는 질문 답변 모음", count: 42 },
-  { id: "blog", title: "블로그 검색", description: "정글 후기를 RAG 문서로", count: 128 },
-  { id: "github", title: "GitHub 분석", description: "GitHub 저장소 분석 자료", count: 67 },
-  { id: "board", title: "게시판 근거", description: "게시판 글과 댓글 데이터", count: 356 },
-];
-
-const SAMPLE_REFERENCES = [
+const KNOWLEDGE_CARDS: Array<{
+  id: KnowledgeId;
+  icon: KnowledgeId;
+  title: string;
+  description: string;
+  countKey: keyof KnowledgeSummary;
+  countLabel: string;
+}> = [
   {
-    title: "정글 알고리즘 완벽 가이드",
-    source: "jungle-dev.tistory.com",
-    summary: "배열 정렬부터 동적계획까지 주요 정글 알고리즘의 원리와 성능을 정리했습니다.",
-    score: "0.93",
+    id: "blog",
+    icon: "blog",
+    title: "블로그 검색",
+    description: "정글 후기와 외부 블로그 RAG 문서",
+    countKey: "blogCount",
+    countLabel: "문서",
   },
   {
-    title: "크래프톤 정글 5주차 핵심 정리",
-    source: "dev-log.kr",
-    summary: "그래프 탐색의 특징, 시간 복잡도, 구현 팁을 정리했습니다.",
-    score: "0.88",
+    id: "official",
+    icon: "official",
+    title: "공식 자료",
+    description: "크래프톤 정글 공식/전시 자료",
+    countKey: "officialCount",
+    countLabel: "문서",
   },
   {
-    title: "JavaScript로 배우는 정렬 알고리즘",
-    source: "codeandrun.dev",
-    summary: "자바스크립트 코드 예제와 함께 각 정렬 알고리즘을 설명합니다.",
-    score: "0.86",
+    id: "board",
+    icon: "board",
+    title: "게시판 근거",
+    description: "사용자가 작성한 게시판 글",
+    countKey: "boardCount",
+    countLabel: "게시글",
   },
   {
-    title: "자료구조와 함께 보는 정렬",
-    source: "algorithm-lab.com",
-    summary: "자료구조 관점에서 정렬 알고리즘을 비교 분석합니다.",
-    score: "0.83",
+    id: "comment",
+    icon: "comment",
+    title: "댓글 근거",
+    description: "게시판 댓글 데이터",
+    countKey: "commentCount",
+    countLabel: "댓글",
   },
 ];
 
@@ -226,6 +369,8 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const [editingBoardId, setEditingBoardId] = React.useState<number | null>(null);
   const [selectedBoard, setSelectedBoard] = React.useState<Board | null>(null);
   const [comments, setComments] = React.useState<Comment[]>([]);
+  const [popularTags, setPopularTags] = React.useState<PopularTag[]>([]);
+  const [recentComments, setRecentComments] = React.useState<RecentComment[]>([]);
   const [commentContent, setCommentContent] = React.useState("");
   const [keyword, setKeyword] = React.useState("");
   const [searchKeyword, setSearchKeyword] = React.useState("");
@@ -235,7 +380,18 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const [aiAnswer, setAiAnswer] = React.useState<AiAnswer | null>(null);
   const [aiError, setAiError] = React.useState("");
   const [isAiLoading, setIsAiLoading] = React.useState(false);
-  const [knowledgePreview, setKnowledgePreview] = React.useState("blog");
+  const [knowledgePreview, setKnowledgePreview] = React.useState<KnowledgeId>("official");
+  const [knowledgeSummary, setKnowledgeSummary] = React.useState<KnowledgeSummary>({
+    blogCount: 0,
+    officialCount: 0,
+    chunkCount: 0,
+    boardCount: 0,
+    commentCount: 0,
+  });
+  const [knowledgeResources, setKnowledgeResources] = React.useState<KnowledgeResource[]>([]);
+  const [knowledgeError, setKnowledgeError] = React.useState("");
+  const [isKnowledgeLoading, setIsKnowledgeLoading] = React.useState(false);
+  const [showAllKnowledgeResources, setShowAllKnowledgeResources] = React.useState(false);
 
   const limit = 10;
   const pageCount = Math.max(1, Math.ceil(total / limit));
@@ -245,14 +401,19 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     activeTag === "전체"
       ? boards
       : boards.filter((board) => getBoardTags(board).includes(activeTag));
-
+  const selectedKnowledgeCard =
+    KNOWLEDGE_CARDS.find((card) => card.id === knowledgePreview) ?? KNOWLEDGE_CARDS[0];
+  const selectedKnowledgeCount = knowledgeSummary[selectedKnowledgeCard.countKey];
+  const visibleKnowledgeResources = showAllKnowledgeResources
+    ? knowledgeResources
+    : knowledgeResources.slice(0, 5);
   const fetchBoards = React.useCallback(async () => {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
       keyword: searchKeyword,
     });
-    const response = await fetch(`http://localhost:3000/boards?${params}`);
+    const response = await fetch(apiUrl(`/boards?${params}`));
     const data = await response.json();
 
     setBoards(data.items ?? []);
@@ -260,7 +421,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }, [page, searchKeyword]);
 
   const fetchTagOptions = React.useCallback(async () => {
-    const response = await fetch("http://localhost:3000/boards/tags");
+    const response = await fetch(apiUrl("/boards/tags"));
 
     if (!response.ok) {
       return;
@@ -279,6 +440,59 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }, [fetchTagOptions]);
 
   React.useEffect(() => {
+    void Promise.resolve().then(async () => {
+      const [popularTagsResponse, recentCommentsResponse] = await Promise.all([
+        fetch(apiUrl("/boards/tags/popular")),
+        fetch(apiUrl("/comments/recent")),
+      ]);
+
+      if (popularTagsResponse.ok) {
+        setPopularTags(await popularTagsResponse.json());
+      }
+
+      if (recentCommentsResponse.ok) {
+        setRecentComments(await recentCommentsResponse.json());
+      }
+    });
+  }, []);
+
+  React.useEffect(() => {
+    void Promise.resolve().then(async () => {
+      const response = await fetch(apiUrl("/ai/knowledge/summary"));
+
+      if (!response.ok) {
+        setKnowledgeError("지식베이스 요약을 불러오지 못했습니다.");
+        return;
+      }
+
+      const data = await response.json();
+      setKnowledgeSummary(data);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    void Promise.resolve().then(async () => {
+      setIsKnowledgeLoading(true);
+      setKnowledgeError("");
+      setShowAllKnowledgeResources(false);
+
+      try {
+        const response = await fetch(apiUrl(`/ai/knowledge/resources?kind=${knowledgePreview}`));
+
+        if (!response.ok) {
+          setKnowledgeError("지식베이스 자료를 불러오지 못했습니다.");
+          return;
+        }
+
+        const data = await response.json();
+        setKnowledgeResources(data);
+      } finally {
+        setIsKnowledgeLoading(false);
+      }
+    });
+  }, [knowledgePreview]);
+
+  React.useEffect(() => {
     if (location.pathname === "/") {
       navigate("/board", { replace: true });
     }
@@ -292,7 +506,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     }
 
     void Promise.resolve().then(async () => {
-      const response = await fetch(`http://localhost:3000/boards/${boardId}`);
+      const response = await fetch(apiUrl(`/boards/${boardId}`));
 
       if (!response.ok) {
         setMessage("게시글 조회 실패");
@@ -369,7 +583,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }
 
   async function fetchComments(boardId: number) {
-    const response = await fetch(`http://localhost:3000/comments?boardId=${boardId}`);
+    const response = await fetch(apiUrl(`/comments?boardId=${boardId}`));
 
     if (!response.ok) {
       setMessage("댓글 조회 실패");
@@ -381,7 +595,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }
 
   async function handleSelectBoard(id: number) {
-    const response = await fetch(`http://localhost:3000/boards/${id}`);
+    const response = await fetch(apiUrl(`/boards/${id}`));
 
     if (!response.ok) {
       setMessage("게시글 조회 실패");
@@ -399,7 +613,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   async function handleCreateBoard(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const response = await authJsonFetch("http://localhost:3000/boards", {
+    const response = await authJsonFetch(apiUrl("/boards"), {
       method: "POST",
       body: JSON.stringify({
         title,
@@ -439,7 +653,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       return;
     }
 
-    const response = await authJsonFetch(`http://localhost:3000/boards/${editingBoardId}`, {
+    const response = await authJsonFetch(apiUrl(`/boards/${editingBoardId}`), {
       method: "PATCH",
       body: JSON.stringify({ title, content, tags: selectedTags }),
     });
@@ -461,7 +675,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       return;
     }
 
-    const response = await authJsonFetch(`http://localhost:3000/boards/${deleteTarget.id}`, {
+    const response = await authJsonFetch(apiUrl(`/boards/${deleteTarget.id}`), {
       method: "DELETE",
     });
 
@@ -482,7 +696,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       return;
     }
 
-    const response = await authJsonFetch("http://localhost:3000/comments", {
+    const response = await authJsonFetch(apiUrl("/comments"), {
       method: "POST",
       body: JSON.stringify({
         boardId: selectedBoard.id,
@@ -501,7 +715,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }
 
   async function handleDeleteComment(id: number) {
-    const response = await authJsonFetch(`http://localhost:3000/comments/${id}`, {
+    const response = await authJsonFetch(apiUrl(`/comments/${id}`), {
       method: "DELETE",
     });
 
@@ -528,7 +742,7 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
     setAiError("");
 
     try {
-      const response = await authJsonFetch("http://localhost:3000/ai/ask", {
+      const response = await authJsonFetch(apiUrl("/ai/ask"), {
         method: "POST",
         body: JSON.stringify({
           question,
@@ -589,10 +803,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
         </nav>
 
         <div className="app-user">
-          <button className="icon-button" type="button" aria-label="알림">
-            !
-          </button>
-          <span className="user-dot">J</span>
           <button className="user-name-button" type="button" onClick={onLogout}>
             {loginId}님
           </button>
@@ -718,33 +928,30 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
               <aside className="side-stack">
                 <section className="side-card">
                   <h2>인기 태그</h2>
-                  {["알고리즘", "프로젝트", "GitHub", "백엔드", "NestJS"].map((tag, index) => (
-                    <div className="rank-line" key={tag}>
-                      <span>{tag}</span>
-                      <strong>{[82, 56, 47, 41, 31][index]}</strong>
-                    </div>
-                  ))}
-                  <button type="button">더보기</button>
+                  <div className="side-list">
+                    {popularTags.map((tag) => (
+                      <div className="rank-line" key={tag.name}>
+                        <span title={tag.name}>{tag.name}</span>
+                        <strong>{tag.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  {popularTags.length === 0 && <p className="empty-text">아직 태그 데이터가 없습니다.</p>}
                 </section>
 
                 <section className="side-card">
                   <h2>최근 댓글</h2>
-                  {comments.slice(0, 3).map((comment, index) => (
-                    <div className="comment-preview" key={comment.id}>
-                      <strong>{index + 1}</strong>
-                      <span>{comment.content}</span>
-                    </div>
-                  ))}
-                  {comments.length === 0 &&
-                    ["좋은 정리 감사합니다!", "저도 이 방법 쓰는데요", "분할정복 팁 공유해주세요!"].map(
-                      (text, index) => (
-                        <div className="comment-preview" key={text}>
-                          <strong>{index + 1}</strong>
-                          <span>{text}</span>
-                        </div>
-                      ),
-                    )}
-                  <button type="button">더보기</button>
+                  <div className="side-list">
+                    {recentComments.map((comment, index) => (
+                      <div className="comment-preview" key={comment.id}>
+                        <strong>{index + 1}</strong>
+                        <span title={comment.boardTitle ? `${comment.boardTitle} · ${comment.content}` : comment.content}>
+                          {comment.content}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {recentComments.length === 0 && <p className="empty-text">아직 댓글 데이터가 없습니다.</p>}
                 </section>
               </aside>
             </div>
@@ -766,13 +973,14 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
                   maxLength={2000}
                   required
                 />
-                <small>{aiQuestion.length}/2000</small>
-
                 {aiError && <p className="error-text">{aiError}</p>}
 
-                <button className="primary-action" type="submit" disabled={isAiLoading || !aiQuestion}>
-                  {isAiLoading ? "답변 생성 중" : "질문하기"}
-                </button>
+                <div className="question-actions">
+                  <small>{aiQuestion.length}/2000</small>
+                  <button className="primary-action" type="submit" disabled={isAiLoading || !aiQuestion}>
+                    {isAiLoading ? "답변 생성 중" : "질문하기"}
+                  </button>
+                </div>
 
                 <div className="notice-box">
                   <p>AI는 지식베이스와 온라인 게시판 내용을 바탕으로 답변합니다.</p>
@@ -783,7 +991,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
               <section className="panel answer-panel">
                 <div className="panel-title-row">
                   <h1>AI 답변</h1>
-                  <span className="status-chip">완료</span>
                 </div>
                 {aiAnswer ? (
                   <>
@@ -841,9 +1048,8 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
             <div className="screen-heading">
               <div>
                 <h1>지식베이스</h1>
-                <p>AI가 답변할 때 참고하는 문서와 자료를 확인할 수 있습니다.</p>
+                <p>AI가 답변할 때 참고하는 실제 DB 자료를 확인할 수 있습니다.</p>
               </div>
-              <button type="button">지식베이스 관리</button>
             </div>
 
             <div className="knowledge-card-grid">
@@ -852,14 +1058,16 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
                   className={`knowledge-card ${knowledgePreview === card.id ? "is-selected" : ""}`}
                   key={card.id}
                 >
-                  <span className="card-icon">{card.title.slice(0, 1)}</span>
+                  <CardIconBadge name={card.icon} label={`${card.title} 아이콘`} />
                   <h2>{card.title}</h2>
                   <p>{card.description}</p>
                   <span className="status-chip">정상</span>
                   <div className="card-foot">
-                    <span>문서 {card.count}개</span>
+                    <span>
+                      {card.countLabel} {knowledgeSummary[card.countKey]}개
+                    </span>
                     <button type="button" onClick={() => setKnowledgePreview(card.id)}>
-                      미리보기
+                      자료 보기
                     </button>
                   </div>
                 </article>
@@ -868,32 +1076,56 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
 
             <section className="preview-panel">
               <div className="panel-title-row">
-                <h2>
-                  {KNOWLEDGE_CARDS.find((card) => card.id === knowledgePreview)?.title} 미리보기
-                </h2>
-                <button type="button">닫기</button>
+                <div>
+                  <h2>{selectedKnowledgeCard.title} 자료 목록</h2>
+                  <p>{selectedKnowledgeCard.description}에 포함된 참고 자료를 확인합니다.</p>
+                </div>
+                <span className="status-chip">
+                  {selectedKnowledgeCard.countLabel} {selectedKnowledgeCount}개
+                </span>
               </div>
+              {knowledgeError && <p className="error-text">{knowledgeError}</p>}
               <div className="preview-table">
                 <div className="preview-row preview-head">
                   <span>제목</span>
                   <span>출처</span>
                   <span>요약</span>
-                  <span>유사도</span>
-                  <span>작업</span>
+                  <span>상태</span>
                 </div>
-                {SAMPLE_REFERENCES.map((reference) => (
+                {isKnowledgeLoading && (
+                  <div className="preview-row">
+                    <strong>자료를 불러오는 중입니다.</strong>
+                    <span>-</span>
+                    <p>잠시만 기다려주세요.</p>
+                    <span>로딩</span>
+                  </div>
+                )}
+                {!isKnowledgeLoading && knowledgeResources.length === 0 && (
+                  <div className="preview-row">
+                    <strong>표시할 자료가 없습니다.</strong>
+                    <span>-</span>
+                    <p>현재 선택한 지식베이스에 연결된 DB 자료가 없습니다.</p>
+                    <span>비어 있음</span>
+                  </div>
+                )}
+                {!isKnowledgeLoading && visibleKnowledgeResources.map((reference) => (
                   <div className="preview-row" key={reference.title}>
                     <strong>{reference.title}</strong>
                     <span>{reference.source}</span>
                     <p>{reference.summary}</p>
-                    <span>{reference.score}</span>
-                    <button type="button" onClick={() => goToTab("ai")}>
-                      AI 질문에 사용
-                    </button>
+                    <span>{reference.status}</span>
                   </div>
                 ))}
               </div>
-              <a href="#more">더 많은 문서 보기</a>
+              {!isKnowledgeLoading && knowledgeResources.length > 5 && (
+                <button
+                  className="text-action"
+                  type="button"
+                  onClick={() => setShowAllKnowledgeResources((current) => !current)}
+                >
+                  {showAllKnowledgeResources ? "문서 접기" : "더 많은 문서 보기"}
+                </button>
+              )}
             </section>
           </section>
         )}
@@ -908,14 +1140,13 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
             </div>
 
             <div className="stat-grid">
-              {[
-                ["내가 쓴 글", myBoards.length || 24, "전체 게시글"],
-                ["내 댓글", comments.length || 87, "전체 댓글"],
-                ["AI 질문", aiAnswer ? 1 : 18, "전체 질문"],
-                ["저장한 참고 근거", 32, "전체 저장"],
-              ].map(([label, value, hint]) => (
+              {([
+                { icon: "posts", label: "내가 쓴 글", value: myBoards.length || 24, hint: "전체 게시글" },
+                { icon: "comments", label: "내 댓글", value: comments.length || 87, hint: "전체 댓글" },
+                { icon: "ai", label: "AI 질문", value: aiAnswer ? 1 : 18, hint: "전체 질문" },
+              ] satisfies StatCardData[]).map(({ icon, label, value, hint }) => (
                 <article className="stat-card" key={label}>
-                  <span className="card-icon">{String(label).slice(0, 1)}</span>
+                  <CardIconBadge name={icon} label={`${label} 아이콘`} />
                   <p>{label}</p>
                   <strong>{value}</strong>
                   <small>{hint}</small>
@@ -923,47 +1154,6 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
               ))}
             </div>
 
-            <div className="activity-layout">
-              <section className="panel">
-                <h2>최근 활동</h2>
-                {[
-                  ["AI 질문", aiAnswer?.question ?? "정렬 알고리즘 성능 비교 방법", "AI 답변 보기"],
-                  ["게시글", boards[0]?.title ?? "Docker와 Docker Compose 차이 정리", "게시글 보기"],
-                  ["댓글", comments[0]?.content ?? "댓글을 남겼습니다", "댓글 보기"],
-                  ["저장", "퀵 정렬과 병합 정렬 비교", "자료 보기"],
-                ].map(([kind, text, action]) => (
-                  <div className="timeline-item" key={`${kind}-${text}`}>
-                    <span className="timeline-dot" />
-                    <span className="tag-pill">{kind}</span>
-                    <strong>{text}</strong>
-                    <button type="button">{action}</button>
-                  </div>
-                ))}
-                <button type="button">더 많은 활동 보기</button>
-              </section>
-
-              <aside className="side-stack">
-                <section className="side-card saved-card">
-                  <h2>저장한 참고 근거</h2>
-                  {SAMPLE_REFERENCES.slice(0, 3).map((reference) => (
-                    <article className="saved-reference" key={reference.title}>
-                      <span className="tag-pill">블로그</span>
-                      <strong>{reference.title}</strong>
-                      <small>{reference.source}</small>
-                    </article>
-                  ))}
-                </section>
-                <section className="side-card quick-links">
-                  <h2>바로가기</h2>
-                  <button type="button" onClick={() => goToTab("board")}>
-                    게시판 목록
-                  </button>
-                  <button type="button" onClick={() => goToTab("ai")}>
-                    AI 질문하기
-                  </button>
-                </section>
-              </aside>
-            </div>
           </section>
         )}
 

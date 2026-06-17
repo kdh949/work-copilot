@@ -19,23 +19,14 @@ function App() {
       {loginId ? (
         <BoardPage loginId={loginId} onLogout={handleLogout} />
       ) : (
-        <>
-          {mode === "login" ? (
-            <LoginForm onLoginSuccess={setLoginId} />
-          ) : (
-            <SignUpForm />
-          )}
-
-          {mode === "login" ? (
-            <button type="button" onClick={() => setMode("signup")}>
-              회원가입
-            </button>
-          ) : (
-            <button type="button" onClick={() => setMode("login")}>
-              로그인으로 돌아가기
-            </button>
-          )}
-        </>
+        mode === "login" ? (
+          <LoginForm
+            onLoginSuccess={setLoginId}
+            onSwitchToSignUp={() => setMode("signup")}
+          />
+        ) : (
+          <SignUpForm onSwitchToLogin={() => setMode("login")} />
+        )
       )}
     </div>
   );
