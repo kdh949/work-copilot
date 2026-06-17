@@ -2,8 +2,9 @@ services:
   - type: web
     name: week15-board-ai
     runtime: python
+    repo: https://github.com/na-man-mu-303-team2/week15-16
     plan: free
-    region: singapore
+    region: oregon
     branch: dev/donghyun-backend
     autoDeploy: true
     buildCommand: cd ai-service && pip install -r requirements.txt
@@ -30,8 +31,9 @@ services:
   - type: web
     name: week15-board-api
     runtime: node
+    repo: https://github.com/na-man-mu-303-team2/week15-16
     plan: free
-    region: singapore
+    region: oregon
     branch: dev/donghyun-backend
     autoDeploy: true
     buildCommand: npm ci && npm run build
@@ -72,8 +74,8 @@ services:
 
 databases:
   - name: week15-board-db
-    databaseName: week15_board
-    user: week15_board_user
+    databaseName: board_database_780x
+    user: board_database_780x_user
     plan: free
-    region: singapore
-    postgresMajorVersion: "16"
+    region: oregon
+    postgresMajorVersion: "18"
