@@ -44,7 +44,32 @@ export class BoardsService {
     // 화면에서는 여러 태그를 배열로 보내고, 예전 코드와 호환하려고 tag 문자열도 받습니다.
     // 중복 태그와 빈 태그를 제거해서 DB에 깔끔하게 저장합니다.
     const rawTags = dto.tags?.length ? dto.tags : dto.tag ? [dto.tag] : [];
-    return [...new Set(rawTags.map((tag) => tag.trim()).filter(Boolean))];
+    return this.uniqueTagNames(rawTags);
+  }
+
+  private getTagKey(tagName: string) {
+    return tagName.trim().toLocaleLowerCase();
+  }
+
+  private uniqueTagNames(tagNames: string[]) {
+    const seen = new Set<string>();
+
+    return tagNames
+      .map((tagName) => tagName.trim())
+      .filter((tagName) => {
+        if (!tagName) {
+          return false;
+        }
+
+        const key = this.getTagKey(tagName);
+
+        if (seen.has(key)) {
+          return false;
+        }
+
+        seen.add(key);
+        return true;
+      });
   }
 
   private async findOrCreateTags(tagNames: string[]) {
@@ -53,7 +78,10 @@ export class BoardsService {
     const tags: Tag[] = [];
 
     for (const name of tagNames) {
-      let tag = await this.tagsRepository.findOneBy({ name });
+      let tag = await this.tagsRepository
+        .createQueryBuilder('tag')
+        .where('LOWER(tag.name) = LOWER(:name)', { name })
+        .getOne();
       if (!tag) {
         tag = await this.tagsRepository.save(
           this.tagsRepository.create({ name }),
@@ -68,7 +96,9 @@ export class BoardsService {
   private toBoardResponse(board: Board) {
     // 프론트가 쓰기 쉽게 tags 배열을 내려줍니다.
     // tag 문자열은 예전 화면 코드와의 호환용으로 함께 제공합니다.
-    const tagNames = board.tags?.map((tag) => tag.name) ?? [];
+    const tagNames = this.uniqueTagNames(
+      board.tags?.map((tag) => tag.name) ?? [],
+    );
     const writer = board.user?.loginId ?? board.writer;
 
     return {
@@ -85,7 +115,9 @@ export class BoardsService {
 
   private indexBoardInBackground(board: Board) {
     // 게시글 저장 직후 해당 글만 인덱싱합니다. 실패해도 게시글 저장은 유지합니다.
-    const tagNames = board.tags?.map((tag) => tag.name) ?? [];
+    const tagNames = this.uniqueTagNames(
+      board.tags?.map((tag) => tag.name) ?? [],
+    );
     const writer = board.user?.loginId ?? board.writer;
 
     void this.aiService
@@ -247,19 +279,18 @@ export class BoardsService {
     const tags = await this.tagsRepository.find({
       order: { name: 'ASC' },
     });
-    return tags.map((tag) => tag.name);
+    return this.uniqueTagNames(tags.map((tag) => tag.name));
   }
 
   async findPopularTags() {
     const rows = await this.tagsRepository
       .createQueryBuilder('tag')
       .leftJoin('tag.boards', 'board')
-      .select('tag.name', 'name')
+      .select('MIN(tag.name)', 'name')
       .addSelect('COUNT(board.id)', 'count')
-      .groupBy('tag.id')
-      .addGroupBy('tag.name')
+      .groupBy('LOWER(tag.name)')
       .orderBy('COUNT(board.id)', 'DESC')
-      .addOrderBy('tag.name', 'ASC')
+      .addOrderBy('MIN(tag.name)', 'ASC')
       .limit(5)
       .getRawMany<{ name: string; count: string }>();
 

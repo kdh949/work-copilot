@@ -288,7 +288,32 @@ function formatDateFromId(id: number) {
 }
 
 function getBoardTags(board: Board) {
-  return board.tags?.length ? board.tags : board.tag ? [board.tag] : [];
+  return uniqueTagNames(board.tags?.length ? board.tags : board.tag ? [board.tag] : []);
+}
+
+function getTagKey(tagName: string) {
+  return tagName.trim().toLocaleLowerCase();
+}
+
+function uniqueTagNames(tagNames: string[]) {
+  const seen = new Set<string>();
+
+  return tagNames
+    .map((tagName) => tagName.trim())
+    .filter((tagName) => {
+      if (!tagName) {
+        return false;
+      }
+
+      const key = getTagKey(tagName);
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
 }
 
 function renderInlineMarkdown(text: string) {
@@ -406,7 +431,9 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   const visibleBoards =
     activeTag === "전체"
       ? boards
-      : boards.filter((board) => getBoardTags(board).includes(activeTag));
+      : boards.filter((board) =>
+          getBoardTags(board).some((tagName) => getTagKey(tagName) === getTagKey(activeTag)),
+        );
   const selectedKnowledgeCard =
     KNOWLEDGE_CARDS.find((card) => card.id === knowledgePreview) ?? KNOWLEDGE_CARDS[0];
   const selectedKnowledgeCount = knowledgeSummary[selectedKnowledgeCard.countKey];
@@ -435,8 +462,8 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
 
     const data = await response.json();
     const dbTagOptions = Array.isArray(data) ? data : [];
-    setTagOptions([...new Set([...DEFAULT_TAG_OPTIONS, ...dbTagOptions])]);
-    setFilterTagOptions(dbTagOptions);
+    setTagOptions(uniqueTagNames([...DEFAULT_TAG_OPTIONS, ...dbTagOptions]));
+    setFilterTagOptions(uniqueTagNames(dbTagOptions));
   }, []);
 
   React.useEffect(() => {
@@ -448,7 +475,10 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
   }, [fetchTagOptions]);
 
   React.useEffect(() => {
-    if (activeTag !== "전체" && !filterTagOptions.includes(activeTag)) {
+    if (
+      activeTag !== "전체" &&
+      !filterTagOptions.some((tagName) => getTagKey(tagName) === getTagKey(activeTag))
+    ) {
       setActiveTag("전체");
     }
   }, [activeTag, filterTagOptions]);
@@ -619,12 +649,8 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
       return;
     }
 
-    setSelectedTags((current) =>
-      current.includes(nextTag) ? current : [...current, nextTag],
-    );
-    setTagOptions((current) =>
-      current.includes(nextTag) ? current : [...current, nextTag],
-    );
+    setSelectedTags((current) => uniqueTagNames([...current, nextTag]));
+    setTagOptions((current) => uniqueTagNames([...current, nextTag]));
     setTagDraft("");
   }
 
