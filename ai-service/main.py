@@ -41,6 +41,7 @@ class DocumentRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     department: str | None = None
+    userDepartment: str | None = None
 
 
 class OnboardingRequest(BaseModel):
@@ -105,16 +106,19 @@ def delete_document(source_id: str) -> dict[str, bool]:
 
 @app.post("/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
-    documents = search_documents(request.question, request.department)
+    department_filter = choose_department_filter(request.question, request.userDepartment or request.department)
+    documents = search_documents_for_intent(request.question, department_filter)
     answer = make_answer(
         "회사 위키 내용을 바탕으로 질문에 답변해주세요.",
         request.question,
         documents,
-        request.department,
+        department_filter,
     )
 
     return {
         "answer": answer,
+        "searchMode": "department" if department_filter else "all",
+        "department": department_filter,
         "sources": make_sources(documents),
     }
 
@@ -330,6 +334,24 @@ def search_documents(question: str, department: str | None) -> list[dict[str, An
     return search_documents_from_memory(question, department)
 
 
+def search_documents_for_intent(question: str, department: str | None) -> list[dict[str, Any]]:
+    documents = search_documents(question, department)
+
+    if department and len(documents) < 5:
+        existing_source_ids = {document["sourceId"] for document in documents}
+        fallback_documents_for_question = search_documents(question, None)
+
+        for document in fallback_documents_for_question:
+            if document["sourceId"] not in existing_source_ids:
+                documents.append(document)
+                existing_source_ids.add(document["sourceId"])
+
+            if len(documents) >= 5:
+                break
+
+    return documents[:5]
+
+
 def search_documents_from_database(question: str, department: str | None) -> list[dict[str, Any]]:
     embedding = make_vector_text(make_embedding(question))
     department_value = department or ''
@@ -401,6 +423,46 @@ def choose_tool(question: str, step: int) -> str:
         return 'get_company_holiday'
 
     return 'search_wiki'
+
+
+def choose_department_filter(question: str, user_department: str | None) -> str | None:
+    if not user_department:
+        return None
+
+    normalized_question = question.replace(" ", "").lower()
+    department_keywords = [
+        "우리부서",
+        "부서업무",
+        "업무파악",
+        "프로젝트",
+        "운영기준",
+        "로드맵",
+        "요구사항",
+        "장애",
+        "릴리즈",
+        "고객대응",
+    ]
+    common_keywords = [
+        "인사",
+        "급여",
+        "휴가",
+        "연차",
+        "공휴일",
+        "휴일",
+        "복지",
+        "계정",
+        "온보딩",
+        "입사",
+        "근태",
+    ]
+
+    if any(keyword in normalized_question for keyword in department_keywords):
+        return user_department
+
+    if any(keyword in normalized_question for keyword in common_keywords):
+        return None
+
+    return None
 
 
 def tool_search_wiki(arguments: dict[str, Any]) -> dict[str, Any]:

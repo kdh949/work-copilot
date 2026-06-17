@@ -11,6 +11,21 @@ export class Post {
     @Column({ type: 'varchar', nullable: true })
     sourceId: string | null;
 
+    @Column({ type: 'jsonb', nullable: true })
+    wikiPath: string[] | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    parentSourceId: string | null;
+
+    @Column({ type: 'int', default: 0 })
+    depth: number;
+
+    @Column({ type: 'varchar', nullable: true })
+    docType: string | null;
+
+    @Column('text', { nullable: true })
+    summary: string | null;
+
     @Column() // title 컬럼을 만든다.
     title: string;
 

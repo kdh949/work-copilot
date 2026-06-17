@@ -7,6 +7,7 @@ type JwtPayload = {
     sub: number;
     email: string;
     role: string;
+    department?: string | null;
 };
 
 export type AuthenticatedRequest = Request & {

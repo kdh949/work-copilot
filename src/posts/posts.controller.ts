@@ -38,6 +38,22 @@ export class PostsController {
         return this.postsService.findAll({ keyword, page, limit, tag, department, boardType });
     }
 
+    @Get('wiki/tree')
+    findWikiTree() {
+        return this.postsService.findWikiTree();
+    }
+
+    @Get('wiki')
+    findWikiPosts(
+        @Query('keyword') keyword?: string,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('tag') tag?: string,
+        @Query('path') path?: string | string[],
+    ) {
+        return this.postsService.findWikiPosts({ keyword, page, limit, tag, path });
+    }
+
     @UseGuards(JwtAuthGuard)
     @Get('questions/my')
     findMyQuestions(

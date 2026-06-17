@@ -16,6 +16,9 @@ export class User {
     @Column()
     nickname: string;
 
+    @Column({ type: 'varchar', nullable: true })
+    department: string | null;
+
     @Column({ type: 'varchar', unique: true, nullable: true })
     employeeNumber: string | null;
 

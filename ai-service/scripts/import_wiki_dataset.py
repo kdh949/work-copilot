@@ -36,7 +36,10 @@ REQUIRED_FIELDS = {
     "department",
     "doc_type",
     "id",
+    "parent_id",
+    "path",
     "quality_status",
+    "summary",
     "tags",
     "title",
     "updated_at",
@@ -49,6 +52,11 @@ class WikiDocument:
     title: str
     content: str
     department: str
+    wiki_path: list[str]
+    parent_source_id: str | None
+    depth: int
+    doc_type: str
+    summary: str
     tags: list[str]
     quality_status: str
     created_at: str
@@ -142,12 +150,20 @@ def load_documents(zip_path: Path) -> list[WikiDocument]:
                 seen_ids.add(source_id)
 
                 tags = normalize_tags(raw.get("tags"), raw.get("doc_type"), raw.get("quality_status"))
+                title = clean_required(raw["title"], "title", file_name, line_number)
+                content = clean_required(raw["body"], "body", file_name, line_number)
+                wiki_path = normalize_wiki_path(raw.get("path"), title, raw.get("department"))
                 documents.append(
                     WikiDocument(
                         source_id=source_id,
-                        title=clean_required(raw["title"], "title", file_name, line_number),
-                        content=clean_required(raw["body"], "body", file_name, line_number),
+                        title=title,
+                        content=content,
                         department=clean_required(raw["department"], "department", file_name, line_number),
+                        wiki_path=wiki_path,
+                        parent_source_id=normalize_optional(raw.get("parent_id")),
+                        depth=normalize_depth(raw.get("depth"), file_name, line_number),
+                        doc_type=clean_required(raw["doc_type"], "doc_type", file_name, line_number),
+                        summary=normalize_optional(raw.get("summary")) or make_summary(content),
                         tags=tags,
                         quality_status=clean_required(raw["quality_status"], "quality_status", file_name, line_number),
                         created_at=clean_required(raw["created_at"], "created_at", file_name, line_number),
@@ -179,6 +195,41 @@ def clean_required(value: Any, field: str, file_name: str, line_number: int) -> 
         fail(f"{file_name}:{line_number} field {field} is blank.")
 
     return text
+
+
+def normalize_optional(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    return text or None
+
+
+def normalize_depth(value: Any, file_name: str, line_number: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        fail(f"{file_name}:{line_number} field depth is not an integer.")
+
+
+def normalize_wiki_path(raw_path: Any, title: str, department: Any) -> list[str]:
+    if isinstance(raw_path, list):
+        path = [str(segment).strip() for segment in raw_path if str(segment).strip()]
+    else:
+        path = []
+
+    if path and path[-1] == title:
+        path = path[:-1]
+
+    if path:
+        return path
+
+    department_text = str(department or "공통").strip() or "공통"
+    return [department_text]
+
+
+def make_summary(content: str) -> str:
+    return " ".join(content.split())[:220]
 
 
 def normalize_tags(raw_tags: Any, doc_type: Any, quality_status: Any) -> list[str]:
@@ -309,6 +360,12 @@ def prepare_database(connection: Any) -> None:
         """
     )
     connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "sourceId" character varying')
+    connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "wikiPath" jsonb')
+    connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "parentSourceId" character varying')
+    connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "depth" integer DEFAULT 0')
+    connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "docType" character varying')
+    connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "summary" text')
+    connection.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS department character varying')
     connection.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS "IDX_post_source_id_unique"
@@ -318,6 +375,7 @@ def prepare_database(connection: Any) -> None:
     )
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_post_board_type" ON "post" ("boardType")')
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_post_department" ON "post" ("department")')
+    connection.execute('CREATE INDEX IF NOT EXISTS "IDX_post_wiki_path" ON "post" USING gin ("wikiPath")')
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_wiki_documents_department" ON wiki_documents (department)')
     connection.execute(
         """
@@ -339,11 +397,12 @@ def ensure_author(connection: Any) -> int:
 
     row = connection.execute(
         """
-        INSERT INTO users (email, password, nickname, "employeeNumber", role, "createdAt", "updatedAt")
-        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+        INSERT INTO users (email, password, nickname, department, "employeeNumber", role, "createdAt", "updatedAt")
+        VALUES (%s, %s, %s, '공통', %s, %s, NOW(), NOW())
         ON CONFLICT (email)
         DO UPDATE SET
             nickname = EXCLUDED.nickname,
+            department = COALESCE(users.department, EXCLUDED.department),
             role = EXCLUDED.role,
             "updatedAt" = NOW()
         RETURNING id
@@ -370,11 +429,17 @@ def upsert_document(connection: Any, author_id: int, document: WikiDocument, emb
     connection.execute(
         """
         INSERT INTO "post" (
-            "sourceId", title, content, "boardType", department, tags, "authorId", "createdAt", "updatedAt"
+            "sourceId", "wikiPath", "parentSourceId", depth, "docType", summary,
+            title, content, "boardType", department, tags, "authorId", "createdAt", "updatedAt"
         )
-        VALUES (%s, %s, %s, 'wiki', %s, %s, %s, %s::timestamp, %s::timestamp)
+        VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s, 'wiki', %s, %s, %s, %s::timestamp, %s::timestamp)
         ON CONFLICT ("sourceId") WHERE "sourceId" IS NOT NULL
         DO UPDATE SET
+            "wikiPath" = EXCLUDED."wikiPath",
+            "parentSourceId" = EXCLUDED."parentSourceId",
+            depth = EXCLUDED.depth,
+            "docType" = EXCLUDED."docType",
+            summary = EXCLUDED.summary,
             title = EXCLUDED.title,
             content = EXCLUDED.content,
             "boardType" = EXCLUDED."boardType",
@@ -386,6 +451,11 @@ def upsert_document(connection: Any, author_id: int, document: WikiDocument, emb
         """,
         (
             document.source_id,
+            json.dumps(document.wiki_path, ensure_ascii=False),
+            document.parent_source_id,
+            document.depth,
+            document.doc_type,
+            document.summary,
             document.title,
             document.content,
             document.department,

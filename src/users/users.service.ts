@@ -7,6 +7,7 @@ type CreateUserInput = {
     email: string;
     password: string;
     nickname: string;
+    department: string;
     employeeNumber: string;
     role?: string;
 };
@@ -68,6 +69,7 @@ export class UsersService {
             email: input.email,
             password: input.password,
             nickname: input.nickname,
+            department: input.department,
             employeeNumber: input.employeeNumber,
             role: input.role || 'employee',
         });

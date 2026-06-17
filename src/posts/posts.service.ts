@@ -24,12 +24,27 @@ type FindAllPostsOptions = {
     includeQuestions?: boolean;
 };
 
+type FindWikiPostsOptions = {
+    keyword?: string;
+    page?: string;
+    limit?: string;
+    tag?: string;
+    path?: string | string[];
+};
+
 type PagedPostsResponse = {
     items: Post[];
     total: number;
     page: number;
     limit: number;
     totalPages: number;
+};
+
+type WikiTreeNode = {
+    path: string[];
+    name: string;
+    depth: number;
+    documentCount: number;
 };
 
 @Injectable()
@@ -105,6 +120,112 @@ export class PostsService {
         };
     }
 
+    async findWikiTree(): Promise<WikiTreeNode[]> {
+        const posts = await this.postRepository
+            .createQueryBuilder('post')
+            .select([
+                'post.id',
+                'post.title',
+                'post.department',
+                'post.wikiPath',
+            ])
+            .where('post.boardType = :boardType', { boardType: 'wiki' })
+            .getMany();
+
+        const nodeMap = new Map<string, WikiTreeNode>();
+
+        for (const post of posts) {
+            const categoryPath = this.getPostCategoryPath(post);
+
+            for (let index = 0; index < categoryPath.length; index += 1) {
+                const path = categoryPath.slice(0, index + 1);
+                const key = this.getPathKey(path);
+                const existingNode = nodeMap.get(key);
+
+                if (existingNode) {
+                    existingNode.documentCount += 1;
+                    continue;
+                }
+
+                nodeMap.set(key, {
+                    path,
+                    name: path[path.length - 1],
+                    depth: path.length - 1,
+                    documentCount: 1,
+                });
+            }
+        }
+
+        return [...nodeMap.values()].sort((left, right) => {
+            const leftKey = this.getPathKey(left.path);
+            const rightKey = this.getPathKey(right.path);
+
+            return leftKey.localeCompare(rightKey, 'ko');
+        });
+    }
+
+    async findWikiPosts(options: FindWikiPostsOptions): Promise<PagedPostsResponse> {
+        const page = this.toNumber(options.page, 1);
+        const limit = this.toNumber(options.limit, 20);
+        const path = this.normalizePathQuery(options.path);
+
+        const query = this.postRepository
+            .createQueryBuilder('post')
+            .leftJoin('post.author', 'author')
+            .select([
+                'post.id',
+                'post.sourceId',
+                'post.wikiPath',
+                'post.parentSourceId',
+                'post.depth',
+                'post.docType',
+                'post.summary',
+                'post.title',
+                'post.boardType',
+                'post.department',
+                'post.tags',
+                'post.createdAt',
+                'post.updatedAt',
+                'author.id',
+                'author.email',
+                'author.nickname',
+                'author.department',
+                'author.employeeNumber',
+                'author.role',
+                'author.createdAt',
+                'author.updatedAt',
+            ])
+            .where('post.boardType = :boardType', { boardType: 'wiki' })
+            .orderBy('post.createdAt', 'DESC')
+            .addOrderBy('post.id', 'DESC')
+            .skip((page - 1) * limit)
+            .take(limit);
+
+        if (options.keyword) {
+            query.andWhere('(post.title ILIKE :keyword OR post.content ILIKE :keyword OR "post"."summary" ILIKE :keyword)', {
+                keyword: `%${options.keyword}%`,
+            });
+        }
+
+        if (options.tag) {
+            query.andWhere('post.tags ILIKE :tag', {
+                tag: `%${options.tag}%`,
+            });
+        }
+
+        this.applyWikiPathFilter(query, path);
+
+        const [items, total] = await query.getManyAndCount();
+
+        return {
+            items,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+        };
+    }
+
     async findOne(id: number, userId?: number): Promise<Post> {
         const post = await this.postRepository.findOne({
             where: { id },
@@ -136,6 +257,11 @@ export class PostsService {
             content: createPostDto.content,
             boardType: 'wiki',
             department: this.normalizeDepartment(createPostDto.department),
+            wikiPath: [this.normalizeDepartment(createPostDto.department)],
+            parentSourceId: null,
+            depth: 0,
+            docType: '수동 문서',
+            summary: this.makeSummary(createPostDto.content),
             tags: this.normalizeTags(createPostDto.tags),
             author,
         });
@@ -178,9 +304,13 @@ export class PostsService {
         }
         if (updatePostDto.department) {
             post.department = this.normalizeDepartment(updatePostDto.department);
+            post.wikiPath = [post.department];
         }
         if (updatePostDto.tags) {
             post.tags = this.normalizeTags(updatePostDto.tags);
+        }
+        if (updatePostDto.content) {
+            post.summary = this.makeSummary(post.content);
         }
 
         const savedPost = await this.postRepository.save(post);
@@ -307,6 +437,71 @@ export class PostsService {
         }
 
         return department.trim() || '공통';
+    }
+
+    private normalizePathQuery(path?: string | string[]): string[] {
+        if (!path) {
+            return [];
+        }
+
+        const values = Array.isArray(path) ? path : [path];
+
+        return values
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0);
+    }
+
+    private applyWikiPathFilter(query: ReturnType<Repository<Post>['createQueryBuilder']>, path: string[]): void {
+        if (path.length === 0) {
+            return;
+        }
+
+        const pathConditions = [
+            '"post"."wikiPath" IS NOT NULL',
+            'jsonb_array_length("post"."wikiPath") >= :wikiPathLength',
+        ];
+        const parameters: Record<string, string | number> = {
+            wikiPathLength: path.length,
+        };
+
+        path.forEach((segment, index) => {
+            const parameterName = `wikiPath${index}`;
+            pathConditions.push(`"post"."wikiPath" ->> ${index} = :${parameterName}`);
+            parameters[parameterName] = segment;
+        });
+
+        if (path.length === 1) {
+            query.andWhere(
+                `((${pathConditions.join(' AND ')}) OR ("post"."wikiPath" IS NULL AND "post"."department" = :fallbackDepartment))`,
+                {
+                    ...parameters,
+                    fallbackDepartment: path[0],
+                },
+            );
+            return;
+        }
+
+        query.andWhere(pathConditions.join(' AND '), parameters);
+    }
+
+    private getPostCategoryPath(post: Post): string[] {
+        const path = post.wikiPath && post.wikiPath.length > 0
+            ? [...post.wikiPath]
+            : [this.normalizeDepartment(post.department)];
+
+        if (path.length > 1 && path[path.length - 1] === post.title) {
+            path.pop();
+        }
+
+        return path.length > 0 ? path : ['공통'];
+    }
+
+    private getPathKey(path: string[]): string {
+        return path.join('\u001f');
+    }
+
+    private makeSummary(content: string): string {
+        return content.replace(/\s+/g, ' ').trim().slice(0, 220);
     }
 
     private toNumber(value: string | undefined, defaultValue: number): number {

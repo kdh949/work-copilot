@@ -9,6 +9,7 @@ type SignupResponse = {
     id: number;
     email: string;
     nickname: string;
+    department: string | null;
     employeeNumber: string | null;
     role: string;
     createdAt: Date;
@@ -22,6 +23,7 @@ type MeResponse = {
     id: number;
     email: string;
     nickname: string;
+    department: string | null;
     employeeNumber: string | null;
     role: string;
 };
@@ -42,6 +44,7 @@ export class AuthService {
             email: signupDto.email,
             password: hashedPassword,
             nickname: signupDto.nickname,
+            department: signupDto.department,
             employeeNumber: signupDto.employeeNumber,
             role,
         });
@@ -50,6 +53,7 @@ export class AuthService {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            department: user.department,
             employeeNumber: user.employeeNumber,
             role: user.role,
             createdAt: user.createdAt,
@@ -74,6 +78,7 @@ export class AuthService {
             sub: user.id,
             email: user.email,
             role: user.role,
+            department: user.department,
         };
 
         const accessToken = await this.jwtService.signAsync(payload);
@@ -94,6 +99,7 @@ export class AuthService {
             id: user.id,
             email: user.email,
             nickname: user.nickname,
+            department: user.department,
             employeeNumber: user.employeeNumber,
             role: user.role,
         };
