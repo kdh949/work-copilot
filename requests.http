@@ -1,314 +1,163 @@
-### Health Check
-GET http://localhost:3000/health
+### 회원가입
+POST http://localhost:3000/auth/signup
+Content-Type: application/json
 
-### 게시글 목록 조회
-GET http://localhost:3000/posts
+{
+  "email": "newbie@example.com",
+  "password": "12345678",
+  "nickname": "신입사원"
+}
 
-### 게시글 검색
-GET http://localhost:3000/posts?keyword=첫
+### 로그인
+# @name login
+POST http://localhost:3000/auth/login
+Content-Type: application/json
 
-### 게시글 상세 조회
-GET http://localhost:3000/posts/1
+{
+  "email": "newbie@example.com",
+  "password": "12345678"
+}
+
+> {%
+    client.global.set("accessToken", response.body.accessToken);
+%}
+
+### 내 정보
+GET http://localhost:3000/auth/me
+Authorization: Bearer {{accessToken}}
 
 ### 게시글 생성
 POST http://localhost:3000/posts
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "title": "새 게시글",
-  "content": "새 게시글 내용입니다."
+  "title": "인사팀 온보딩 안내",
+  "content": "입사 첫날에는 근로계약서, 보안 서약서, 급여 계좌 등록을 먼저 완료합니다.",
+  "department": "인사",
+  "tags": ["온보딩", "급여", "인사"]
 }
 
-### 게시글 수정
-PATCH http://localhost:3000/posts/1
-Content-Type: application/json
+### 게시글 목록, 페이징, 검색
+GET http://localhost:3000/posts?page=1&limit=5&keyword=급여&department=인사&tag=온보딩
 
-{
-  "title": "수정된 제목"
-}
-
-### 게시글 삭제
-DELETE http://localhost:3000/posts/1
-
-### 게시글 생성 - 정상
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": "DTO 테스트",
-  "content": "Validation Pipe를 적용했습니다."
-}
-
-### 게시글 생성 - 잘못된 타입
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": 123,
-  "content": true
-}
-
-### 게시글 생성 - 빈 문자열
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": "",
-  "content": ""
-}
-
-### 게시글 생성 - 허용되지 않은 속성
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": "제목",
-  "content": "내용",
-  "isAdmin": true
-}
-
-### 게시글 수정 - 정상
-PATCH http://localhost:3000/posts/1
-Content-Type: application/json
-
-{
-  "title": "수정된 제목"
-}
-
-### 게시글 상세 조회 - 존재하지 않는 id
-GET http://localhost:3000/posts/999
-
-### 게시글 상세 조회 - 잘못된 id 타입
-GET http://localhost:3000/posts/abc
-
-### 게시글 수정 - 존재하지 않는 id
-PATCH http://localhost:3000/posts/999
-Content-Type: application/json
-
-{
-  "title": "없는 글 수정"
-}
-
-### 게시글 삭제 - 존재하지 않는 id
-DELETE http://localhost:3000/posts/999
-
-### 게시글 생성 1
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": "DB 저장 테스트",
-  "content": "이제 PostgreSQL에 저장됩니다."
-}
-
-### 게시글 생성 2
-POST http://localhost:3000/posts
-Content-Type: application/json
-
-{
-  "title": "TypeORM 시작",
-  "content": "Repository로 CRUD를 구현합니다."
-}
-
-### 게시글 목록 조회
-GET http://localhost:3000/posts
-
-### 게시글 검색
-GET http://localhost:3000/posts?keyword=typeorm
-
-### 게시글 상세 조회
+### 게시글 상세
 GET http://localhost:3000/posts/1
 
 ### 게시글 수정
 PATCH http://localhost:3000/posts/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "title": "수정된 DB 게시글"
+  "title": "인사팀 온보딩 안내 수정",
+  "tags": ["온보딩", "급여", "계약"]
 }
 
-### 게시글 삭제
-DELETE http://localhost:3000/posts/1703
-
-
-
-
-
-
-
-### 회원가입 - 정상
-POST http://localhost:3000/auth/signup
+### 댓글 작성
+POST http://localhost:3000/posts/1/comments
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
-  "password": "12345678",
-  "nickname": "정글러"
+  "content": "급여 계좌 등록 위치도 추가하면 좋겠습니다."
 }
 
-### 회원가입 - 잘못된 이메일
-POST http://localhost:3000/auth/signup
+### 댓글 수정
+PATCH http://localhost:3000/posts/1/comments/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "not-email",
-  "password": "12345678",
-  "nickname": "정글러"
+  "content": "급여 계좌 등록 메뉴 위치도 추가하면 좋겠습니다."
 }
 
-### 회원가입 - 짧은 비밀번호
-POST http://localhost:3000/auth/signup
+### 댓글 삭제
+DELETE http://localhost:3000/posts/1/comments/1
+Authorization: Bearer {{accessToken}}
+
+### 내 질문 노트 생성 - AI가 댓글로 답변
+POST http://localhost:3000/posts/questions
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "short@example.com",
-  "password": "1234",
-  "nickname": "정글러"
+  "title": "입사 첫날 급여 계좌는 어디서 등록하나요?",
+  "content": "인사팀 온보딩 문서를 봤는데 급여 계좌 등록 메뉴 위치가 헷갈립니다.",
+  "department": "인사",
+  "tags": ["급여", "온보딩", "질문"]
 }
 
-### 회원가입 - 중복 이메일
-POST http://localhost:3000/auth/signup
+### 내 질문 노트 목록
+GET http://localhost:3000/posts/questions/my?page=1&limit=5&keyword=급여
+Authorization: Bearer {{accessToken}}
+
+### RAG 챗봇
+POST http://localhost:3000/ai/chat
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
-  "password": "12345678",
-  "nickname": "다른닉네임"
+  "question": "입사 첫날 무엇부터 해야 하나요?",
+  "department": "인사"
 }
 
-
-### 로그인 - 정상
-POST http://localhost:3000/auth/login
+### 온보딩 추천
+POST http://localhost:3000/ai/onboarding
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
-  "password": "12345678"
+  "department": "인사",
+  "employeeName": "신입사원"
 }
 
-### 로그인 - 없는 이메일
-POST http://localhost:3000/auth/login
+### 강의안 생성
+POST http://localhost:3000/ai/lecture
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "none@example.com",
-  "password": "12345678"
+  "department": "인사",
+  "employeeName": "신입사원"
 }
 
-### 로그인 - 틀린 비밀번호
-POST http://localhost:3000/auth/login
+### Agent 실행
+POST http://localhost:3000/ai/agent
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
-  "password": "wrongpassword"
+  "question": "온보딩 중 휴일과 급여 관련해서 확인할 내용을 알려줘",
+  "department": "인사"
 }
 
-### 로그인 - 잘못된 이메일 형식
-POST http://localhost:3000/auth/login
+### FastAPI MCP tools/list
+POST http://localhost:8000/mcp
 Content-Type: application/json
+X-API-Key: local-mcp-key
 
 {
-  "email": "not-email",
-  "password": "12345678"
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
 }
 
-### 로그인 - 정상
-POST http://localhost:3000/auth/login
+### FastAPI MCP tools/call
+POST http://localhost:8000/mcp
 Content-Type: application/json
+X-API-Key: local-mcp-key
 
 {
-  "email": "test@example.com",
-  "password": "12345678"
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "get_company_holiday",
+    "arguments": {
+      "country": "KR",
+      "year": 2026
+    }
+  }
 }
-
-### 내 정보 조회 - 정상
-GET http://localhost:3000/auth/me
-Authorization: Bearer abc
-
-
-### 내 정보 조회 - 토큰 없음
-GET http://localhost:3000/auth/me
-
-#### 게시글 생성 - 인증 필요
-#POST http://localhost:3000/posts
-#Authorization: Bearer {{login.response.body.accessToken}}
-#Content-Type: application/json
-#
-#{
-#  "title": "인증된 사용자의 글",
-#  "content": "JWT에서 작성자를 결정합니다."
-#}
-
-### 회원가입 - user1
-POST http://localhost:3000/auth/signup
-Content-Type: application/json
-
-{
-  "email": "user1@example.com",
-  "password": "12345678",
-  "nickname": "유저1"
-}
-
-### 회원가입 - user2
-POST http://localhost:3000/auth/signup
-Content-Type: application/json
-
-{
-  "email": "user2@example.com",
-  "password": "12345678",
-  "nickname": "유저2"
-}
-
-### 로그인 - user1
-# @name loginUser1
-POST http://localhost:3000/auth/login
-Content-Type: application/json
-
-{
-  "email": "user1@example.com",
-  "password": "12345678"
-}
-
-### 로그인 - user2
-# @name loginUser2
-POST http://localhost:3000/auth/login
-Content-Type: application/json
-
-{
-  "email": "user2@example.com",
-  "password": "12345678"
-}
-
-### user1 게시글 작성
-# @name createPostByUser1
-POST http://localhost:3000/posts
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsImVtYWlsIjoidXNlcjFAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU0MDMsImV4cCI6MTc4MTUyOTAwM30.mH_DshaS1SPlZTdFUBaC2a7xOuHhfMMKcBl_KHGRPlY
-Content-Type: application/json
-
-{
-  "title": "user1의 게시글",
-  "content": "이 글은 user1이 작성했습니다."
-}
-
-### user1이 자기 글 수정 - 성공
-PATCH http://localhost:3000/posts/1709834
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8
-Content-Type: application/json
-
-{
-  "title": "user1이 수정한 제목"
-}
-
-### user2가 user1 글 수정 - 실패
-PATCH http://localhost:3000/posts/1709834
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8
-Content-Type: application/json
-
-{
-  "title": "user2가 몰래 수정 시도"
-}
-
-### user2가 user1 글 삭제 - 실패
-DELETE http://localhost:3000/posts/1709834
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjMsImVtYWlsIjoidXNlcjJAZXhhbXBsZS5jb20iLCJpYXQiOjE3ODE1MjU1NDMsImV4cCI6MTc4MTUyOTE0M30.LhRShLQzYhq6tbE2kpzkyHbXRzqt5QtZ5Hk8vXhMAH8

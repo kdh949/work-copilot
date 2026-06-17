@@ -5,6 +5,11 @@ import { ValidationPipe } from "@nestjs/common";
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 
+    app.enableCors({
+        origin: true,
+        credentials: true,
+    });
+
     app.useGlobalPipes(
         new ValidationPipe({
             whitelist: true, // DTO에 없는 속성은 제거

@@ -48,7 +48,7 @@ export class AuthService {
     }
 
     async login(loginDto: LoginDto): Promise<LoginResponse> {
-        const user = await this.usersService.findByEmail(loginDto.email);
+        const user = await this.usersService.findByEmailWithPassword(loginDto.email);
 
         if (!user) {
             throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');

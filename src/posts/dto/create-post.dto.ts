@@ -1,4 +1,4 @@
-import {IsNotEmpty, IsString} from "class-validator";
+import { IsArray, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class CreatePostDto {
     @IsString()
@@ -8,4 +8,13 @@ export class CreatePostDto {
     @IsString()
     @IsNotEmpty()
     content: string;
+
+    @IsString()
+    @IsOptional()
+    department?: string;
+
+    @IsArray()
+    @IsString({ each: true })
+    @IsOptional()
+    tags?: string[];
 }
