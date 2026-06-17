@@ -79,15 +79,26 @@ jobs:
             > task-definition.json
 
           jq '
-            del(
-              .taskDefinitionArn,
-              .revision,
-              .status,
-              .requiresAttributes,
-              .compatibilities,
-              .registeredAt,
-              .registeredBy
-            )
+            {
+              family,
+              taskRoleArn,
+              executionRoleArn,
+              networkMode,
+              containerDefinitions,
+              volumes,
+              placementConstraints,
+              requiresCompatibilities,
+              cpu,
+              memory,
+              tags,
+              pidMode,
+              ipcMode,
+              proxyConfiguration,
+              inferenceAccelerators,
+              ephemeralStorage,
+              runtimePlatform
+            }
+            | with_entries(select(.value != null))
             | .containerDefinitions |= map(
                 .environment = ((.environment // []) | map(
                   if .name == "GITHUB_TOKEN" then .value = "" else . end
