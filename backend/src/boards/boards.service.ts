@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Tag } from './entities/tag.entity';
+import { AiService } from '../ai/ai.service';
 
 type JwtPayload = {
   sub: number;
@@ -27,6 +28,7 @@ export class BoardsService {
     @InjectRepository(Tag)
     private readonly tagsRepository: Repository<Tag>,
     private readonly jwtService: JwtService,
+    private readonly aiService: AiService,
   ) {}
 
   // 토큰에서 loginId 꺼내는 함수
@@ -54,7 +56,9 @@ export class BoardsService {
     for (const name of tagNames) {
       let tag = await this.tagsRepository.findOneBy({ name });
       if (!tag) {
-        tag = await this.tagsRepository.save(this.tagsRepository.create({ name }));
+        tag = await this.tagsRepository.save(
+          this.tagsRepository.create({ name }),
+        );
       }
       tags.push(tag);
     }
@@ -73,9 +77,27 @@ export class BoardsService {
     };
   }
 
+  private indexBoardInBackground(board: Board) {
+    // 게시글 저장 직후 해당 글만 인덱싱합니다. 실패해도 게시글 저장은 유지합니다.
+    const tagNames = board.tags?.map((tag) => tag.name) ?? [];
+    void this.aiService
+      .indexBoardDocument({
+        id: board.id,
+        title: board.title,
+        content: board.content,
+        writer: board.writer,
+        tags: tagNames,
+      })
+      .catch((error: unknown) => {
+        console.warn(`[board-index] failed: ${String(error)}`);
+      });
+  }
+
   async create(createBoardDto: CreateBoardDto) {
     // 요청으로 받은 태그 이름들을 실제 Tag 엔티티 목록으로 바꿉니다.
-    const tags = await this.findOrCreateTags(this.normalizeTagNames(createBoardDto));
+    const tags = await this.findOrCreateTags(
+      this.normalizeTagNames(createBoardDto),
+    );
     const board = this.boardsRepository.create({
       title: createBoardDto.title,
       content: createBoardDto.content,
@@ -83,6 +105,7 @@ export class BoardsService {
       tags,
     });
     const saved = await this.boardsRepository.save(board);
+    this.indexBoardInBackground(saved);
     return this.toBoardResponse(saved);
   }
 
@@ -163,10 +186,13 @@ export class BoardsService {
     }
     if (updateBoardDto.tags !== undefined || updateBoardDto.tag !== undefined) {
       // 수정 요청에 태그가 있으면 게시글의 태그 목록을 통째로 새로 맞춥니다.
-      board.tags = await this.findOrCreateTags(this.normalizeTagNames(updateBoardDto));
+      board.tags = await this.findOrCreateTags(
+        this.normalizeTagNames(updateBoardDto),
+      );
     }
 
     const saved = await this.boardsRepository.save(board);
+    this.indexBoardInBackground(saved);
     return this.toBoardResponse(saved);
   }
 
@@ -195,5 +221,24 @@ export class BoardsService {
       order: { name: 'ASC' },
     });
     return tags.map((tag) => tag.name);
+  }
+
+  async findPopularTags() {
+    const rows = await this.tagsRepository
+      .createQueryBuilder('tag')
+      .leftJoin('tag.boards', 'board')
+      .select('tag.name', 'name')
+      .addSelect('COUNT(board.id)', 'count')
+      .groupBy('tag.id')
+      .addGroupBy('tag.name')
+      .orderBy('COUNT(board.id)', 'DESC')
+      .addOrderBy('tag.name', 'ASC')
+      .limit(5)
+      .getRawMany<{ name: string; count: string }>();
+
+    return rows.map((row) => ({
+      name: row.name,
+      count: Number(row.count),
+    }));
   }
 }

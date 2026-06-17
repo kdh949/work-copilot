@@ -54,6 +54,11 @@ export class BoardsController {
     return this.boardsService.findTags();
   }
 
+  @Get('tags/popular')
+  findPopularTags() {
+    return this.boardsService.findPopularTags();
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.boardsService.findOne(id);

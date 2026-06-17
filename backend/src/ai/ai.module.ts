@@ -7,5 +7,6 @@ import { AiService } from './ai.service';
   controllers: [AiController],
   // FastAPI AI 서버를 호출하는 일을 담당합니다.
   providers: [AiService],
+  exports: [AiService],
 })
 export class AiModule {}

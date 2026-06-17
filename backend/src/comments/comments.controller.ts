@@ -15,6 +15,11 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 export class CommentsController {
   constructor(private readonly commentsService: CommentsService) {}
 
+  @Get('recent')
+  findRecent() {
+    return this.commentsService.findRecent();
+  }
+
   @Get()
   findByBoardId(@Query('boardId', ParseIntPipe) boardId: number) {
     return this.commentsService.findByBoardId(boardId);

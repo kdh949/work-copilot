@@ -8,11 +8,13 @@ import { Tag } from './entities/tag.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import type { StringValue } from 'ms';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
     // Board와 Tag 저장소를 BoardsService에서 쓸 수 있게 등록합니다.
     TypeOrmModule.forFeature([Board, Tag]),
+    AiModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

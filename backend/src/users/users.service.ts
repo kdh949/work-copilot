@@ -41,7 +41,10 @@ export class UsersService {
   }
   // Todo
   update(id: number, updateUserDto: UpdateUserDto) {
-    return `This action updates a #${id} user`;
+    return {
+      message: `This action updates a #${id} user`,
+      changes: updateUserDto,
+    };
   }
 
   remove(id: number) {
