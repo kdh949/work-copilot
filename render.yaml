@@ -20,10 +20,7 @@ services:
           name: my-jg-mentor-db
           property: connectionString
       - key: AI_SERVER_URL
-        fromService:
-          type: web
-          name: my-jg-mentor-ai-server
-          property: host
+        value: https://my-jg-mentor-ai-server.onrender.com
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
