@@ -1,0 +1,79 @@
+services:
+  - type: web
+    name: week15-board-ai
+    runtime: python
+    plan: free
+    region: singapore
+    branch: dev/donghyun-backend
+    autoDeploy: true
+    buildCommand: cd ai-service && pip install -r requirements.txt
+    startCommand: cd ai-service && uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: week15-board-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: MCP_API_KEY
+        sync: false
+      - key: HOLIDAY_COUNTRY
+        value: KR
+      - key: HOLIDAY_API_URL
+        value: https://date.nager.at/api/v3/PublicHolidays
+
+  - type: web
+    name: week15-board-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: dev/donghyun-backend
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: week15-board-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: week15-board-db
+          property: port
+      - key: DB_USERNAME
+        fromDatabase:
+          name: week15-board-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: week15-board-db
+          property: password
+      - key: DB_DATABASE
+        fromDatabase:
+          name: week15-board-db
+          property: database
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 1h
+      - key: AI_SERVICE_URL
+        fromService:
+          type: web
+          name: week15-board-ai
+          property: host
+
+databases:
+  - name: week15-board-db
+    databaseName: week15_board
+    user: week15_board_user
+    plan: free
+    region: singapore
+    postgresMajorVersion: "16"

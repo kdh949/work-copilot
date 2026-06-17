@@ -84,6 +84,12 @@ export class AiService {
     }
 
     private getAiUrl(): string {
-        return this.configService.get<string>('AI_SERVICE_URL') || 'http://localhost:8000';
+        const aiUrl = this.configService.get<string>('AI_SERVICE_URL') || 'http://localhost:8000';
+
+        if (aiUrl.startsWith('http')) {
+            return aiUrl;
+        }
+
+        return `https://${aiUrl}`;
     }
 }
