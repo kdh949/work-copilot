@@ -1029,14 +1029,29 @@ export const BoardPage = ({ loginId, onLogout }: BoardPageProps) => {
                           reference.snippet ??
                           reference.summary ??
                           "근거 내용을 불러왔습니다.";
-
-                        return (
-                          <article className="reference-mini" key={`${reference.title ?? index}`}>
+                        const referenceContent = (
+                          <>
                             <span className="tag-pill">{reference.type ?? reference.category ?? "블로그"}</span>
                             <strong>{reference.title ?? "참고 문서"}</strong>
                             <small>{sourceUrl ?? "지식베이스"}</small>
                             <p>{body}</p>
                             {typeof reference.score === "number" && <em>유사도 {reference.score.toFixed(2)}</em>}
+                          </>
+                        );
+
+                        return sourceUrl ? (
+                          <a
+                            className="reference-mini"
+                            href={sourceUrl}
+                            key={`${reference.title ?? index}`}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {referenceContent}
+                          </a>
+                        ) : (
+                          <article className="reference-mini" key={`${reference.title ?? index}`}>
+                            {referenceContent}
                           </article>
                         );
                       })}
