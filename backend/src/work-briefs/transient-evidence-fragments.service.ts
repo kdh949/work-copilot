@@ -1,10 +1,16 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { WorkBriefContentGuard } from './work-brief-content-guard.service';
 import { TransientEvidenceCryptoService } from './transient-evidence-crypto.service';
 import { TransientEvidenceFragment } from './entities/transient-evidence-fragment.entity';
+import { CleanupHealthService } from '../operations/cleanup-health.service';
 
 const MAX_TTL_SECONDS = 24 * 60 * 60;
 
@@ -25,6 +31,7 @@ export class TransientEvidenceFragmentsService
     private readonly configService: ConfigService,
     private readonly cryptoService: TransientEvidenceCryptoService,
     private readonly contentGuard: WorkBriefContentGuard,
+    @Optional() private readonly cleanupHealth?: CleanupHealthService,
   ) {}
 
   onModuleInit(): void {
@@ -86,11 +93,16 @@ export class TransientEvidenceFragmentsService
 
   async purgeExpired(): Promise<void> {
     try {
-      await this.fragmentsRepository.delete({
+      const result = await this.fragmentsRepository.delete({
         expiresAt: LessThanOrEqual(new Date()),
       });
+      this.cleanupHealth?.recordSuccess(
+        'transient_evidence',
+        result.affected ?? 0,
+      );
     } catch {
       // Purges never include evidence data in errors or logs.
+      this.cleanupHealth?.recordFailure('transient_evidence');
     }
   }
 

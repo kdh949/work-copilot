@@ -155,6 +155,13 @@ describe('IntegrationProfilesService', () => {
     expect(auditEvents.map((event) => event.action)).toContain(
       'INTEGRATION_PROFILE_ACTIVATED',
     );
+
+    const deactivated = await service.deactivate(second.id, 7, 'corr-5');
+    expect(deactivated.isActive).toBe(false);
+    expect(profiles.filter((profile) => profile.isActive)).toHaveLength(0);
+    expect(auditEvents.map((event) => event.action)).toContain(
+      'INTEGRATION_PROFILE_DEACTIVATED',
+    );
   });
 
   it('rejects broad or empty scope and resource allowlists before they are stored', async () => {
@@ -206,5 +213,86 @@ describe('IntegrationProfilesService', () => {
         'corr-7',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rotates a profile-specific webhook route secret without returning it or writing it to audit metadata', async () => {
+    const now = new Date('2026-08-02T00:00:00.000Z');
+    const profile = {
+      id: '11111111-1111-4111-8111-111111111111',
+      jiraBaseUrl: 'https://jira.example.test',
+      confluenceBaseUrl: 'https://confluence.example.test',
+      jiraClientId: 'jira-client',
+      confluenceClientId: 'confluence-client',
+      jiraClientSecretCiphertext: 'jira-ciphertext',
+      confluenceClientSecretCiphertext: 'confluence-ciphertext',
+      webhookRouteSecretCiphertext: null,
+      encryptionKeyVersion: 1,
+      allowedProjectKeys: ['ENG'],
+      allowedSpaceKeys: ['ENG'],
+      briefParentPageId: 'parent-1',
+      policy: { oauthScopes: { jira: ['READ'], confluence: ['READ'] } },
+      isActive: false,
+      createdAt: now,
+      updatedAt: now,
+    } as IntegrationProfile;
+    const auditEvents: SecurityAuditEvent[] = [];
+    const profileQuery = {
+      addSelect: jest.fn(),
+      where: jest.fn(),
+      getOne: jest.fn(() => Promise.resolve(profile)),
+    };
+    profileQuery.addSelect.mockReturnValue(profileQuery);
+    profileQuery.where.mockReturnValue(profileQuery);
+    const manager = {
+      getRepository: jest.fn(() => ({
+        createQueryBuilder: jest.fn(() => profileQuery),
+      })),
+      create: jest.fn(<T>(_entity: unknown, value: T) => value),
+      save: jest.fn((value: IntegrationProfile | SecurityAuditEvent) => {
+        if ('action' in value) {
+          auditEvents.push(value);
+        }
+        return Promise.resolve(value);
+      }),
+    } as unknown as EntityManager;
+    const dataSource = {
+      transaction: jest.fn(
+        (operation: (transactionManager: EntityManager) => unknown) =>
+          operation(manager),
+      ),
+    } as unknown as DataSource;
+    const routeSecret = 'rotating-route-secret-1234';
+    const service = new IntegrationProfilesService(
+      {} as Repository<IntegrationProfile>,
+      { manager } as Repository<SecurityAuditEvent>,
+      dataSource,
+      {} as ConfigService,
+      {
+        encrypt: jest.fn(() => ({
+          ciphertext: 'webhook-ciphertext',
+          iv: 'iv',
+          authenticationTag: 'tag',
+          keyVersion: 1,
+        })),
+      } as unknown as IntegrationProfileCryptoService,
+      {} as IntegrationProfileUrlPolicy,
+      {} as IntegrationProfileConnectionTestService,
+    );
+
+    const response = await service.rotateWebhookRouteSecret(
+      profile.id,
+      { webhookRouteSecret: routeSecret },
+      7,
+      'webhook-correlation-1',
+    );
+
+    expect(response.webhookRouteSecretConfigured).toBe(true);
+    expect(response).not.toHaveProperty('webhookRouteSecret');
+    expect(JSON.stringify(auditEvents)).not.toContain(routeSecret);
+    expect(auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'WEBHOOK_ROUTE_SECRET_ROTATED' }),
+      ]),
+    );
   });
 });

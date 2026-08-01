@@ -1,5 +1,10 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { WorkCopilotMetricsService } from '../operations/work-copilot-metrics.service';
 import {
   WorkBriefContentGuard,
   type WorkBriefEvidenceInput,
@@ -19,12 +24,14 @@ export class WorkBriefAiClientService {
   constructor(
     private readonly configService: ConfigService,
     private readonly contentGuard: WorkBriefContentGuard,
+    @Optional() private readonly metrics?: WorkCopilotMetricsService,
   ) {}
 
   async generate(
     instruction: string,
     evidence: readonly WorkBriefEvidenceInput[],
   ): Promise<WorkBriefOutput> {
+    const startedAt = Date.now();
     this.contentGuard.assertSafeRequest(instruction, evidence);
 
     let response: Response;
@@ -35,12 +42,14 @@ export class WorkBriefAiClientService {
         body: JSON.stringify({ instruction, evidence }),
       });
     } catch {
+      this.recordDuration('generate', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief AI service is unavailable.',
       );
     }
 
     if (!response.ok) {
+      this.recordDuration('generate', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief AI service is unavailable.',
       );
@@ -61,8 +70,10 @@ export class WorkBriefAiClientService {
       if (!this.hasOnlyRequestedEvidence(payload, evidence)) {
         throw new Error('invalid work brief evidence');
       }
+      this.recordDuration('generate', 'success', startedAt);
       return payload;
     } catch {
+      this.recordDuration('generate', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief AI service is unavailable.',
       );
@@ -70,6 +81,7 @@ export class WorkBriefAiClientService {
   }
 
   async sanitize(values: readonly string[]): Promise<string[]> {
+    const startedAt = Date.now();
     this.contentGuard.assertSafeModelOutput(values);
 
     let response: Response;
@@ -80,12 +92,14 @@ export class WorkBriefAiClientService {
         body: JSON.stringify({ values }),
       });
     } catch {
+      this.recordDuration('sanitize', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief DLP service is unavailable.',
       );
     }
 
     if (!response.ok) {
+      this.recordDuration('sanitize', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief DLP service is unavailable.',
       );
@@ -97,8 +111,10 @@ export class WorkBriefAiClientService {
         throw new Error('invalid work brief DLP response');
       }
       this.contentGuard.assertSafeModelOutput(payload.values);
+      this.recordDuration('sanitize', 'success', startedAt);
       return payload.values;
     } catch {
+      this.recordDuration('sanitize', 'failure', startedAt);
       throw new ServiceUnavailableException(
         'Work brief DLP service is unavailable.',
       );
@@ -110,6 +126,18 @@ export class WorkBriefAiClientService {
       this.configService.get<string>('AI_SERVICE_URL') ||
       'http://localhost:8000';
     return configured.startsWith('http') ? configured : `https://${configured}`;
+  }
+
+  private recordDuration(
+    operation: 'generate' | 'sanitize',
+    outcome: 'success' | 'failure',
+    startedAt: number,
+  ): void {
+    this.metrics?.observeDuration(
+      'work_brief_ai_duration_ms',
+      { operation, outcome },
+      Date.now() - startedAt,
+    );
   }
 
   private getAiHeaders(): Record<string, string> {

@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   Injectable,
+  Optional,
   PayloadTooLargeException,
 } from '@nestjs/common';
+import { WorkCopilotMetricsService } from '../operations/work-copilot-metrics.service';
 
 export type WorkBriefEvidenceInput = {
   evidenceId: string;
@@ -25,6 +27,10 @@ export class WorkBriefContentGuard {
   static readonly MAX_EVIDENCE_CHARS = 8_000;
   static readonly MAX_TOTAL_EVIDENCE_CHARS = 64_000;
   static readonly MAX_INSTRUCTION_CHARS = 2_000;
+
+  constructor(
+    @Optional() private readonly metrics?: WorkCopilotMetricsService,
+  ) {}
 
   assertSafeRequest(
     instruction: string,
@@ -72,6 +78,9 @@ export class WorkBriefContentGuard {
 
   private assertNoSecret(value: string): void {
     if (SECRET_PATTERNS.some((pattern) => pattern.test(value))) {
+      this.metrics?.increment('work_brief_dlp_block_total', {
+        outcome: 'blocked',
+      });
       throw new BadRequestException('Sensitive content cannot be processed.');
     }
   }

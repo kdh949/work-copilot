@@ -45,6 +45,9 @@ export class BriefPublication {
   @Column({ type: 'varchar', length: 16, default: 'mock' })
   executionMode: PublicationExecutionMode;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  reviewRequiredAt: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

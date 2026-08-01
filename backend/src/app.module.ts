@@ -12,6 +12,8 @@ import { IntegrationProfilesModule } from './integrations/profiles/integration-p
 import { IntegrationsOAuthModule } from './integrations/oauth/integrations-oauth.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { WorkBriefsModule } from './work-briefs/work-briefs.module';
+import { OperationsModule } from './operations/operations.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   // 부품 조립 박스라고 생각
@@ -35,7 +37,9 @@ import { WorkBriefsModule } from './work-briefs/work-briefs.module';
     IntegrationProfilesModule,
     IntegrationsOAuthModule,
     WorkItemsModule,
+    OperationsModule,
     WorkBriefsModule,
+    WebhooksModule,
   ],
   controllers: [AppController], // 이 모듈은 AppController를 사용하고,
   providers: [AppService], // AppService를 주입 가능한 서비스로 등록한다.

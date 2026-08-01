@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreateIntegrationProfileDto } from './dto/create-integration-profile.dto';
+import { RotateWebhookRouteSecretDto } from './dto/rotate-webhook-route-secret.dto';
 import { UpdateIntegrationProfileDto } from './dto/update-integration-profile.dto';
 import {
   ChildTaskTemplate,
@@ -43,6 +44,7 @@ export type IntegrationProfileResponse = {
   confluenceClientId: string;
   jiraClientSecretConfigured: boolean;
   confluenceClientSecretConfigured: boolean;
+  webhookRouteSecretConfigured: boolean;
   jiraScopes: string[];
   confluenceScopes: string[];
   allowedProjectKeys: string[];
@@ -75,6 +77,7 @@ export class IntegrationProfilesService {
       .addSelect([
         'profile.jiraClientSecretCiphertext',
         'profile.confluenceClientSecretCiphertext',
+        'profile.webhookRouteSecretCiphertext',
       ])
       .orderBy('profile.createdAt', 'DESC')
       .getMany();
@@ -170,6 +173,66 @@ export class IntegrationProfilesService {
       );
 
       return this.toResponse(profile);
+    });
+  }
+
+  async deactivate(
+    id: string,
+    actorUserId: number,
+    correlationId: string,
+  ): Promise<IntegrationProfileResponse> {
+    return this.dataSource.transaction(async (manager) => {
+      const profile = await this.findProfile(manager, id);
+      const result = await manager.update(
+        IntegrationProfile,
+        { id: profile.id },
+        { isActive: false },
+      );
+      if (result.affected !== 1) {
+        throw new NotFoundException('Integration profile was not found.');
+      }
+
+      profile.isActive = false;
+      await this.writeAudit(
+        manager,
+        actorUserId,
+        'INTEGRATION_PROFILE_DEACTIVATED',
+        profile.id,
+        correlationId,
+        'DEACTIVATED',
+      );
+
+      return this.toResponse(profile);
+    });
+  }
+
+  async rotateWebhookRouteSecret(
+    id: string,
+    dto: RotateWebhookRouteSecretDto,
+    actorUserId: number,
+    correlationId: string,
+  ): Promise<IntegrationProfileResponse> {
+    const secret = this.cryptoService.encrypt(
+      this.normalizeSecret(dto.webhookRouteSecret),
+    );
+
+    return this.dataSource.transaction(async (manager) => {
+      const profile = await this.findProfile(manager, id);
+      Object.assign(profile, this.webhookSecretColumns(secret), {
+        encryptionKeyVersion: secret.keyVersion,
+      });
+      const savedProfile = await manager.save(profile);
+
+      await this.writeAudit(
+        manager,
+        actorUserId,
+        'WEBHOOK_ROUTE_SECRET_ROTATED',
+        savedProfile.id,
+        correlationId,
+        'ROTATED',
+      );
+
+      return this.toResponse(savedProfile);
     });
   }
 
@@ -405,6 +468,16 @@ export class IntegrationProfilesService {
     };
   }
 
+  private webhookSecretColumns(
+    secret: EncryptedProfileSecret,
+  ): Partial<IntegrationProfile> {
+    return {
+      webhookRouteSecretCiphertext: secret.ciphertext,
+      webhookRouteSecretIv: secret.iv,
+      webhookRouteSecretTag: secret.authenticationTag,
+    };
+  }
+
   private normalizeClientId(value: string): string {
     const normalized = value.trim();
 
@@ -605,6 +678,7 @@ export class IntegrationProfilesService {
       .addSelect([
         'profile.jiraClientSecretCiphertext',
         'profile.confluenceClientSecretCiphertext',
+        'profile.webhookRouteSecretCiphertext',
       ])
       .where('profile.id = :id', { id })
       .getOne();
@@ -649,6 +723,9 @@ export class IntegrationProfilesService {
       jiraClientSecretConfigured: Boolean(profile.jiraClientSecretCiphertext),
       confluenceClientSecretConfigured: Boolean(
         profile.confluenceClientSecretCiphertext,
+      ),
+      webhookRouteSecretConfigured: Boolean(
+        profile.webhookRouteSecretCiphertext,
       ),
       jiraScopes: scopes.jira,
       confluenceScopes: scopes.confluence,

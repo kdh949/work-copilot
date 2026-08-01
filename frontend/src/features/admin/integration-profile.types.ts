@@ -6,6 +6,7 @@ export type IntegrationProfile = {
   confluenceClientId: string;
   jiraClientSecretConfigured: boolean;
   confluenceClientSecretConfigured: boolean;
+  webhookRouteSecretConfigured: boolean;
   jiraScopes: string[];
   confluenceScopes: string[];
   allowedProjectKeys: string[];
@@ -51,3 +52,32 @@ export type IntegrationConnectionTest = {
 };
 
 export type ApiRequest = <T>(path: string, options?: RequestInit) => Promise<T>;
+
+export type WorkCopilotMetric = {
+  name: string;
+  labels: Record<string, string | undefined>;
+  count: number;
+  averageDurationMs?: number;
+};
+
+export type WorkCopilotOperationsHealth = {
+  webhook: {
+    mode: "shadow" | "manual_refresh";
+    ingressVerified: boolean;
+    allowedCidrCount: number;
+    lastReceivedAt: string | null;
+    ingressRejectionCount: number;
+  };
+  cleanup: {
+    status: "pending" | "healthy" | "degraded";
+    maxAgeSeconds: number;
+    jobs: Array<{
+      job: "transient_evidence" | "source_change_events";
+      status: "pending" | "healthy" | "degraded";
+      lastAttemptAt: string | null;
+      lastSuccessAt: string | null;
+      lastDeletedCount: number;
+    }>;
+  };
+  metrics: WorkCopilotMetric[];
+};

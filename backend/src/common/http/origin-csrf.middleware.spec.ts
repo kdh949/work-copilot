@@ -5,9 +5,11 @@ import { OriginCsrfMiddleware } from './origin-csrf.middleware';
 const requestFor = (
   method: string,
   headers: Record<string, string> = {},
+  path = '/',
 ): Request =>
   ({
     method,
+    path,
     header: (name: string) => headers[name.toLowerCase()],
   }) as unknown as Request;
 
@@ -61,6 +63,18 @@ describe('OriginCsrfMiddleware', () => {
     const next = jest.fn() as NextFunction;
 
     middleware.use(requestFor('GET'), response, next);
+
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('leaves only the dedicated webhook path to its route-secret ingress boundary', () => {
+    const next = jest.fn() as NextFunction;
+
+    middleware.use(
+      requestFor('POST', {}, '/webhooks/profile-id/jira'),
+      response,
+      next,
+    );
 
     expect(next).toHaveBeenCalledWith();
   });
