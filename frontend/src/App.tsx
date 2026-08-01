@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
+import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -1480,6 +1481,10 @@ function App() {
         )}
 
         {menu === "workBriefs" && user && <WorkBriefsPage request={request} />}
+
+        {menu === "integrations" && user && (
+          <IntegrationConnectionsPage request={request} />
+        )}
 
         {menu === "notes" && (
           <section className="wiki-layout">
