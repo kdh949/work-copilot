@@ -30,6 +30,10 @@ services:
         value: hybrid-chunks
       - key: RAG_MIN_CONFIDENCE
         value: "0"
+      - key: OPENAI_INPUT_COST_PER_1M
+        value: "0.15"
+      - key: OPENAI_OUTPUT_COST_PER_1M
+        value: "0.60"
       - key: MCP_API_KEY
         sync: false
       - key: HOLIDAY_COUNTRY
