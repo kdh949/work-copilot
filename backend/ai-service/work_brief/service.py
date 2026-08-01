@@ -38,6 +38,10 @@ class WorkBriefGenerateRequest(BaseModel):
     evidence: list[WorkBriefEvidence] = Field(default_factory=list)
 
 
+class WorkBriefSanitizeRequest(BaseModel):
+    values: list[str] = Field(default_factory=list, max_length=100)
+
+
 class WorkBriefOutput(BaseModel):
     title: str
     summary: str
@@ -105,6 +109,17 @@ def generate_work_brief(request: WorkBriefGenerateRequest) -> dict[str, Any]:
         raise WorkBriefError("Sensitive model output cannot be used.") from error
 
     return model_output
+
+
+def sanitize_work_brief_values(request: WorkBriefSanitizeRequest) -> dict[str, list[str]]:
+    if not request.values or any(len(value) > MAX_OUTPUT_TEXT_CHARS for value in request.values):
+        raise WorkBriefError("Work brief content is invalid.")
+    try:
+        redactor = KoreanPiiRedactor(load_safe_custom_rules(os.getenv("WORK_BRIEF_DLP_RULES_JSON")))
+        context = redactor.new_context()
+        return {"values": [redactor.sanitize(value, context) for value in request.values]}
+    except (DlpBlockedError, DlpConfigurationError) as error:
+        raise WorkBriefError("Sensitive content cannot be processed.") from error
 
 
 def _assert_request_bounds(request: WorkBriefGenerateRequest) -> None:

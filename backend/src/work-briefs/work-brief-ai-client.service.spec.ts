@@ -78,4 +78,25 @@ describe('WorkBriefAiClientService', () => {
       ]),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
+
+  it('uses the isolated DLP endpoint to sanitize an edited draft', async () => {
+    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ values: ['담당자 [EMAIL_1]'] }),
+    });
+    global.fetch = fetchMock;
+    const service = new WorkBriefAiClientService(
+      configService as never,
+      contentGuard as never,
+    );
+
+    await expect(
+      service.sanitize(['담당자 user@example.com']),
+    ).resolves.toEqual(['담당자 [EMAIL_1]']);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://ai-service.test/work-brief/sanitize',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });

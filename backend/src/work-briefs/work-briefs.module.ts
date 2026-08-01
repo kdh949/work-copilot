@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { WorkItemsModule } from '../work-items/work-items.module';
 import { TransientEvidenceFragment } from './entities/transient-evidence-fragment.entity';
+import { WorkBriefDraft } from './entities/work-brief-draft.entity';
+import { BriefCitationValidatorService } from './brief-citation-validator.service';
 import { TransientEvidenceCryptoService } from './transient-evidence-crypto.service';
 import { TransientEvidenceFragmentsService } from './transient-evidence-fragments.service';
 import { WorkBriefAiClientService } from './work-brief-ai-client.service';
@@ -10,10 +13,15 @@ import { WorkBriefsController } from './work-briefs.controller';
 import { WorkBriefsService } from './work-briefs.service';
 
 @Module({
-  imports: [AuthModule, TypeOrmModule.forFeature([TransientEvidenceFragment])],
+  imports: [
+    AuthModule,
+    WorkItemsModule,
+    TypeOrmModule.forFeature([TransientEvidenceFragment, WorkBriefDraft]),
+  ],
   controllers: [WorkBriefsController],
   providers: [
     WorkBriefContentGuard,
+    BriefCitationValidatorService,
     TransientEvidenceCryptoService,
     TransientEvidenceFragmentsService,
     WorkBriefAiClientService,

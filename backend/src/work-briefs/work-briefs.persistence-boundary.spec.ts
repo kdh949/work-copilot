@@ -11,11 +11,19 @@ describe('work brief persistence boundary', () => {
       join(__dirname, 'work-brief-ai-client.service.ts'),
       'utf8',
     );
+    const serviceSource = readFileSync(
+      join(__dirname, 'work-briefs.service.ts'),
+      'utf8',
+    );
 
     expect(moduleSource).not.toMatch(
       /PostsModule|AiModule|AiSyncService|AiService/,
     );
     expect(clientSource).not.toMatch(/\/documents|pgvector|wiki_document/);
     expect(clientSource).toContain('/work-brief/generate');
+    expect(serviceSource).toContain('collectIssueDraftContext');
+    expect(serviceSource).not.toMatch(
+      /createIssue|createSubtask|remoteLink|transitionIssue|Confluence/,
+    );
   });
 });
