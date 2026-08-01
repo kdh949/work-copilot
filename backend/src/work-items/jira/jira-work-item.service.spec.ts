@@ -128,4 +128,73 @@ describe('JiraWorkItemService', () => {
     expect(assertAllowedProject).toHaveBeenCalledWith(profile, 'HR');
     expect(getAccessToken).not.toHaveBeenCalled();
   });
+
+  it('collects every allowlisted linked issue returned by Jira without an arbitrary truncation', async () => {
+    const linkedKeys = Array.from(
+      { length: 11 },
+      (_, index) => `ENG-${index + 2}`,
+    );
+    const manyLinksRoot = {
+      ...rootIssue,
+      fields: {
+        ...rootIssue.fields,
+        issuelinks: linkedKeys.map((key) => ({ outwardIssue: { key } })),
+      },
+    };
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedProject: jest.fn(
+        (_profile: IntegrationProfile, projectKey: string) => {
+          if (projectKey !== 'ENG') {
+            throw new ForbiddenException();
+          }
+
+          return projectKey;
+        },
+      ),
+      providerBaseUrl: jest.fn(() => profile.jiraBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'jira', path: string) =>
+          new URL(path, profile.jiraBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const readClient = {
+      getJson: jest.fn((url: URL) => {
+        const issueKey = decodeURIComponent(
+          url.pathname.split('/').at(-1) ?? '',
+        );
+
+        if (issueKey === 'ENG-1') {
+          return Promise.resolve({
+            status: 'ok' as const,
+            body: manyLinksRoot,
+          });
+        }
+
+        const sourceId = issueKey.slice('ENG-'.length);
+        return Promise.resolve({
+          status: 'ok' as const,
+          body: {
+            ...linkedIssue,
+            id: sourceId,
+            key: issueKey,
+            fields: {
+              ...linkedIssue.fields,
+              summary: `Linked issue ${sourceId}`,
+            },
+          },
+        });
+      }),
+    } as unknown as AtlassianReadClientService;
+    const service = new JiraWorkItemService(accessPolicy, readClient, {
+      getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+    } as unknown as IntegrationsOAuthService);
+
+    const result = await service.collectIssueEvidence(1, 'ENG-1', 'corr-a');
+
+    expect(result.evidence).toHaveLength(12);
+    expect(result.evidence.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['jira:100', 'jira:2', 'jira:12']),
+    );
+  });
 });
