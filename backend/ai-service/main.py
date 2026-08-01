@@ -473,7 +473,11 @@ def search_documents_from_database(
     if get_retrieval_mode() == 'document-vector':
         return search_documents_from_database_baseline(question, preferred_department, access)
 
-    documents = search_documents_from_database_hybrid(question, preferred_department, access)
+    try:
+        documents = search_documents_from_database_hybrid(question, preferred_department, access)
+    except Exception:
+        # 배포 직후 청크 백필 전에도 기존 전체 문서 기준선으로 응답을 유지한다.
+        return search_documents_from_database_baseline(question, preferred_department, access)
 
     if documents:
         return documents
