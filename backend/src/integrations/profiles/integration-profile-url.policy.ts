@@ -66,11 +66,7 @@ export class IntegrationProfileUrlPolicy {
     const base = new URL(this.normalizeBaseUrl(baseUrl));
     const url = new URL(path.replace(/^\/+/, ''), base);
 
-    if (url.origin !== base.origin) {
-      throw new BadRequestException('Integration provider URL is invalid.');
-    }
-
-    return url;
+    return this.assertProviderRequestUrl(url.toString(), baseUrl);
   }
 
   assertProviderEndpoint(urlValue: string, baseUrl: string): URL {
@@ -80,15 +76,21 @@ export class IntegrationProfileUrlPolicy {
       'Integration provider URL is invalid.',
     );
 
-    if (url.origin !== base.origin) {
-      throw new BadRequestException('Integration provider URL is invalid.');
-    }
+    return this.assertWithinProviderBase(url, base);
+  }
 
-    return url;
+  assertProviderRequestUrl(urlValue: string, baseUrl: string): URL {
+    const base = new URL(this.normalizeBaseUrl(baseUrl));
+    const url = this.parseHttpsRequestUrl(
+      urlValue,
+      'Integration provider URL is invalid.',
+    );
+
+    return this.assertWithinProviderBase(url, base);
   }
 
   async assertSafeRequestUrl(url: URL, baseUrl: string): Promise<URL> {
-    const safeUrl = this.assertProviderEndpoint(url.toString(), baseUrl);
+    const safeUrl = this.assertProviderRequestUrl(url.toString(), baseUrl);
     const addresses = await lookup(safeUrl.hostname, {
       all: true,
       verbatim: true,
@@ -124,6 +126,36 @@ export class IntegrationProfileUrlPolicy {
       (url.port && url.port !== '443')
     ) {
       throw new BadRequestException(message);
+    }
+
+    return url;
+  }
+
+  private parseHttpsRequestUrl(value: string, message: string): URL {
+    let url: URL;
+
+    try {
+      url = new URL(value.trim());
+    } catch {
+      throw new BadRequestException(message);
+    }
+
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      (url.port && url.port !== '443')
+    ) {
+      throw new BadRequestException(message);
+    }
+
+    return url;
+  }
+
+  private assertWithinProviderBase(url: URL, base: URL): URL {
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) {
+      throw new BadRequestException('Integration provider URL is invalid.');
     }
 
     return url;

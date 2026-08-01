@@ -78,4 +78,25 @@ describe('IntegrationProfileUrlPolicy', () => {
       ),
     ).resolves.toMatchObject({ hostname: 'jira.example.test' });
   });
+
+  it('allows query strings only for requests inside the configured provider base path', () => {
+    const policy = makePolicy({
+      INTEGRATION_BASE_URL_HOST_ALLOWLIST: 'jira.example.test',
+    });
+    const baseUrl = 'https://jira.example.test/jira';
+
+    expect(
+      policy
+        .providerUrl(baseUrl, 'rest/api/2/issue/ENG-1?fields=summary%2Cproject')
+        .toString(),
+    ).toBe(
+      'https://jira.example.test/jira/rest/api/2/issue/ENG-1?fields=summary%2Cproject',
+    );
+    expect(() =>
+      policy.assertProviderRequestUrl(
+        'https://jira.example.test/rest/api/2/issue/ENG-1?fields=summary',
+        baseUrl,
+      ),
+    ).toThrow(BadRequestException);
+  });
 });
