@@ -9,7 +9,6 @@ import {
 import { IntegrationAccessPolicyService } from '../integration-access-policy.service';
 import type { IntegrationProfile } from '../../integrations/profiles/entities/integration-profile.entity';
 
-const MAX_LINKED_ISSUES = 10;
 const ISSUE_KEY_PATTERN = /^([A-Z][A-Z0-9_]{0,31})-([1-9][0-9]*)$/;
 
 @Injectable()
@@ -42,7 +41,7 @@ export class JiraWorkItemService {
     const evidence = [this.normalizeIssue(profile, root.body)];
     const linkedKeys = this.linkedIssueKeys(root.body);
 
-    for (const linkedKey of linkedKeys.slice(0, MAX_LINKED_ISSUES)) {
+    for (const linkedKey of linkedKeys) {
       if (!profile.allowedProjectKeys.includes(this.projectKey(linkedKey))) {
         continue;
       }
