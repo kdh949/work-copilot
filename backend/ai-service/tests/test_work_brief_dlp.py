@@ -15,7 +15,9 @@ from work_brief.dlp import (
 from work_brief.service import (
     WorkBriefError,
     WorkBriefGenerateRequest,
+    WorkBriefSanitizeRequest,
     generate_work_brief,
+    sanitize_work_brief_values,
 )
 
 
@@ -124,6 +126,15 @@ class WorkBriefGenerationTests(unittest.TestCase):
                 result = generate_work_brief(self.request("user@example.com의 요구사항"))
 
         self.assertEqual(result["title"], "[EMAIL_1]에 공유")
+
+    def test_sanitizes_user_edited_text_without_an_openai_request(self) -> None:
+        with patch("work_brief.service.requests.post") as post:
+            result = sanitize_work_brief_values(WorkBriefSanitizeRequest(
+                values=["담당자 user@example.com", "010-1234-5678로 연락"],
+            ))
+
+        self.assertEqual(result["values"], ["담당자 [EMAIL_1]", "[PHONE_1]로 연락"])
+        post.assert_not_called()
 
     def test_rejects_unverified_model_evidence_ids(self) -> None:
         output = {

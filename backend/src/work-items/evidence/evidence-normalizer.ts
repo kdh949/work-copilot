@@ -93,14 +93,18 @@ const safeUrl = (value: string): string => {
 };
 
 const excerptLength = (value: unknown): number =>
-  plainText(value).slice(0, MAX_EXCERPT_LENGTH).length;
+  toTransientPlainText(value, MAX_EXCERPT_LENGTH).length;
 
-const plainText = (value: unknown): string =>
+export const toTransientPlainText = (
+  value: unknown,
+  maximum = MAX_EXCERPT_LENGTH,
+): string =>
   textParts(value, 0)
     .join(' ')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    .slice(0, maximum);
 
 const textParts = (value: unknown, depth: number): string[] => {
   if (depth > 24 || value === null || value === undefined) {

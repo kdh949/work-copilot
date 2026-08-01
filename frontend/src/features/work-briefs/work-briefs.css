@@ -1,0 +1,143 @@
+.work-brief-page,
+.work-brief-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.work-brief-intro h1,
+.work-brief-intro p,
+.work-brief-draft-header h2,
+.work-brief-draft-header p {
+  margin-top: 0;
+}
+
+.work-brief-intro > p:last-child,
+.work-brief-draft-header p {
+  color: #64748b;
+}
+
+.work-brief-source-form,
+.work-brief-citation-editor,
+.work-brief-list-editor,
+.work-brief-child-task {
+  display: grid;
+  gap: 10px;
+}
+
+.work-brief-inline-form,
+.work-brief-draft-header,
+.work-brief-section-heading,
+.work-brief-evidence-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.work-brief-inline-form input {
+  flex: 1;
+}
+
+.work-brief-draft-header,
+.work-brief-section-heading {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.work-brief-evidence-list {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-brief-evidence-list li {
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.work-brief-evidence-list li > div {
+  flex: 1;
+}
+
+.work-brief-evidence-list a {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.work-brief-evidence-list p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.work-brief-ai-excluded,
+.work-brief-blocker {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.work-brief-citation-editor,
+.work-brief-list-editor,
+.work-brief-child-task,
+.work-brief-access-limited {
+  padding: 16px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.work-brief-citation-editor h3,
+.work-brief-list-editor h3 {
+  margin: 0;
+}
+
+.work-brief-citation-editor fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+}
+
+.work-brief-citation-editor fieldset label,
+.work-brief-child-task > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 500;
+}
+
+.work-brief-citation-editor input[type="checkbox"],
+.work-brief-child-task input[type="checkbox"],
+.work-brief-evidence-list input[type="checkbox"] {
+  width: auto;
+}
+
+.work-brief-list-item {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.work-brief-save-note {
+  align-self: center;
+  color: #64748b;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .work-brief-inline-form,
+  .work-brief-draft-header,
+  .work-brief-section-heading,
+  .work-brief-evidence-list li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

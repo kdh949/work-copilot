@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
+import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const CHAT_SUGGESTIONS = [
@@ -184,7 +185,13 @@ function App() {
       const errorMessage = Array.isArray(data.message)
         ? data.message.join(", ")
         : data.message;
-      throw new Error(errorMessage || "요청 처리에 실패했습니다.");
+      const error = new Error(
+        errorMessage || "요청 처리에 실패했습니다.",
+      ) as Error & {
+        status?: number;
+      };
+      error.status = response.status;
+      throw error;
     }
 
     return data as T;
@@ -1362,6 +1369,8 @@ function App() {
         {menu === "admin" && user?.role === "admin" && (
           <IntegrationProfilesPage request={request} />
         )}
+
+        {menu === "workBriefs" && user && <WorkBriefsPage request={request} />}
 
         {menu === "notes" && (
           <section className="wiki-layout">

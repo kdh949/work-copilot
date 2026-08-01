@@ -5,11 +5,27 @@ import {
   type EvidenceCollectionResponse,
   type NormalizedEvidence,
   normalizeEvidence,
+  toTransientPlainText,
 } from '../evidence/evidence-normalizer';
 import { IntegrationAccessPolicyService } from '../integration-access-policy.service';
 import type { IntegrationProfile } from '../../integrations/profiles/entities/integration-profile.entity';
 
 const ISSUE_KEY_PATTERN = /^([A-Z][A-Z0-9_]{0,31})-([1-9][0-9]*)$/;
+const MAX_TRANSIENT_EVIDENCE_CHARS = 8_000;
+
+export type TransientJiraDraftEvidence = {
+  evidence: NormalizedEvidence;
+  content: string;
+};
+
+export type JiraDraftContext = {
+  accessStatus: EvidenceCollectionResponse['accessStatus'];
+  profileId: string | null;
+  sourceJiraId: string | null;
+  sourceJiraKey: string;
+  sourceJiraVersion: string | null;
+  evidence: TransientJiraDraftEvidence[];
+};
 
 @Injectable()
 export class JiraWorkItemService {
@@ -24,6 +40,23 @@ export class JiraWorkItemService {
     issueKeyValue: string,
     correlationId: string,
   ): Promise<EvidenceCollectionResponse> {
+    const context = await this.collectIssueDraftContext(
+      userId,
+      issueKeyValue,
+      correlationId,
+    );
+
+    return {
+      accessStatus: context.accessStatus,
+      evidence: context.evidence.map((item) => item.evidence),
+    };
+  }
+
+  async collectIssueDraftContext(
+    userId: number,
+    issueKeyValue: string,
+    correlationId: string,
+  ): Promise<JiraDraftContext> {
     const issueKey = this.issueKey(issueKeyValue);
     const profile = await this.accessPolicy.activeProfile();
     this.accessPolicy.assertAllowedProject(profile, this.projectKey(issueKey));
@@ -35,10 +68,18 @@ export class JiraWorkItemService {
     const root = await this.readIssue(profile, accessToken, issueKey);
 
     if (root.status !== 'ok') {
-      return { accessStatus: root.status, evidence: [] };
+      return {
+        accessStatus: root.status,
+        profileId: null,
+        sourceJiraId: null,
+        sourceJiraKey: issueKey,
+        sourceJiraVersion: null,
+        evidence: [],
+      };
     }
 
-    const evidence = [this.normalizeIssue(profile, root.body)];
+    const rootEvidence = this.toTransientDraftEvidence(profile, root.body);
+    const evidence = [rootEvidence];
     const linkedKeys = this.linkedIssueKeys(root.body);
 
     for (const linkedKey of linkedKeys) {
@@ -52,14 +93,23 @@ export class JiraWorkItemService {
         continue;
       }
 
-      const normalized = this.normalizeIssue(profile, linked.body);
+      const normalized = this.toTransientDraftEvidence(profile, linked.body);
 
-      if (!evidence.some((item) => item.id === normalized.id)) {
+      if (
+        !evidence.some((item) => item.evidence.id === normalized.evidence.id)
+      ) {
         evidence.push(normalized);
       }
     }
 
-    return { accessStatus: 'accessible', evidence };
+    return {
+      accessStatus: 'accessible',
+      profileId: profile.id,
+      sourceJiraId: rootEvidence.evidence.sourceId,
+      sourceJiraKey: issueKey,
+      sourceJiraVersion: rootEvidence.evidence.version,
+      evidence,
+    };
   }
 
   private async readIssue(
@@ -114,6 +164,24 @@ export class JiraWorkItemService {
       version,
       excerptSource: fields.description,
     });
+  }
+
+  private toTransientDraftEvidence(
+    profile: IntegrationProfile,
+    body: Record<string, unknown>,
+  ): TransientJiraDraftEvidence {
+    const evidence = this.normalizeIssue(profile, body);
+    const fields = this.record(body.fields, 'Jira issue is invalid.');
+    const description = toTransientPlainText(
+      fields.description,
+      MAX_TRANSIENT_EVIDENCE_CHARS,
+    );
+    const content = `${evidence.title}\n${description}`.slice(
+      0,
+      MAX_TRANSIENT_EVIDENCE_CHARS,
+    );
+
+    return { evidence, content };
   }
 
   private linkedIssueKeys(body: Record<string, unknown>): string[] {
