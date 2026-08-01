@@ -2,14 +2,18 @@ services:
   - type: web
     name: week15-board-ai
     runtime: python
-    repo: https://github.com/na-man-mu-303-team2/week15-16
+    repo: https://github.com/kdh949/dh-company-wiki
     plan: free
     region: oregon
-    branch: dev/donghyun-backend
+    branch: main
+    rootDir: backend/ai-service
     autoDeploy: true
-    buildCommand: cd ai-service && pip install -r requirements.txt
-    startCommand: cd ai-service && uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    buildFilter:
+      paths:
+        - backend/ai-service/**
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -31,14 +35,19 @@ services:
   - type: web
     name: week15-board-api
     runtime: node
-    repo: https://github.com/na-man-mu-303-team2/week15-16
+    repo: https://github.com/kdh949/dh-company-wiki
     plan: free
     region: oregon
-    branch: dev/donghyun-backend
+    branch: main
     autoDeploy: true
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm run start:prod
+    buildCommand: npm ci --include=dev && npm run build --workspace=backend
+    startCommand: npm run start:prod --workspace=backend
     healthCheckPath: /health
+    buildFilter:
+      paths:
+        - backend/**
+        - package.json
+        - package-lock.json
     envVars:
       - key: NODE_ENV
         value: production
@@ -71,6 +80,28 @@ services:
           type: web
           name: week15-board-ai
           property: host
+
+  - type: web
+    name: week15-board-web
+    runtime: static
+    repo: https://github.com/kdh949/dh-company-wiki
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci && npm run build --workspace=frontend
+    staticPublishPath: frontend/dist
+    buildFilter:
+      paths:
+        - frontend/**
+        - package.json
+        - package-lock.json
+    envVars:
+      - key: VITE_API_URL
+        value: https://week15-board-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
 
 databases:
   - name: week15-board-db

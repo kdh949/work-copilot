@@ -1,0 +1,88 @@
+# DH Company Wiki
+
+회사 위키, AI 온보딩 챗봇, 개인 노트를 제공하는 모노리포입니다.
+
+## 구성
+
+- `backend`: NestJS API와 FastAPI AI 서비스
+- `frontend`: React + Vite 프론트엔드
+- `docker-compose.yml`: pgvector가 포함된 로컬 PostgreSQL
+- `render.yaml`: Render API, AI, 정적 사이트, PostgreSQL 구성
+
+## 요구 사항
+
+- Node.js 22
+- npm 10 이상
+- Python 3.12
+- Docker Compose
+
+## 설치
+
+루트에서 두 Node.js workspace 의존성을 한 번에 설치합니다.
+
+```bash
+npm ci
+```
+
+AI 서비스는 별도의 Python 가상환경을 사용합니다.
+
+```bash
+cd backend/ai-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## 로컬 실행
+
+PostgreSQL을 먼저 실행합니다.
+
+```bash
+docker compose up -d
+```
+
+각 서비스의 환경 파일을 준비합니다.
+
+```bash
+cp backend/.env.example backend/.env
+cp backend/ai-service/.env.example backend/ai-service/.env
+cp frontend/.env.example frontend/.env
+```
+
+서로 다른 터미널에서 서비스를 실행합니다.
+
+```bash
+npm run dev:backend
+```
+
+```bash
+cd backend/ai-service
+source .venv/bin/activate
+uvicorn main:app --reload --port 8000
+```
+
+```bash
+npm run dev:frontend
+```
+
+첫 번째 가입자는 `admin`, 이후 가입자는 `employee` 역할을 받습니다.
+
+## 검증
+
+```bash
+npm run build
+npm test
+docker compose config
+```
+
+## 배포
+
+- API: `https://week15-board-api.onrender.com`
+- AI: `https://week15-board-ai.onrender.com`
+- 프론트엔드: `https://week15-board-web.onrender.com`
+
+Render는 루트 `render.yaml`을 사용하며 `main` 브랜치 변경을 자동 배포합니다.
+
+## 이전 커밋 이력
+
+백엔드와 프론트엔드의 기존 커밋 SHA는 재작성하지 않고 `main`의 병합 부모로 보존했습니다. 기존 팀 브랜치의 끝은 `legacy/*-tip` 태그에서 확인할 수 있습니다.

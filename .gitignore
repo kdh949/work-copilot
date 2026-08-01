@@ -1,0 +1,40 @@
+# Dependencies and build outputs
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+**/coverage/
+
+# Environment files and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Generated project knowledge and temporary files
+.understand-anything/
+**/.understand-anything/
+.temp/
+**/.temp/
+.tmp/
+**/.tmp/
+
+# Editors and operating systems
+.idea/
+.DS_Store
+*.log
