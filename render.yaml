@@ -85,7 +85,6 @@ services:
     name: week15-board-web
     runtime: static
     repo: https://github.com/kdh949/dh-company-wiki
-    plan: free
     branch: main
     autoDeploy: true
     buildCommand: npm ci && npm run build --workspace=frontend
