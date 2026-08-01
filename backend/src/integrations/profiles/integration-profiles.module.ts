@@ -21,5 +21,6 @@ import { IntegrationProfileUrlPolicy } from './integration-profile-url.policy';
     IntegrationProfileUrlPolicy,
     IntegrationProfileConnectionTestService,
   ],
+  exports: [IntegrationProfileCryptoService, IntegrationProfileUrlPolicy],
 })
 export class IntegrationProfilesModule {}

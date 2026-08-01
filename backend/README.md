@@ -45,7 +45,7 @@ docker compose up -d
 - `KEYCLOAK_ALLOWED_EMAIL_DOMAINS`: 쉼표로 구분한 허용 회사 이메일 도메인
 - `OIDC_ATTEMPT_ENCRYPTION_KEY`: base64 32-byte OIDC PKCE verifier 암호화 키
 - `SESSION_TTL_SECONDS`: 300~86400초 범위의 BFF 세션 수명
-- `INTEGRATION_ENCRYPTION_KEY`: base64 32-byte integration client secret 암호화 키
+- `INTEGRATION_ENCRYPTION_KEY`: base64 32-byte integration client secret·사용자 OAuth token 암호화 키
 - `INTEGRATION_CALLBACK_BASE_URL`: 사용자 OAuth callback을 만들 API HTTPS base URL
 - `INTEGRATION_BASE_URL_HOST_ALLOWLIST`: 쉼표로 구분한 Jira·Confluence HTTPS hostname allowlist
 - `INTEGRATION_JIRA_SCOPE_ALLOWLIST`, `INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST`: 프로필에서 선택 가능한 최소 OAuth scope 목록
