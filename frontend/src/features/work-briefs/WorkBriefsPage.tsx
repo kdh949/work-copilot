@@ -90,7 +90,7 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
       setIsLoadingEvidence(true);
       setMessage("");
       const result = await request<EvidenceCollection>(
-        `/work-items/jira/issues/${encodeURIComponent(normalizedKey)}`,
+        `/work-items/jira/${encodeURIComponent(normalizedKey)}/context`,
       );
       if (result.accessStatus !== "accessible") {
         setJiraEvidence([]);

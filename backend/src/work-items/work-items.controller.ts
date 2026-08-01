@@ -18,8 +18,8 @@ export class WorkItemsController {
     private readonly confluenceWorkItemService: ConfluenceWorkItemService,
   ) {}
 
-  @Get('jira/issues/:issueKey')
-  jiraIssue(
+  @Get('jira/:issueKey/context')
+  jiraContext(
     @Param('issueKey') issueKey: string,
     @Req() request: WorkItemRequest,
   ) {
@@ -28,6 +28,16 @@ export class WorkItemsController {
       issueKey,
       request.correlationId ?? 'missing-correlation-id',
     );
+  }
+
+  // Keep the initial UI route working while clients move to the documented
+  // context contract. Both routes use exactly the same authenticated read.
+  @Get('jira/issues/:issueKey')
+  jiraIssue(
+    @Param('issueKey') issueKey: string,
+    @Req() request: WorkItemRequest,
+  ) {
+    return this.jiraContext(issueKey, request);
   }
 
   @Get('confluence/spaces/:spaceKey/search')
