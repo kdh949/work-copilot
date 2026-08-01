@@ -7,7 +7,7 @@
 - `backend`: NestJS API와 FastAPI AI 서비스
 - `frontend`: React + Vite 프론트엔드
 - `docker-compose.yml`: pgvector가 포함된 로컬 PostgreSQL
-- `render.yaml`: Render API, AI, 정적 사이트, PostgreSQL 구성
+- `render.yaml`: Render API, AI, 정적 사이트 구성
 
 ## 요구 사항
 
@@ -82,6 +82,7 @@ docker compose config
 - 프론트엔드: `https://week15-board-web.onrender.com`
 
 Render는 루트 `render.yaml`을 사용하며 `main` 브랜치 변경을 자동 배포합니다.
+운영 데이터베이스는 Supabase PostgreSQL의 Shared Pooler session endpoint를 사용합니다.
 
 ## 이전 커밋 이력
 

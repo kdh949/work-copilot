@@ -16,16 +16,21 @@ import { AiModule } from './ai/ai.module';
 
         TypeOrmModule.forRootAsync({
             inject: [ConfigService],
-            useFactory: (configService: ConfigService) => ({
-                type: "postgres",
-                host: configService.get<string>('DB_HOST'),
-                port: configService.get<number>('DB_PORT'),
-                username: configService.get<string>('DB_USERNAME'),
-                password: configService.get<string>('DB_PASSWORD'),
-                database: configService.get<string>('DB_DATABASE'),
-                autoLoadEntities: true, // 각 모듈에서 등록한 Entity를 자동으로 로드한다.
-                synchronize: true, // Entity 클래스와 DB 테이블 구조를 자동으로 맞춘다.
-            })
+            useFactory: (configService: ConfigService) => {
+                const useSsl = configService.get<string>('DB_SSL')?.toLowerCase() === 'true';
+
+                return {
+                    type: "postgres",
+                    host: configService.get<string>('DB_HOST'),
+                    port: configService.get<number>('DB_PORT'),
+                    username: configService.get<string>('DB_USERNAME'),
+                    password: configService.get<string>('DB_PASSWORD'),
+                    database: configService.get<string>('DB_DATABASE'),
+                    ssl: useSsl ? { rejectUnauthorized: true } : false,
+                    autoLoadEntities: true, // 각 모듈에서 등록한 Entity를 자동으로 로드한다.
+                    synchronize: true, // Entity 클래스와 DB 테이블 구조를 자동으로 맞춘다.
+                };
+            }
         }),
 
         PostsModule,
