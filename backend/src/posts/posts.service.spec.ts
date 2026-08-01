@@ -5,6 +5,7 @@ import { Post } from "./post.entity";
 import { Comment } from "./comment.entity";
 import { UsersService } from "../users/users.service";
 import { AiService } from "../ai/ai.service";
+import { ForbiddenException } from '@nestjs/common';
 
 describe('PostsService', () => {
   let service: PostsService;
@@ -37,5 +38,47 @@ describe('PostsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('rejects a wiki detail request outside an employee department', async () => {
+    const wikiPost = {
+      id: 1,
+      boardType: 'wiki',
+      department: '인사',
+      author: { id: 2 },
+    } as Post;
+    const protectedService = new PostsService(
+      { findOne: jest.fn().mockResolvedValue(wikiPost) } as never,
+      {} as never,
+      {} as UsersService,
+      {} as AiService,
+    );
+
+    await expect(protectedService.findOne(1, {
+      userId: 10,
+      role: 'employee',
+      department: '엔지니어링',
+    })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows an administrator to read any wiki detail', async () => {
+    const wikiPost = {
+      id: 1,
+      boardType: 'wiki',
+      department: '인사',
+      author: { id: 2 },
+    } as Post;
+    const protectedService = new PostsService(
+      { findOne: jest.fn().mockResolvedValue(wikiPost) } as never,
+      {} as never,
+      {} as UsersService,
+      {} as AiService,
+    );
+
+    await expect(protectedService.findOne(1, {
+      userId: 10,
+      role: 'admin',
+      department: '엔지니어링',
+    })).resolves.toBe(wikiPost);
   });
 });
