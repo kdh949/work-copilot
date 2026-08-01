@@ -18,6 +18,9 @@ import { AiModule } from './ai/ai.module';
             inject: [ConfigService],
             useFactory: (configService: ConfigService) => {
                 const useSsl = configService.get<string>('DB_SSL')?.toLowerCase() === 'true';
+                const rejectUnauthorized = configService
+                    .get<string>('DB_SSL_REJECT_UNAUTHORIZED')
+                    ?.toLowerCase() !== 'false';
 
                 return {
                     type: "postgres",
@@ -26,7 +29,7 @@ import { AiModule } from './ai/ai.module';
                     username: configService.get<string>('DB_USERNAME'),
                     password: configService.get<string>('DB_PASSWORD'),
                     database: configService.get<string>('DB_DATABASE'),
-                    ssl: useSsl ? { rejectUnauthorized: true } : false,
+                    ssl: useSsl ? { rejectUnauthorized } : false,
                     autoLoadEntities: true, // 각 모듈에서 등록한 Entity를 자동으로 로드한다.
                     synchronize: true, // Entity 클래스와 DB 테이블 구조를 자동으로 맞춘다.
                 };

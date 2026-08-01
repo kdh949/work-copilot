@@ -83,6 +83,7 @@ docker compose config
 
 Render는 루트 `render.yaml`을 사용하며 `main` 브랜치 변경을 자동 배포합니다.
 운영 데이터베이스는 Supabase PostgreSQL의 Shared Pooler session endpoint를 사용합니다.
+Render와 Supabase 사이의 데이터베이스 연결은 TLS를 강제합니다.
 
 ## 이전 커밋 이력
 
