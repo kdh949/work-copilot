@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AiService } from "./ai.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import type { AuthenticatedRequest } from "../auth/guards/jwt-auth.guard";
@@ -47,5 +47,20 @@ export class AiController {
         return {
             retried: await this.aiSyncService.retryFailed(sourceId),
         };
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get('operations/summary')
+    async operationsSummary(@Req() request: AuthenticatedRequest) {
+        if (request.user.role !== 'admin') {
+            throw new ForbiddenException('관리자만 AI 운영 지표를 조회할 수 있습니다.');
+        }
+
+        const [requests, synchronization] = await Promise.all([
+            this.aiService.operationsSummary(),
+            this.aiSyncService.getSummary(),
+        ]);
+
+        return { requests, synchronization };
     }
 }

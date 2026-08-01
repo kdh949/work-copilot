@@ -2,6 +2,7 @@ import datetime
 import hmac
 import hashlib
 import os
+import time
 from typing import Any
 
 import requests
@@ -85,6 +86,11 @@ def health() -> dict[str, str]:
     }
 
 
+@app.get("/operations/summary", dependencies=[Depends(require_internal_api_key)])
+def operations_summary() -> dict[str, Any]:
+    return get_operations_summary()
+
+
 @app.post("/documents", dependencies=[Depends(require_internal_api_key)])
 def save_document(document: DocumentRequest) -> dict[str, str]:
     if can_use_database():
@@ -126,34 +132,49 @@ def delete_document(source_id: str) -> dict[str, bool]:
 
 @app.post("/chat", dependencies=[Depends(require_internal_api_key)])
 def chat(request: ChatRequest) -> dict[str, Any]:
+    started_at = time.perf_counter()
     department_filter = choose_department_filter(request.question, request.access.department)
-    documents = search_documents_for_intent(request.question, department_filter, request.access)
 
-    if should_abstain(documents, get_minimum_confidence()):
-        return {
-            "answer": "확인 가능한 회사 위키 근거가 부족해 답변할 수 없습니다. 질문을 구체화하거나 관련 위키 문서를 추가해주세요.",
+    try:
+        documents = search_documents_for_intent(request.question, department_filter, request.access)
+
+        if should_abstain(documents, get_minimum_confidence()):
+            result = {
+                "answer": "확인 가능한 회사 위키 근거가 부족해 답변할 수 없습니다. 질문을 구체화하거나 관련 위키 문서를 추가해주세요.",
+                "searchMode": "department" if department_filter else "all",
+                "department": department_filter,
+                "retrievalMode": get_retrieval_mode(),
+                "abstained": True,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "estimatedCost": 0.0,
+                "sources": [],
+            }
+            record_ai_request('chat', 'abstained', 0, int((time.perf_counter() - started_at) * 1000))
+            return result
+
+        answer, usage = make_answer_with_usage(
+            "회사 위키 내용을 바탕으로 질문에 답변해주세요.",
+            request.question,
+            documents,
+            department_filter,
+        )
+        result = {
+            "answer": answer,
             "searchMode": "department" if department_filter else "all",
             "department": department_filter,
             "retrievalMode": get_retrieval_mode(),
-            "abstained": True,
-            "sources": [],
+            "abstained": False,
+            "inputTokens": usage['inputTokens'],
+            "outputTokens": usage['outputTokens'],
+            "estimatedCost": estimate_chat_cost(usage),
+            "sources": make_sources(documents),
         }
-
-    answer = make_answer(
-        "회사 위키 내용을 바탕으로 질문에 답변해주세요.",
-        request.question,
-        documents,
-        department_filter,
-    )
-
-    return {
-        "answer": answer,
-        "searchMode": "department" if department_filter else "all",
-        "department": department_filter,
-        "retrievalMode": get_retrieval_mode(),
-        "abstained": False,
-        "sources": make_sources(documents),
-    }
+        record_ai_request('chat', 'success', len(documents), int((time.perf_counter() - started_at) * 1000), usage)
+        return result
+    except Exception as error:
+        record_ai_request('chat', 'error', 0, int((time.perf_counter() - started_at) * 1000), error_code=type(error).__name__)
+        raise
 
 
 @app.post("/onboarding", dependencies=[Depends(require_internal_api_key)])
@@ -324,6 +345,22 @@ def prepare_database() -> None:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_wiki_document_chunks_source_id ON wiki_document_chunks (source_id)",
             )
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS ai_request_events (
+                    id SERIAL PRIMARY KEY,
+                    request_id VARCHAR(64) NOT NULL,
+                    route VARCHAR(64) NOT NULL,
+                    outcome VARCHAR(32) NOT NULL,
+                    retrieval_mode VARCHAR(32) NOT NULL,
+                    result_count INTEGER NOT NULL,
+                    latency_ms INTEGER NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost NUMERIC(12, 8) NOT NULL DEFAULT 0,
+                    error_code VARCHAR(64),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
     except Exception:
         print('Postgres 연결 실패: 메모리 저장소로 동작합니다.')
 
@@ -619,6 +656,16 @@ def search_documents_from_memory(
 
 
 def make_answer(role: str, question: str, documents: list[dict[str, Any]], department: str | None) -> str:
+    answer, _ = make_answer_with_usage(role, question, documents, department)
+    return answer
+
+
+def make_answer_with_usage(
+    role: str,
+    question: str,
+    documents: list[dict[str, Any]],
+    department: str | None,
+) -> tuple[str, dict[str, int]]:
     if os.getenv('OPENAI_API_KEY') and ChatOpenAI and SystemMessage and HumanMessage:
         llm = ChatOpenAI(
             model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
@@ -628,10 +675,17 @@ def make_answer(role: str, question: str, documents: list[dict[str, Any]], depar
             SystemMessage(content=f"{role} 모르면 모른다고 답하고, 참고한 문서 제목을 함께 언급하세요."),
             HumanMessage(content=f"부서: {department or '공통'}\n질문: {question}\n\n문서:\n{make_context(documents)}"),
         ])
-        return str(response.content)
+        usage = getattr(response, 'usage_metadata', None)
+        if not usage:
+            metadata = getattr(response, 'response_metadata', {})
+            usage = metadata.get('token_usage', {}) if isinstance(metadata, dict) else {}
+        return str(response.content), extract_token_usage(usage)
 
     if not documents:
-        return '아직 참고할 회사 위키 문서가 없습니다. 게시글을 먼저 작성하면 더 정확히 답변할 수 있습니다.'
+        return '아직 참고할 회사 위키 문서가 없습니다. 게시글을 먼저 작성하면 더 정확히 답변할 수 있습니다.', {
+            'inputTokens': 0,
+            'outputTokens': 0,
+        }
 
     lines = [
         f"{department or '공통'} 기준으로 회사 위키를 확인했습니다.",
@@ -646,7 +700,10 @@ def make_answer(role: str, question: str, documents: list[dict[str, Any]], depar
     lines.append("상세 답변:")
     lines.append(documents[0]["content"][:500])
 
-    return "\n".join(lines)
+    return "\n".join(lines), {
+        'inputTokens': 0,
+        'outputTokens': 0,
+    }
 
 
 def choose_tool(question: str, step: int) -> str:
@@ -810,6 +867,28 @@ def should_abstain(documents: list[dict[str, Any]], minimum_confidence: float) -
     return max(float(document.get("confidence", 0.0)) for document in documents) < minimum_confidence
 
 
+def extract_token_usage(usage: Any) -> dict[str, int]:
+    values = usage if isinstance(usage, dict) else {}
+    input_tokens = values.get('input_tokens', values.get('prompt_tokens', 0))
+    output_tokens = values.get('output_tokens', values.get('completion_tokens', 0))
+
+    return {
+        'inputTokens': int(input_tokens or 0),
+        'outputTokens': int(output_tokens or 0),
+    }
+
+
+def estimate_chat_cost(usage: dict[str, int]) -> float:
+    input_price = float(os.getenv('OPENAI_INPUT_COST_PER_1M', '0.15'))
+    output_price = float(os.getenv('OPENAI_OUTPUT_COST_PER_1M', '0.60'))
+
+    return round(
+        usage['inputTokens'] / 1_000_000 * input_price
+        + usage['outputTokens'] / 1_000_000 * output_price,
+        8,
+    )
+
+
 def make_context(documents: list[dict[str, Any]]) -> str:
     if not documents:
         return '참고 문서 없음'
@@ -858,6 +937,76 @@ def can_use_database() -> bool:
 
 def get_database_url() -> str:
     return os.getenv('DATABASE_URL', '')
+
+
+def record_ai_request(
+    route: str,
+    outcome: str,
+    result_count: int,
+    latency_ms: int,
+    usage: dict[str, int] | None = None,
+    error_code: str | None = None,
+) -> None:
+    if not can_use_database():
+        return
+
+    token_usage = usage or {'inputTokens': 0, 'outputTokens': 0}
+
+    try:
+        with psycopg.connect(get_database_url()) as connection:
+            connection.execute(
+                """
+                INSERT INTO ai_request_events (
+                    request_id, route, outcome, retrieval_mode, result_count, latency_ms,
+                    input_tokens, output_tokens, estimated_cost, error_code
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    hashlib.sha256(f"{route}-{time.time_ns()}".encode()).hexdigest()[:32],
+                    route,
+                    outcome,
+                    get_retrieval_mode(),
+                    result_count,
+                    latency_ms,
+                    token_usage['inputTokens'],
+                    token_usage['outputTokens'],
+                    estimate_chat_cost(token_usage),
+                    error_code,
+                ),
+            )
+    except Exception:
+        # 관찰성 장애가 사용자 요청을 실패시키면 안 된다.
+        return
+
+
+def get_operations_summary() -> dict[str, Any]:
+    if not can_use_database():
+        return {'requests': 0, 'errors': 0, 'p50LatencyMs': 0, 'p95LatencyMs': 0, 'estimatedCost': 0.0}
+
+    try:
+        with psycopg.connect(get_database_url()) as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE outcome = 'error'),
+                       COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms), 0),
+                       COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0),
+                       COALESCE(SUM(estimated_cost), 0)
+                FROM ai_request_events
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                """,
+            ).fetchone()
+    except Exception:
+        return {'requests': 0, 'errors': 0, 'p50LatencyMs': 0, 'p95LatencyMs': 0, 'estimatedCost': 0.0}
+
+    return {
+        'requests': int(row[0]),
+        'errors': int(row[1]),
+        'p50LatencyMs': int(row[2]),
+        'p95LatencyMs': int(row[3]),
+        'estimatedCost': float(row[4]),
+    }
 
 
 def check_mcp_api_key(api_key: str | None) -> None:

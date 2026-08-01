@@ -20,4 +20,17 @@ describe('AiController operations', () => {
             user: { sub: 2, role: 'employee', email: 'employee@example.com', department: '엔지니어링' },
         } as never)).rejects.toBeInstanceOf(ForbiddenException);
     });
+
+    it('returns AI request and synchronization metrics to an administrator', async () => {
+        const aiService = { operationsSummary: jest.fn().mockResolvedValue({ requests: 10 }) } as unknown as AiService;
+        const syncService = { getSummary: jest.fn().mockResolvedValue({ completed: 8, retry: 1 }) } as unknown as AiSyncService;
+        const controller = new AiController(aiService, syncService);
+
+        await expect(controller.operationsSummary({
+            user: { sub: 1, role: 'admin', email: 'admin@example.com', department: '인사' },
+        } as never)).resolves.toEqual({
+            requests: { requests: 10 },
+            synchronization: { completed: 8, retry: 1 },
+        });
+    });
 });

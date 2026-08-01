@@ -119,6 +119,18 @@ export class AiService {
         }
     }
 
+    async operationsSummary(): Promise<unknown> {
+        const response = await fetch(`${this.getAiUrl()}/operations/summary`, {
+            headers: this.getAiHeaders(),
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI 운영 지표 조회 실패: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
     private async postToAi(path: string, body: object) {
         try {
             const response = await fetch(`${this.getAiUrl()}${path}`, {

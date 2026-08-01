@@ -87,6 +87,20 @@ export class AiSyncService implements OnModuleInit, OnModuleDestroy {
         return result.affected || 0;
     }
 
+    async getSummary(): Promise<Record<string, number>> {
+        const rows = await this.outboxRepository
+            .createQueryBuilder('outbox')
+            .select('outbox.status', 'status')
+            .addSelect('COUNT(*)', 'count')
+            .groupBy('outbox.status')
+            .getRawMany<{ status: string; count: string }>();
+
+        return rows.reduce<Record<string, number>>((summary, row) => {
+            summary[row.status] = Number(row.count);
+            return summary;
+        }, {});
+    }
+
     async processPendingJobs(): Promise<void> {
         if (this.isProcessing) {
             return;
