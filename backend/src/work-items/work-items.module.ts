@@ -24,6 +24,6 @@ import { WorkItemsController } from './work-items.controller';
     JiraWorkItemService,
     ConfluenceWorkItemService,
   ],
-  exports: [JiraWorkItemService],
+  exports: [JiraWorkItemService, ConfluenceWorkItemService],
 })
 export class WorkItemsModule {}

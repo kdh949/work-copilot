@@ -78,12 +78,16 @@ describe('ReadinessService', () => {
   const jiraWorkItemService = {
     collectReadinessContext: jest.fn(),
   };
+  const confluenceWorkItemService = {
+    collectEvidenceMetadata: jest.fn(),
+  };
 
   function createService(): ReadinessService {
     return new ReadinessService(
       draftsRepository as never,
       assessmentsRepository as never,
       jiraWorkItemService as never,
+      confluenceWorkItemService as never,
       new ReadinessCoverageEvaluatorService(),
     );
   }
@@ -316,5 +320,105 @@ describe('ReadinessService', () => {
       ]),
     );
     expect(result.publishAllowed).toBe(false);
+  });
+
+  it('includes selected Confluence evidence in the read-only freshness gate', async () => {
+    const confluenceEvidence = {
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+      title: '배포 결정',
+      version: '7',
+      excerptLength: 64,
+      accessStatus: 'accessible' as const,
+      dlpStatus: 'not_evaluated' as const,
+      aiStatus: 'included' as const,
+    };
+    const base = createDraft();
+    const draft = createDraft({
+      evidence: [...base.evidence, confluenceEvidence],
+      maskedBrief: {
+        ...base.maskedBrief,
+        requirements: [
+          { text: '배포 조건 확인', evidenceIds: ['confluence:200'] },
+        ],
+        acceptanceCriteria: [
+          { text: '검증 결과 확인', evidenceIds: ['confluence:200'] },
+        ],
+        childTasks: [
+          {
+            ...base.maskedBrief.childTasks[0],
+            evidenceIds: ['confluence:200'],
+          },
+        ],
+      },
+    });
+    draftsRepository.findOneBy.mockResolvedValue(draft);
+    jiraWorkItemService.collectReadinessContext.mockResolvedValue({
+      ...accessibleContext(),
+      childTaskTemplate: {
+        issueTypeId: '10001',
+        fields: { customfield_10100: 'configured' },
+      },
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: draft.profileId,
+      evidence: [confluenceEvidence],
+    });
+
+    const result = await createService().assessDraft(7, draft.id, 'corr-6');
+
+    expect(result.status).toBe('READY');
+    expect(result.publishAllowed).toBe(true);
+    expect(confluenceWorkItemService.collectEvidenceMetadata).toHaveBeenCalledWith(
+      7,
+      ['confluence:200'],
+      'corr-6',
+    );
+  });
+
+  it('does not expose a no-longer-readable Confluence page in readiness results', async () => {
+    const base = createDraft();
+    const draft = createDraft({
+      evidence: [
+        ...base.evidence,
+        {
+          id: 'confluence:200',
+          provider: 'confluence',
+          sourceId: '200',
+          url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+          title: '비공개 페이지',
+          version: '7',
+          excerptLength: 64,
+          accessStatus: 'accessible',
+          dlpStatus: 'not_evaluated',
+          aiStatus: 'included',
+        },
+      ],
+    });
+    draftsRepository.findOneBy.mockResolvedValue(draft);
+    jiraWorkItemService.collectReadinessContext.mockResolvedValue(
+      accessibleContext(),
+    );
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'access_limited',
+      profileId: null,
+      evidence: [],
+    });
+
+    const result = await createService().assessDraft(7, draft.id, 'corr-7');
+
+    expect(result.status).toBe('ACCESS_LIMITED');
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'ACCESS_CHANGED' }),
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toContain('비공개 페이지');
+    expect(JSON.stringify(assessmentsRepository.save.mock.calls)).not.toContain(
+      '비공개 페이지',
+    );
   });
 });

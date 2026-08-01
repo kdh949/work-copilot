@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import {
+  ConfluenceWorkItemService,
+  type ConfluenceDraftContext,
+} from '../work-items/confluence/confluence-work-item.service';
 import type { JiraDraftContext } from '../work-items/jira/jira-work-item.service';
 import { JiraWorkItemService } from '../work-items/jira/jira-work-item.service';
 import { BriefCitationValidatorService } from './brief-citation-validator.service';
@@ -32,6 +36,7 @@ export class WorkBriefsService {
     @InjectRepository(WorkBriefDraft)
     private readonly draftsRepository: Repository<WorkBriefDraft>,
     private readonly jiraWorkItemService: JiraWorkItemService,
+    private readonly confluenceWorkItemService: ConfluenceWorkItemService,
     private readonly aiClient: WorkBriefAiClientService,
     private readonly citationValidator: BriefCitationValidatorService,
   ) {}
@@ -41,15 +46,35 @@ export class WorkBriefsService {
     dto: CreateBriefDraftDto,
     correlationId: string,
   ): Promise<BriefDraftView> {
+    const selectedEvidenceIds = this.selectedEvidenceIds(
+      dto.selectedEvidenceIds,
+    );
     const context = await this.jiraWorkItemService.collectIssueDraftContext(
       userId,
       dto.sourceJiraKey,
       correlationId,
     );
-    const selectedEvidence = this.selectedEvidence(
+    const selectedJiraEvidence = this.selectedJiraEvidence(
       context,
-      dto.selectedEvidenceIds,
+      selectedEvidenceIds.jira,
     );
+    const confluenceContext =
+      selectedEvidenceIds.confluence.length > 0
+        ? await this.confluenceWorkItemService.collectDraftEvidence(
+            userId,
+            selectedEvidenceIds.confluence,
+            correlationId,
+          )
+        : null;
+    const selectedConfluenceEvidence = this.selectedConfluenceEvidence(
+      context,
+      confluenceContext,
+      selectedEvidenceIds.confluence,
+    );
+    const selectedEvidence = [
+      ...selectedJiraEvidence,
+      ...selectedConfluenceEvidence,
+    ];
     await this.assertNoExistingDraft(context.profileId, context.sourceJiraId);
     const output = await this.aiClient.generate(
       dto.instruction,
@@ -148,14 +173,34 @@ export class WorkBriefsService {
       draft.sourceJiraKey,
       correlationId,
     );
-    const selectedEvidenceIds = new Set(draft.evidence.map((item) => item.id));
-    const currentEvidence = context.evidence.filter((item) =>
-      selectedEvidenceIds.has(item.evidence.id),
+    const selectedJiraEvidenceIds = new Set(
+      draft.evidence
+        .filter((item) => item.provider === 'jira')
+        .map((item) => item.id),
     );
+    const currentJiraEvidence = context.evidence.filter((item) =>
+      selectedJiraEvidenceIds.has(item.evidence.id),
+    );
+    const selectedConfluenceEvidenceIds = draft.evidence
+      .filter((item) => item.provider === 'confluence')
+      .map((item) => item.id);
+    const confluenceContext =
+      selectedConfluenceEvidenceIds.length > 0
+        ? await this.confluenceWorkItemService.collectEvidenceMetadata(
+            userId,
+            selectedConfluenceEvidenceIds,
+            correlationId,
+          )
+        : null;
+    const currentConfluenceEvidence = confluenceContext?.evidence ?? [];
     const inaccessible =
       context.accessStatus !== 'accessible' ||
       context.profileId !== draft.profileId ||
-      currentEvidence.length !== draft.evidence.length;
+      (confluenceContext !== null &&
+        (confluenceContext.accessStatus !== 'accessible' ||
+          confluenceContext.profileId !== draft.profileId)) ||
+      currentJiraEvidence.length + currentConfluenceEvidence.length !==
+        draft.evidence.length;
 
     if (inaccessible) {
       return this.applyRefresh(draft, dto.optimisticVersion, {
@@ -165,12 +210,30 @@ export class WorkBriefsService {
       });
     }
 
-    const refreshedEvidence = currentEvidence.map((item) => ({
-      ...item.evidence,
-      aiStatus:
-        draft.evidence.find((stored) => stored.id === item.evidence.id)
-          ?.aiStatus ?? 'excluded',
-    }));
+    const currentEvidenceById = new Map(
+      [
+        ...currentJiraEvidence.map((item) => item.evidence),
+        ...currentConfluenceEvidence,
+      ].map((item) => [item.id, item]),
+    );
+    const refreshedEvidence = draft.evidence.map((stored) => {
+      const current = currentEvidenceById.get(stored.id);
+
+      if (!current) {
+        return stored;
+      }
+
+      return {
+        ...current,
+        // Metadata-only Confluence refreshes intentionally do not re-read the
+        // page body. Retain the prior safe length instead of fabricating one.
+        excerptLength:
+          current.provider === 'confluence'
+            ? stored.excerptLength
+            : current.excerptLength,
+        aiStatus: stored.aiStatus,
+      };
+    });
     const changed =
       context.sourceJiraVersion !== draft.sourceJiraVersion ||
       refreshedEvidence.some(
@@ -191,7 +254,32 @@ export class WorkBriefsService {
     });
   }
 
-  private selectedEvidence(
+  private selectedEvidenceIds(selectedEvidenceIds: string[]): {
+    jira: string[];
+    confluence: string[];
+  } {
+    const ids = new Set(selectedEvidenceIds);
+
+    if (ids.size !== selectedEvidenceIds.length) {
+      throw new BadRequestException('Selected evidence is invalid.');
+    }
+
+    const jira: string[] = [];
+    const confluence: string[] = [];
+    for (const evidenceId of selectedEvidenceIds) {
+      if (evidenceId.startsWith('jira:')) {
+        jira.push(evidenceId);
+      } else if (evidenceId.startsWith('confluence:')) {
+        confluence.push(evidenceId);
+      } else {
+        throw new BadRequestException('Selected evidence is invalid.');
+      }
+    }
+
+    return { jira, confluence };
+  }
+
+  private selectedJiraEvidence(
     context: JiraDraftContext,
     selectedEvidenceIds: string[],
   ) {
@@ -207,13 +295,41 @@ export class WorkBriefsService {
     }
 
     const ids = new Set(selectedEvidenceIds);
-    if (ids.size !== selectedEvidenceIds.length) {
-      throw new BadRequestException('Selected evidence is invalid.');
-    }
-
     const selected = context.evidence.filter((item) =>
       ids.has(item.evidence.id),
     );
+    if (selected.length !== ids.size) {
+      throw new BadRequestException('Selected evidence is invalid.');
+    }
+
+    return selected;
+  }
+
+  private selectedConfluenceEvidence(
+    jiraContext: JiraDraftContext,
+    confluenceContext: ConfluenceDraftContext | null,
+    selectedEvidenceIds: string[],
+  ) {
+    if (selectedEvidenceIds.length === 0) {
+      return [];
+    }
+
+    if (
+      !confluenceContext ||
+      confluenceContext.accessStatus !== 'accessible' ||
+      !confluenceContext.profileId ||
+      confluenceContext.profileId !== jiraContext.profileId
+    ) {
+      throw new ConflictException(
+        'Selected Confluence evidence is no longer accessible.',
+      );
+    }
+
+    const ids = new Set(selectedEvidenceIds);
+    const selected = confluenceContext.evidence.filter((item) =>
+      ids.has(item.evidence.id),
+    );
+
     if (selected.length !== ids.size) {
       throw new BadRequestException('Selected evidence is invalid.');
     }

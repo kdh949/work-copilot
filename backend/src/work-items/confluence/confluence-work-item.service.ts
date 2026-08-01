@@ -6,10 +6,29 @@ import {
   type EvidenceCollectionResponse,
   type NormalizedEvidence,
   normalizeEvidence,
+  toTransientPlainText,
 } from '../evidence/evidence-normalizer';
 import { IntegrationAccessPolicyService } from '../integration-access-policy.service';
 
 const MAX_SEARCH_RESULTS = 10;
+const MAX_TRANSIENT_EVIDENCE_CHARS = 8_000;
+
+export type TransientConfluenceDraftEvidence = {
+  evidence: NormalizedEvidence;
+  content: string;
+};
+
+export type ConfluenceEvidenceContext = {
+  accessStatus: EvidenceCollectionResponse['accessStatus'];
+  profileId: string | null;
+  evidence: NormalizedEvidence[];
+};
+
+export type ConfluenceDraftContext = {
+  accessStatus: EvidenceCollectionResponse['accessStatus'];
+  profileId: string | null;
+  evidence: TransientConfluenceDraftEvidence[];
+};
 
 @Injectable()
 export class ConfluenceWorkItemService {
@@ -80,6 +99,98 @@ export class ConfluenceWorkItemService {
     return { accessStatus: 'accessible', evidence };
   }
 
+  /**
+   * Re-reads only selected Confluence page metadata.  This is deliberately an
+   * internal adapter result: it never returns raw page storage to a controller
+   * or persists it with a draft.
+   */
+  async collectEvidenceMetadata(
+    userId: number,
+    evidenceIds: readonly string[],
+    correlationId: string,
+  ): Promise<ConfluenceEvidenceContext> {
+    const sourceIds = this.selectedSourceIds(evidenceIds);
+    const profile = await this.accessPolicy.activeProfile();
+    const accessToken = await this.integrationsOAuthService.getAccessToken(
+      userId,
+      'confluence',
+      correlationId,
+    );
+    const evidence: NormalizedEvidence[] = [];
+
+    for (const sourceId of sourceIds) {
+      const page = await this.readClient.getJson(
+        this.pageUrl(profile, sourceId, false),
+        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+        accessToken,
+      );
+
+      if (page.status !== 'ok') {
+        return this.unavailableMetadata(page.status);
+      }
+
+      try {
+        const normalized = this.normalizeSelectedPage(profile, page.body);
+
+        if (normalized.id !== `confluence:${sourceId}`) {
+          return this.unavailableMetadata('access_limited');
+        }
+        evidence.push(normalized);
+      } catch {
+        // A selected page outside the current allowlist or user-visible
+        // boundary is treated as unavailable without exposing its metadata.
+        return this.unavailableMetadata('access_limited');
+      }
+    }
+
+    return { accessStatus: 'accessible', profileId: profile.id, evidence };
+  }
+
+  /**
+   * Retrieves a short plaintext fragment only for the immediate AI request.
+   * Callers must pass it to the DLP boundary and must not serialize this
+   * result into a response, log, or persistent draft.
+   */
+  async collectDraftEvidence(
+    userId: number,
+    evidenceIds: readonly string[],
+    correlationId: string,
+  ): Promise<ConfluenceDraftContext> {
+    const sourceIds = this.selectedSourceIds(evidenceIds);
+    const profile = await this.accessPolicy.activeProfile();
+    const accessToken = await this.integrationsOAuthService.getAccessToken(
+      userId,
+      'confluence',
+      correlationId,
+    );
+    const evidence: TransientConfluenceDraftEvidence[] = [];
+
+    for (const sourceId of sourceIds) {
+      const page = await this.readClient.getJson(
+        this.pageUrl(profile, sourceId),
+        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+        accessToken,
+      );
+
+      if (page.status !== 'ok') {
+        return this.unavailableDraftEvidence(page.status);
+      }
+
+      try {
+        const transient = this.toTransientDraftEvidence(profile, page.body);
+
+        if (transient.evidence.id !== `confluence:${sourceId}`) {
+          return this.unavailableDraftEvidence('access_limited');
+        }
+        evidence.push(transient);
+      } catch {
+        return this.unavailableDraftEvidence('access_limited');
+      }
+    }
+
+    return { accessStatus: 'accessible', profileId: profile.id, evidence };
+  }
+
   private searchUrl(
     profile: IntegrationProfile,
     spaceKey: string,
@@ -102,12 +213,16 @@ export class ConfluenceWorkItemService {
     );
   }
 
-  private pageUrl(profile: IntegrationProfile, pageId: string): URL {
+  private pageUrl(
+    profile: IntegrationProfile,
+    pageId: string,
+    includeBody = true,
+  ): URL {
     // Content expansions provide only the page body, space, and version needed
     // to normalize evidence; the excerpt itself is discarded after measuring.
     // Source: https://developer.atlassian.com/server/confluence/confluence-server-rest-api/
     const parameters = new URLSearchParams({
-      expand: 'space,version,body.storage',
+      expand: includeBody ? 'space,version,body.storage' : 'space,version',
     });
 
     return this.accessPolicy.providerUrl(
@@ -147,6 +262,67 @@ export class ConfluenceWorkItemService {
       version,
       excerptSource: bodyValue,
     });
+  }
+
+  private normalizeSelectedPage(
+    profile: IntegrationProfile,
+    body: Record<string, unknown>,
+  ): NormalizedEvidence {
+    const spaceKey = this.spaceKey(body);
+
+    if (!spaceKey) {
+      throw new BadRequestException('Confluence page is invalid.');
+    }
+
+    return this.normalizePage(profile, spaceKey, body);
+  }
+
+  private toTransientDraftEvidence(
+    profile: IntegrationProfile,
+    body: Record<string, unknown>,
+  ): TransientConfluenceDraftEvidence {
+    const evidence = this.normalizeSelectedPage(profile, body);
+    const bodyValue = this.record(body.body)?.storage;
+    const content = `${evidence.title}\n${toTransientPlainText(
+      bodyValue,
+      MAX_TRANSIENT_EVIDENCE_CHARS,
+    )}`.slice(0, MAX_TRANSIENT_EVIDENCE_CHARS);
+
+    return { evidence, content };
+  }
+
+  private selectedSourceIds(evidenceIds: readonly string[]): string[] {
+    if (evidenceIds.length === 0 || evidenceIds.length > 20) {
+      throw new BadRequestException('Selected Confluence evidence is invalid.');
+    }
+
+    const sourceIds = evidenceIds.map((evidenceId) => {
+      const match = /^confluence:([A-Za-z0-9_-]{1,255})$/.exec(evidenceId);
+
+      if (!match) {
+        throw new BadRequestException('Selected Confluence evidence is invalid.');
+      }
+
+      return match[1];
+    });
+
+    if (new Set(sourceIds).size !== sourceIds.length) {
+      throw new BadRequestException('Selected Confluence evidence is invalid.');
+    }
+
+    return sourceIds;
+  }
+
+  private unavailableMetadata(
+    accessStatus: Exclude<EvidenceCollectionResponse['accessStatus'], 'accessible'>,
+  ): ConfluenceEvidenceContext {
+    return { accessStatus, profileId: null, evidence: [] };
+  }
+
+  private unavailableDraftEvidence(
+    accessStatus: Exclude<EvidenceCollectionResponse['accessStatus'], 'accessible'>,
+  ): ConfluenceDraftContext {
+    return { accessStatus, profileId: null, evidence: [] };
   }
 
   private searchResultItems(

@@ -80,4 +80,115 @@ describe('ConfluenceWorkItemService', () => {
     expect(getAccessToken).toHaveBeenCalledWith(1, 'confluence', 'corr-a');
     expect(getJson).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps selected page storage inside the draft-only adapter and returns metadata without the raw excerpt', async () => {
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) =>
+          spaceKey.toUpperCase(),
+      ),
+      providerBaseUrl: jest.fn(() => profile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, profile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      const hasBodyExpansion = url.searchParams
+        .get('expand')
+        ?.includes('body.storage');
+
+      return Promise.resolve({
+        status: 'ok' as const,
+        body: {
+          id: '200',
+          title: 'Engineering decision',
+          space: { key: 'ENG' },
+          version: { number: 7 },
+          ...(hasBodyExpansion
+            ? { body: { storage: { value: '<p>private page excerpt</p>' } } }
+            : {}),
+        },
+      });
+    });
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const metadata = await service.collectEvidenceMetadata(
+      1,
+      ['confluence:200'],
+      'corr-a',
+    );
+    const draftContext = await service.collectDraftEvidence(
+      1,
+      ['confluence:200'],
+      'corr-a',
+    );
+
+    expect(metadata).toEqual({
+      accessStatus: 'accessible',
+      profileId: profile.id,
+      evidence: [expect.objectContaining({ id: 'confluence:200' })],
+    });
+    expect(JSON.stringify(metadata)).not.toContain('private page excerpt');
+    expect(draftContext.evidence[0].content).toContain('private page excerpt');
+    expect(getJson.mock.calls[0][0].searchParams.get('expand')).toBe(
+      'space,version',
+    );
+    expect(getJson.mock.calls[1][0].searchParams.get('expand')).toBe(
+      'space,version,body.storage',
+    );
+  });
+
+  it('fails closed when a selected page no longer belongs to an allowlisted space', async () => {
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedSpace: jest.fn(() => {
+        throw new Error('space is denied');
+      }),
+      providerBaseUrl: jest.fn(() => profile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, profile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      {
+        getJson: jest.fn(() =>
+          Promise.resolve({
+            status: 'ok' as const,
+            body: {
+              id: '200',
+              title: '비공개 페이지',
+              space: { key: 'HR' },
+              version: { number: 7 },
+            },
+          }),
+        ),
+      } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.collectEvidenceMetadata(
+      1,
+      ['confluence:200'],
+      'corr-a',
+    );
+
+    expect(result).toEqual({
+      accessStatus: 'access_limited',
+      profileId: null,
+      evidence: [],
+    });
+    expect(JSON.stringify(result)).not.toContain('비공개 페이지');
+  });
 });
