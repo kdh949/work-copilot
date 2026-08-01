@@ -82,6 +82,7 @@ export class AiService {
         try {
             await fetch(`${this.getAiUrl()}/documents/${this.getPostSourceId(post)}`, {
                 method: 'DELETE',
+                headers: this.getAiHeaders(),
             });
         } catch (error) {
             console.log('AI 문서 삭제 동기화 실패', error);
@@ -93,7 +94,7 @@ export class AiService {
             const response = await fetch(`${this.getAiUrl()}${path}`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    ...this.getAiHeaders(),
                 },
                 body: JSON.stringify(body),
             });
@@ -121,6 +122,19 @@ export class AiService {
         }
 
         return `https://${aiUrl}`;
+    }
+
+    private getAiHeaders(): Record<string, string> {
+        const apiKey = this.configService.get<string>('AI_SERVICE_API_KEY');
+
+        if (!apiKey) {
+            throw new Error('AI_SERVICE_API_KEY가 설정되지 않았습니다.');
+        }
+
+        return {
+            'Content-Type': 'application/json',
+            'X-AI-Service-Key': apiKey,
+        };
     }
 
     private getPostSourceId(post: Post): string {

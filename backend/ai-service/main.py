@@ -1,11 +1,12 @@
 import datetime
+import hmac
 import hashlib
 import os
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 try:
@@ -56,6 +57,16 @@ class JsonRpcRequest(BaseModel):
     id: int | str | None = None
 
 
+def require_internal_api_key(x_ai_service_key: str | None = Header(default=None)) -> None:
+    expected_api_key = os.getenv('AI_SERVICE_API_KEY')
+
+    if not expected_api_key:
+        raise HTTPException(status_code=503, detail='AI 서비스 내부 인증이 설정되지 않았습니다.')
+
+    if not x_ai_service_key or not hmac.compare_digest(x_ai_service_key, expected_api_key):
+        raise HTTPException(status_code=401, detail='AI 서비스 내부 인증에 실패했습니다.')
+
+
 @app.on_event("startup")
 def startup() -> None:
     prepare_database()
@@ -69,7 +80,7 @@ def health() -> dict[str, str]:
     }
 
 
-@app.post("/documents")
+@app.post("/documents", dependencies=[Depends(require_internal_api_key)])
 def save_document(document: DocumentRequest) -> dict[str, str]:
     if can_use_database():
         try:
@@ -85,7 +96,7 @@ def save_document(document: DocumentRequest) -> dict[str, str]:
     }
 
 
-@app.delete("/documents/{source_id}")
+@app.delete("/documents/{source_id}", dependencies=[Depends(require_internal_api_key)])
 def delete_document(source_id: str) -> dict[str, bool]:
     if can_use_database():
         try:
@@ -104,7 +115,7 @@ def delete_document(source_id: str) -> dict[str, bool]:
     }
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(require_internal_api_key)])
 def chat(request: ChatRequest) -> dict[str, Any]:
     department_filter = choose_department_filter(request.question, request.userDepartment or request.department)
     documents = search_documents_for_intent(request.question, department_filter)
@@ -123,7 +134,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/onboarding")
+@app.post("/onboarding", dependencies=[Depends(require_internal_api_key)])
 def onboarding(request: OnboardingRequest) -> dict[str, Any]:
     employee_name = request.employeeName or '신입 직원'
     question = f"{request.department} 부서에 새로 온 {employee_name}이 입사 직후 해야 할 일을 추천해주세요."
@@ -141,7 +152,7 @@ def onboarding(request: OnboardingRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/lecture")
+@app.post("/lecture", dependencies=[Depends(require_internal_api_key)])
 def lecture(request: OnboardingRequest) -> dict[str, Any]:
     question = f"{request.department} 부서 신입 직원 교육 강의안을 만들어주세요."
     documents = search_documents(question, request.department)
@@ -158,7 +169,7 @@ def lecture(request: OnboardingRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/mcp")
+@app.post("/mcp", dependencies=[Depends(require_internal_api_key)])
 def mcp(request: JsonRpcRequest, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     check_mcp_api_key(x_api_key)
 
@@ -193,7 +204,7 @@ def mcp(request: JsonRpcRequest, x_api_key: str | None = Header(default=None)) -
     return json_rpc_error(request.id, -32601, '지원하지 않는 MCP 메서드입니다.')
 
 
-@app.post("/agent/run")
+@app.post("/agent/run", dependencies=[Depends(require_internal_api_key)])
 def run_agent(request: ChatRequest) -> dict[str, Any]:
     state = {
         "question": request.question,
