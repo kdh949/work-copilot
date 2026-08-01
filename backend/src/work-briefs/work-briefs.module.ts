@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { ReadinessModule } from '../readiness/readiness.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { TransientEvidenceFragment } from './entities/transient-evidence-fragment.entity';
 import { WorkBriefDraft } from './entities/work-brief-draft.entity';
@@ -16,6 +17,7 @@ import { WorkBriefsService } from './work-briefs.service';
   imports: [
     AuthModule,
     WorkItemsModule,
+    ReadinessModule,
     TypeOrmModule.forFeature([TransientEvidenceFragment, WorkBriefDraft]),
   ],
   controllers: [WorkBriefsController],

@@ -5,6 +5,7 @@ import type {
   ChildTask,
   EvidenceCitation,
   EvidenceCollection,
+  ReadinessAssessment,
   WorkBriefApiRequest,
   WorkEvidence,
 } from "./work-briefs.types";
@@ -42,6 +43,8 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [readiness, setReadiness] = useState<ReadinessAssessment | null>(null);
+  const [isAssessingReadiness, setIsAssessingReadiness] = useState(false);
 
   const selectedEvidence = useMemo(
     () => evidence.filter((item) => selectedEvidenceIds.includes(item.id)),
@@ -52,6 +55,7 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     setDraft(nextDraft);
     setEditingContent(nextDraft.content);
     setConflict(false);
+    setReadiness(null);
   }
 
   async function collectEvidence() {
@@ -188,6 +192,26 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     }
   }
 
+  async function assessReadiness() {
+    if (!draft) return;
+
+    try {
+      setIsAssessingReadiness(true);
+      setMessage("");
+      setReadiness(
+        await request<ReadinessAssessment>(
+          `/brief-drafts/${draft.id}/readiness`,
+        ),
+      );
+    } catch {
+      setMessage(
+        "준비성 점검을 완료하지 못했습니다. 연결 상태와 권한을 확인하세요.",
+      );
+    } finally {
+      setIsAssessingReadiness(false);
+    }
+  }
+
   function updateContent(updater: (current: BriefContent) => BriefContent) {
     setEditingContent((current) => (current ? updater(current) : current));
   }
@@ -273,6 +297,14 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
               >
                 근거 새로 고침
               </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={assessReadiness}
+                disabled={isSaving || isAssessingReadiness}
+              >
+                {isAssessingReadiness ? "점검 중" : "준비성 점검"}
+              </button>
               {conflict && (
                 <button
                   type="button"
@@ -290,6 +322,8 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
               {blockReason(blocker.code)}
             </p>
           ))}
+
+          {readiness && <ReadinessPanel assessment={readiness} />}
 
           {editingContent ? (
             <>
@@ -372,6 +406,93 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
             </section>
           )}
         </section>
+      )}
+    </section>
+  );
+}
+
+const readinessStatusLabel: Record<ReadinessAssessment["status"], string> = {
+  READY: "게시 준비 완료",
+  NEEDS_ATTENTION: "검토 필요",
+  BLOCKED: "게시 차단",
+  ACCESS_LIMITED: "권한 확인 필요",
+};
+
+function readinessFindingDescription(
+  finding: ReadinessAssessment["findings"][number],
+): string {
+  switch (finding.code) {
+    case "COVERAGE_MISSING": {
+      const missing = (finding.missing ?? [])
+        .map((item) =>
+          item === "child_task" ? "선택한 하위 작업" : "검증 근거",
+        )
+        .join(", ");
+      return `요구사항 ${(finding.requirementIndex ?? 0) + 1}: ${missing} 연결이 필요합니다.`;
+    }
+    case "CREATE_FIELD_MISSING":
+      return `Jira 생성 필수 field ${finding.fieldId ?? ""}의 템플릿 값을 설정하세요.`;
+    case "CREATE_METADATA_ACCESS_LIMITED":
+      return "현재 사용자 권한으로 Jira 생성 필수 field를 확인할 수 없습니다.";
+    case "CREATE_METADATA_UNAVAILABLE":
+      return "Jira 생성 metadata를 확인할 수 없습니다.";
+    case "UNRESOLVED_BLOCKER":
+      return "해결되지 않은 Jira blocker가 있습니다.";
+    case "ACCESS_LIMITED_DEPENDENCY":
+      return "연결된 blocker의 접근 권한을 확인할 수 없습니다.";
+    case "FRESHNESS_REVIEW_REQUIRED":
+      return "근거 버전이 변경되었거나 다시 검토해야 합니다.";
+    case "ACCESS_CHANGED":
+      return "원본 또는 선택 근거 접근 권한이 변경되었습니다.";
+    case "PROFILE_CHANGED":
+      return "초안 생성에 사용한 연동 프로필이 더 이상 활성 상태가 아닙니다.";
+  }
+}
+
+function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
+  return (
+    <section
+      className={`work-brief-readiness readiness-${assessment.status.toLowerCase()}`}
+      aria-label="통합 준비성 점검"
+    >
+      <header>
+        <div>
+          <p className="eyebrow">읽기 전용 점검</p>
+          <h3>{readinessStatusLabel[assessment.status]}</h3>
+        </div>
+        <span>{assessment.publishAllowed ? "게시 가능" : "게시 차단"}</span>
+      </header>
+      {assessment.findings.length === 0 ? (
+        <p>
+          요구사항, 하위 작업, 검증 근거 및 Jira 생성 필수 field를 확인했습니다.
+        </p>
+      ) : (
+        <ul>
+          {assessment.findings.map((finding, index) => (
+            <li key={`${finding.code}-${finding.fieldId ?? index}`}>
+              <strong>{finding.code}</strong>
+              <span>{readinessFindingDescription(finding)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {assessment.blockers.length > 0 && (
+        <ul className="work-brief-readiness-blockers">
+          {assessment.blockers.map((blocker, index) =>
+            blocker.kind === "visible_blocker" ? (
+              <li key={blocker.issueKey}>
+                <a href={blocker.url} target="_blank" rel="noreferrer">
+                  {blocker.issueKey}
+                </a>
+                {blocker.crossProject && " · 다른 프로젝트"}
+              </li>
+            ) : (
+              <li key={`access-limited-${index}`}>
+                연결된 blocker의 제목과 식별자는 권한 확인 전 표시하지 않습니다.
+              </li>
+            ),
+          )}
+        </ul>
       )}
     </section>
   );

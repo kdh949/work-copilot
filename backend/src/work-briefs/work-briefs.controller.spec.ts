@@ -10,6 +10,9 @@ describe('WorkBriefsController', () => {
     updateDraft: jest.fn(),
     refreshDraft: jest.fn(),
   };
+  const readinessService = {
+    assessDraft: jest.fn(),
+  };
 
   it('uses the protected brief-drafts API surface', () => {
     const guards = Reflect.getMetadata(
@@ -22,7 +25,10 @@ describe('WorkBriefsController', () => {
   });
 
   it('passes the session user and correlation ID without provider write adapters', async () => {
-    const controller = new WorkBriefsController(service as never);
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+    );
     const request = {
       user: { sub: 7 },
       correlationId: 'correlation-id',
@@ -41,6 +47,25 @@ describe('WorkBriefsController', () => {
     expect(service.createDraft).toHaveBeenCalledWith(
       7,
       expect.any(Object),
+      'correlation-id',
+    );
+  });
+
+  it('runs a protected, read-only readiness assessment for the draft owner', async () => {
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+    );
+    readinessService.assessDraft.mockResolvedValue({ status: 'READY' });
+
+    await controller.readiness('draft-id', {
+      user: { sub: 7 },
+      correlationId: 'correlation-id',
+    } as never);
+
+    expect(readinessService.assessDraft).toHaveBeenCalledWith(
+      7,
+      'draft-id',
       'correlation-id',
     );
   });

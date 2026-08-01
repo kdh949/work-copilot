@@ -21,6 +21,8 @@ const profileDto = (suffix: string): CreateIntegrationProfileDto => ({
   allowedProjectKeys: [`eng_${suffix}`],
   allowedSpaceKeys: [`space_${suffix}`],
   briefParentPageId: `parent-${suffix}`,
+  childTaskIssueTypeId: '10001',
+  childTaskTemplateFields: { customfield_10100: `value-${suffix}` },
 });
 
 describe('IntegrationProfilesService', () => {
@@ -142,6 +144,8 @@ describe('IntegrationProfilesService', () => {
       expect.objectContaining({
         jiraClientSecretConfigured: true,
         confluenceClientSecretConfigured: true,
+        childTaskIssueTypeId: '10001',
+        childTaskTemplateFields: { customfield_10100: 'value-one' },
       }),
     );
     expect(first).not.toHaveProperty('jiraClientSecret');
@@ -188,6 +192,18 @@ describe('IntegrationProfilesService', () => {
         { ...profileDto('empty-project'), allowedProjectKeys: ['   '] },
         7,
         'corr-6',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create(
+        {
+          ...profileDto('template-secret'),
+          childTaskTemplateFields: {
+            customfield_10100: 'sk-proj-abc123456789',
+          },
+        },
+        7,
+        'corr-7',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
