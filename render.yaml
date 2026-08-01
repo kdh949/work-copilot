@@ -26,6 +26,10 @@ services:
         value: text-embedding-3-small
       - key: AI_SERVICE_API_KEY
         sync: false
+      - key: RAG_RETRIEVAL_MODE
+        value: hybrid-chunks
+      - key: RAG_MIN_CONFIDENCE
+        value: "0"
       - key: MCP_API_KEY
         sync: false
       - key: HOLIDAY_COUNTRY

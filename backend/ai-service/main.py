@@ -110,6 +110,10 @@ def delete_document(source_id: str) -> dict[str, bool]:
                     "DELETE FROM wiki_documents WHERE source_id = %s",
                     (source_id,),
                 )
+                connection.execute(
+                    "DELETE FROM wiki_document_chunks WHERE source_id = %s",
+                    (source_id,),
+                )
         except Exception:
             delete_document_from_memory(source_id)
     else:
@@ -124,6 +128,17 @@ def delete_document(source_id: str) -> dict[str, bool]:
 def chat(request: ChatRequest) -> dict[str, Any]:
     department_filter = choose_department_filter(request.question, request.access.department)
     documents = search_documents_for_intent(request.question, department_filter, request.access)
+
+    if should_abstain(documents, get_minimum_confidence()):
+        return {
+            "answer": "확인 가능한 회사 위키 근거가 부족해 답변할 수 없습니다. 질문을 구체화하거나 관련 위키 문서를 추가해주세요.",
+            "searchMode": "department" if department_filter else "all",
+            "department": department_filter,
+            "retrievalMode": get_retrieval_mode(),
+            "abstained": True,
+            "sources": [],
+        }
+
     answer = make_answer(
         "회사 위키 내용을 바탕으로 질문에 답변해주세요.",
         request.question,
@@ -135,6 +150,8 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         "answer": answer,
         "searchMode": "department" if department_filter else "all",
         "department": department_filter,
+        "retrievalMode": get_retrieval_mode(),
+        "abstained": False,
         "sources": make_sources(documents),
     }
 
@@ -294,6 +311,19 @@ def prepare_database() -> None:
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS wiki_document_chunks (
+                    id SERIAL PRIMARY KEY,
+                    source_id VARCHAR(100) NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    embedding vector(1536),
+                    UNIQUE (source_id, chunk_index)
+                )
+            """)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_wiki_document_chunks_source_id ON wiki_document_chunks (source_id)",
+            )
     except Exception:
         print('Postgres 연결 실패: 메모리 저장소로 동작합니다.')
 
@@ -301,6 +331,7 @@ def prepare_database() -> None:
 def save_document_to_database(document: DocumentRequest) -> None:
     text = make_document_text(document)
     embedding = make_vector_text(make_embedding(text))
+    chunks = chunk_document_text(document.content)
 
     with psycopg.connect(get_database_url()) as connection:
         connection.execute(
@@ -324,6 +355,20 @@ def save_document_to_database(document: DocumentRequest) -> None:
                 embedding,
             ),
         )
+        connection.execute(
+            "DELETE FROM wiki_document_chunks WHERE source_id = %s",
+            (document.sourceId,),
+        )
+
+        for chunk_index, chunk in enumerate(chunks):
+            chunk_embedding = make_vector_text(make_embedding(f"{document.title}\n{chunk}"))
+            connection.execute(
+                """
+                INSERT INTO wiki_document_chunks (source_id, chunk_index, content, embedding)
+                VALUES (%s, %s, %s, %s::vector)
+                """,
+                (document.sourceId, chunk_index, chunk, chunk_embedding),
+            )
 
 
 def save_document_to_memory(document: DocumentRequest) -> None:
@@ -388,13 +433,30 @@ def search_documents_from_database(
     preferred_department: str | None,
     access: AccessContext,
 ) -> list[dict[str, Any]]:
+    if get_retrieval_mode() == 'document-vector':
+        return search_documents_from_database_baseline(question, preferred_department, access)
+
+    documents = search_documents_from_database_hybrid(question, preferred_department, access)
+
+    if documents:
+        return documents
+
+    return search_documents_from_database_baseline(question, preferred_department, access)
+
+
+def search_documents_from_database_baseline(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
     embedding = make_vector_text(make_embedding(question))
     department_value = preferred_department or ''
 
     with psycopg.connect(get_database_url()) as connection:
         rows = connection.execute(
             """
-            SELECT documents.source_id, documents.title, documents.content, documents.department, documents.tags
+            SELECT documents.source_id, documents.title, documents.content, documents.department, documents.tags,
+                   documents.embedding <-> %s::vector AS distance
             FROM wiki_documents AS documents
             JOIN "post" AS post
               ON post."sourceId" = documents.source_id
@@ -402,13 +464,135 @@ def search_documents_from_database(
             WHERE post."boardType" = 'wiki'
               AND (%s OR post.department = '공통' OR post.department = %s)
               AND (%s = '' OR documents.department = %s OR documents.department = '공통')
-            ORDER BY documents.embedding <-> %s::vector
+            ORDER BY distance
             LIMIT 5
             """,
-            (access.role == 'admin', access.department, department_value, department_value, embedding),
+            (embedding, access.role == 'admin', access.department, department_value, department_value),
         ).fetchall()
 
-    return rows_to_documents(rows)
+    documents = rows_to_documents([row[:5] for row in rows])
+
+    for document, row in zip(documents, rows):
+        document['confidence'] = distance_to_confidence(float(row[5]))
+
+    return documents
+
+
+def search_documents_from_database_hybrid(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
+    embedding = make_vector_text(make_embedding(question))
+    department_value = preferred_department or ''
+
+    with psycopg.connect(get_database_url()) as connection:
+        vector_rows = connection.execute(
+            """
+            SELECT chunks.id::text, chunks.source_id, documents.title, chunks.content,
+                   documents.department, documents.tags, chunks.embedding <-> %s::vector AS distance
+            FROM wiki_document_chunks AS chunks
+            JOIN wiki_documents AS documents ON documents.source_id = chunks.source_id
+            JOIN "post" AS post
+              ON post."sourceId" = documents.source_id
+              OR (post."sourceId" IS NULL AND documents.source_id = CONCAT('post-', post.id))
+            WHERE post."boardType" = 'wiki'
+              AND (%s OR post.department = '공통' OR post.department = %s)
+              AND (%s = '' OR documents.department = %s OR documents.department = '공통')
+            ORDER BY distance
+            LIMIT 20
+            """,
+            (embedding, access.role == 'admin', access.department, department_value, department_value),
+        ).fetchall()
+        keyword_rows = search_keyword_chunks(connection, question, department_value, access)
+
+    chunks_by_id: dict[str, dict[str, Any]] = {}
+
+    for row in vector_rows:
+        chunks_by_id[row[0]] = make_chunk_result(row, distance_to_confidence(float(row[6])))
+
+    for row in keyword_rows:
+        chunks_by_id.setdefault(row[0], make_chunk_result(row, 1.0))
+
+    ranked_chunk_ids = reciprocal_rank_fusion(
+        [row[0] for row in vector_rows],
+        [row[0] for row in keyword_rows],
+    )
+    documents: list[dict[str, Any]] = []
+    seen_source_ids: set[str] = set()
+
+    for chunk_id in ranked_chunk_ids:
+        chunk = chunks_by_id[chunk_id]
+
+        if chunk['sourceId'] in seen_source_ids:
+            continue
+
+        documents.append(chunk)
+        seen_source_ids.add(chunk['sourceId'])
+
+        if len(documents) >= 5:
+            break
+
+    return documents
+
+
+def search_keyword_chunks(
+    connection: Any,
+    question: str,
+    department_value: str,
+    access: AccessContext,
+) -> list[tuple[Any, ...]]:
+    terms = [word for word in question.split() if len(word) >= 2][:5]
+
+    if not terms:
+        return []
+
+    patterns = [f"%{term}%" for term in terms]
+    return connection.execute(
+        """
+        SELECT chunks.id::text, chunks.source_id, documents.title, chunks.content,
+               documents.department, documents.tags
+        FROM wiki_document_chunks AS chunks
+        JOIN wiki_documents AS documents ON documents.source_id = chunks.source_id
+        JOIN "post" AS post
+          ON post."sourceId" = documents.source_id
+          OR (post."sourceId" IS NULL AND documents.source_id = CONCAT('post-', post.id))
+        WHERE post."boardType" = 'wiki'
+          AND (%s OR post.department = '공통' OR post.department = %s)
+          AND (%s = '' OR documents.department = %s OR documents.department = '공통')
+          AND chunks.content ILIKE ANY(%s)
+        ORDER BY chunks.id
+        LIMIT 20
+        """,
+        (access.role == 'admin', access.department, department_value, department_value, patterns),
+    ).fetchall()
+
+
+def make_chunk_result(row: tuple[Any, ...], confidence: float) -> dict[str, Any]:
+    return {
+        'chunkId': str(row[0]),
+        'sourceId': str(row[1]),
+        'title': str(row[2]),
+        'content': str(row[3]),
+        'department': str(row[4]),
+        'tags': str(row[5]).split(',') if row[5] else [],
+        'confidence': confidence,
+    }
+
+
+def distance_to_confidence(distance: float) -> float:
+    return max(0.0, min(1.0, 1 - distance / 2))
+
+
+def get_retrieval_mode() -> str:
+    return os.getenv('RAG_RETRIEVAL_MODE', 'hybrid-chunks')
+
+
+def get_minimum_confidence() -> float:
+    try:
+        return max(0.0, min(1.0, float(os.getenv('RAG_MIN_CONFIDENCE', '0'))))
+    except ValueError:
+        return 0.0
 
 
 def search_documents_from_memory(
@@ -580,6 +764,50 @@ def make_vector_text(values: list[float]) -> str:
 
 def make_document_text(document: DocumentRequest) -> str:
     return f"{document.title}\n{document.department}\n{','.join(document.tags)}\n{document.content}"
+
+
+def chunk_document_text(text: str, chunk_size: int = 220, overlap: int = 40) -> list[str]:
+    words = text.split()
+
+    if not words:
+        return []
+
+    safe_chunk_size = max(1, chunk_size)
+    safe_overlap = min(max(0, overlap), safe_chunk_size - 1)
+    step = safe_chunk_size - safe_overlap
+    chunks: list[str] = []
+
+    for start in range(0, len(words), step):
+        chunk = " ".join(words[start:start + safe_chunk_size])
+        if chunk:
+            chunks.append(chunk)
+        if start + safe_chunk_size >= len(words):
+            break
+
+    return chunks
+
+
+def reciprocal_rank_fusion(
+    vector_ranked_ids: list[str],
+    keyword_ranked_ids: list[str],
+    rank_constant: int = 60,
+) -> list[str]:
+    scores: dict[str, float] = {}
+    first_seen: dict[str, int] = {}
+
+    for ranking in [vector_ranked_ids, keyword_ranked_ids]:
+        for index, item_id in enumerate(ranking, start=1):
+            scores[item_id] = scores.get(item_id, 0.0) + 1 / (rank_constant + index)
+            first_seen.setdefault(item_id, len(first_seen))
+
+    return sorted(scores, key=lambda item_id: (-scores[item_id], first_seen[item_id]))
+
+
+def should_abstain(documents: list[dict[str, Any]], minimum_confidence: float) -> bool:
+    if not documents:
+        return True
+
+    return max(float(document.get("confidence", 0.0)) for document in documents) < minimum_confidence
 
 
 def make_context(documents: list[dict[str, Any]]) -> str:
