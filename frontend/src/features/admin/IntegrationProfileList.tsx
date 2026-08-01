@@ -100,6 +100,10 @@ export function IntegrationProfileList({
               <dt>허용 space</dt>
               <dd>{profile.allowedSpaceKeys.join(", ") || "없음"}</dd>
             </div>
+            <div>
+              <dt>하위 작업 issue type</dt>
+              <dd>{profile.childTaskIssueTypeId ?? "미설정"}</dd>
+            </div>
           </dl>
 
           <p className="secret-state">

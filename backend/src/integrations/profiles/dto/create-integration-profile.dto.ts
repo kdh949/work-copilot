@@ -2,6 +2,8 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsObject,
+  IsOptional,
   IsString,
   MaxLength,
   MinLength,
@@ -64,4 +66,13 @@ export class CreateIntegrationProfileDto {
   @MinLength(1)
   @MaxLength(128)
   briefParentPageId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  childTaskIssueTypeId?: string;
+
+  @IsOptional()
+  @IsObject()
+  childTaskTemplateFields?: Record<string, unknown>;
 }

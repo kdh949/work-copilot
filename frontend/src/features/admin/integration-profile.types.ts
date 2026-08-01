@@ -11,10 +11,14 @@ export type IntegrationProfile = {
   allowedProjectKeys: string[];
   allowedSpaceKeys: string[];
   briefParentPageId: string | null;
+  childTaskIssueTypeId: string | null;
+  childTaskTemplateFields: Record<string, ChildTaskTemplateFieldValue>;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
+
+export type ChildTaskTemplateFieldValue = string | number | boolean | string[];
 
 export type IntegrationProfileInput = {
   jiraBaseUrl: string;
@@ -28,6 +32,8 @@ export type IntegrationProfileInput = {
   allowedProjectKeys: string[];
   allowedSpaceKeys: string[];
   briefParentPageId: string;
+  childTaskIssueTypeId?: string;
+  childTaskTemplateFields?: Record<string, ChildTaskTemplateFieldValue>;
 };
 
 type ResourceStatus = "reachable" | "authorization_required" | "unavailable";

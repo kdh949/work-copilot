@@ -11,6 +11,7 @@ import {
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import type { CorrelatedRequest } from '../common/http/correlation-id.middleware';
 import type { AuthenticatedRequest } from '../auth/guards/session-auth.guard';
+import { ReadinessService } from '../readiness/readiness.service';
 import {
   CreateBriefDraftDto,
   RefreshBriefDraftDto,
@@ -23,7 +24,10 @@ type WorkBriefRequest = AuthenticatedRequest & CorrelatedRequest;
 @Controller()
 @UseGuards(SessionAuthGuard)
 export class WorkBriefsController {
-  constructor(private readonly workBriefsService: WorkBriefsService) {}
+  constructor(
+    private readonly workBriefsService: WorkBriefsService,
+    private readonly readinessService: ReadinessService,
+  ) {}
 
   @Post('brief-drafts')
   create(@Body() dto: CreateBriefDraftDto, @Req() request: WorkBriefRequest) {
@@ -37,6 +41,15 @@ export class WorkBriefsController {
   @Get('brief-drafts/:id')
   find(@Param('id') id: string, @Req() request: WorkBriefRequest) {
     return this.workBriefsService.findDraft(request.user.sub, id);
+  }
+
+  @Get('brief-drafts/:id/readiness')
+  readiness(@Param('id') id: string, @Req() request: WorkBriefRequest) {
+    return this.readinessService.assessDraft(
+      request.user.sub,
+      id,
+      request.correlationId ?? 'missing-correlation-id',
+    );
   }
 
   @Patch('brief-drafts/:id')

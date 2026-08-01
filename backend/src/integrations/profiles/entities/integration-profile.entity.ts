@@ -6,11 +6,19 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+export type ChildTaskTemplateFieldValue = string | number | boolean | string[];
+
+export type ChildTaskTemplate = {
+  issueTypeId: string;
+  fields: Record<string, ChildTaskTemplateFieldValue>;
+};
+
 export type OAuthScopePolicy = {
   oauthScopes?: {
     jira?: string[];
     confluence?: string[];
   };
+  childTaskTemplate?: ChildTaskTemplate;
 };
 
 @Entity('integration_profiles')
