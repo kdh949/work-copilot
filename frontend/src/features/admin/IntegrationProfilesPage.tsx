@@ -1,0 +1,189 @@
+import { useCallback, useEffect, useState } from "react";
+import { IntegrationProfileForm } from "./IntegrationProfileForm";
+import { IntegrationProfileList } from "./IntegrationProfileList";
+import type {
+  ApiRequest,
+  IntegrationConnectionTest,
+  IntegrationProfile,
+  IntegrationProfileInput,
+} from "./integration-profile.types";
+import "./integration-profiles.css";
+
+type IntegrationProfilesPageProps = {
+  request: ApiRequest;
+};
+
+const endpoint = "/admin/integration-profiles";
+
+export function IntegrationProfilesPage({
+  request,
+}: IntegrationProfilesPageProps) {
+  const [profiles, setProfiles] = useState<IntegrationProfile[]>([]);
+  const [editingProfile, setEditingProfile] =
+    useState<IntegrationProfile | null>(null);
+  const [testResults, setTestResults] = useState<
+    Record<string, IntegrationConnectionTest>
+  >({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTestingProfileId, setIsTestingProfileId] = useState<string | null>(
+    null,
+  );
+  const [error, setError] = useState("");
+
+  const loadProfiles = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setProfiles(await request<IntegrationProfile[]>(endpoint));
+    } catch {
+      setError("연동 프로필을 불러오지 못했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    void request<IntegrationProfile[]>(endpoint)
+      .then((loadedProfiles) => {
+        if (isCurrent) setProfiles(loadedProfiles);
+      })
+      .catch(() => {
+        if (isCurrent) setError("연동 프로필을 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [request]);
+
+  async function saveProfile(input: IntegrationProfileInput) {
+    try {
+      setIsSaving(true);
+      setError("");
+      const payload = { ...input } as Record<string, unknown>;
+
+      if (!payload.jiraClientSecret) delete payload.jiraClientSecret;
+      if (!payload.confluenceClientSecret)
+        delete payload.confluenceClientSecret;
+
+      if (editingProfile) {
+        await request(`${endpoint}/${editingProfile.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await request(endpoint, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      setEditingProfile(null);
+      await loadProfiles();
+    } catch {
+      setError(
+        "프로필을 저장하지 못했습니다. HTTPS URL과 허용 scope를 다시 확인하세요.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function activateProfile(profile: IntegrationProfile) {
+    try {
+      setError("");
+      await request(`${endpoint}/${profile.id}/activate`, { method: "POST" });
+      await loadProfiles();
+    } catch {
+      setError("프로필을 활성화하지 못했습니다.");
+    }
+  }
+
+  async function testProfile(profile: IntegrationProfile) {
+    try {
+      setError("");
+      setIsTestingProfileId(profile.id);
+      const result = await request<IntegrationConnectionTest>(
+        `${endpoint}/${profile.id}/test`,
+        { method: "POST" },
+      );
+      setTestResults((current) => ({ ...current, [profile.id]: result }));
+    } catch {
+      setError(
+        "연결을 확인하지 못했습니다. 저장된 URL과 네트워크 정책을 확인하세요.",
+      );
+    } finally {
+      setIsTestingProfileId(null);
+    }
+  }
+
+  async function deleteProfile(profile: IntegrationProfile) {
+    if (!window.confirm("이 비활성 프로필을 삭제할까요?")) return;
+
+    try {
+      setError("");
+      await request(`${endpoint}/${profile.id}`, { method: "DELETE" });
+      setEditingProfile((current) =>
+        current?.id === profile.id ? null : current,
+      );
+      await loadProfiles();
+    } catch {
+      setError(
+        "프로필을 삭제하지 못했습니다. 활성 프로필은 먼저 다른 프로필을 활성화하세요.",
+      );
+    }
+  }
+
+  return (
+    <section
+      className="integration-admin-page"
+      aria-labelledby="integration-admin-title"
+    >
+      <header className="integration-admin-intro">
+        <p className="eyebrow">관리자 전용</p>
+        <h1 id="integration-admin-title">Jira · Confluence 연동 프로필</h1>
+        <p>
+          활성 프로필은 하나만 허용됩니다. 연결 확인은 설정과 허용 범위만
+          검사하며 외부 문서를 저장하지 않습니다.
+        </p>
+      </header>
+
+      {error && (
+        <p className="message" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="integration-admin-layout">
+        <IntegrationProfileForm
+          key={editingProfile?.id ?? "new"}
+          profile={editingProfile}
+          isSaving={isSaving}
+          onSubmit={saveProfile}
+          onCancelEdit={() => setEditingProfile(null)}
+        />
+
+        {isLoading ? (
+          <section className="admin-empty-state" aria-busy="true">
+            프로필을 불러오는 중입니다.
+          </section>
+        ) : (
+          <IntegrationProfileList
+            profiles={profiles}
+            testResults={testResults}
+            isTestingProfileId={isTestingProfileId}
+            onEdit={setEditingProfile}
+            onActivate={activateProfile}
+            onTest={testProfile}
+            onDelete={deleteProfile}
+          />
+        )}
+      </div>
+    </section>
+  );
+}

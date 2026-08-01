@@ -1,0 +1,197 @@
+.integration-admin-page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.integration-admin-intro {
+  max-width: 760px;
+}
+
+.integration-admin-intro h1,
+.integration-admin-intro p {
+  margin: 0;
+}
+
+.integration-admin-intro h1 {
+  margin-bottom: 0.5rem;
+}
+
+.integration-admin-intro > p:last-child,
+.admin-section-heading p,
+.form-help,
+.integration-profile-card-heading p,
+.secret-state,
+.connection-result p {
+  color: #64748b;
+}
+
+.eyebrow {
+  margin-bottom: 0.5rem !important;
+  color: #1d4ed8 !important;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.integration-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.integration-profile-form,
+.integration-profile-card,
+.admin-empty-state {
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 1.25rem;
+}
+
+.integration-profile-form {
+  position: sticky;
+  top: 1rem;
+}
+
+.admin-section-heading,
+.integration-profile-card-heading,
+.button-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-section-heading h2,
+.admin-section-heading p,
+.integration-profile-card h2,
+.integration-profile-card-heading p,
+.admin-empty-state h2,
+.admin-empty-state p {
+  margin: 0;
+}
+
+.integration-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.integration-form-grid fieldset {
+  min-width: 0;
+  margin: 1rem 0 0;
+  border: 1px solid #d8e0ea;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.integration-form-grid legend {
+  padding: 0 0.25rem;
+  font-weight: 800;
+}
+
+.integration-profile-form label {
+  font-size: 0.875rem;
+}
+
+.form-help {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.integration-profile-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.integration-profile-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.integration-profile-card-heading h2 {
+  font-size: 1rem;
+}
+
+.integration-profile-card-heading p {
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.status {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  color: #475569;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.status.active {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.integration-profile-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.integration-profile-details div {
+  min-width: 0;
+}
+
+.integration-profile-details dt {
+  color: #64748b;
+  font-size: 0.8125rem;
+}
+
+.integration-profile-details dd {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.secret-state {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.connection-result {
+  border-left: 3px solid #2563eb;
+  background: #eff6ff;
+  padding: 0.75rem;
+}
+
+.connection-result p {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+}
+
+.admin-empty-state {
+  color: #475569;
+}
+
+@media (max-width: 900px) {
+  .integration-admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .integration-profile-form {
+    position: static;
+  }
+}
+
+@media (max-width: 600px) {
+  .integration-form-grid,
+  .integration-profile-details {
+    grid-template-columns: 1fr;
+  }
+}

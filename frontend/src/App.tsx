@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
+import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const CHAT_SUGGESTIONS = [
@@ -1356,6 +1357,10 @@ function App() {
               )}
             </section>
           </section>
+        )}
+
+        {menu === "admin" && user?.role === "admin" && (
+          <IntegrationProfilesPage request={request} />
         )}
 
         {menu === "notes" && (

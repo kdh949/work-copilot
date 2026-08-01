@@ -93,6 +93,16 @@ services:
         value: "3600"
       - key: INTEGRATION_ENCRYPTION_KEY
         sync: false
+      - key: INTEGRATION_ENCRYPTION_KEY_VERSION
+        value: "1"
+      - key: INTEGRATION_CALLBACK_BASE_URL
+        sync: false
+      - key: INTEGRATION_BASE_URL_HOST_ALLOWLIST
+        sync: false
+      - key: INTEGRATION_JIRA_SCOPE_ALLOWLIST
+        value: "READ"
+      - key: INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST
+        value: "READ"
       - key: TRANSIENT_CONTENT_ENCRYPTION_KEY
         sync: false
       - key: AI_SERVICE_URL
