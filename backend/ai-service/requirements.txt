@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-dotenv
+requests
+psycopg[binary]
+langchain
+langchain-openai
