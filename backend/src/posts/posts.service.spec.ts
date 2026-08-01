@@ -4,7 +4,7 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 import { Post } from "./post.entity";
 import { Comment } from "./comment.entity";
 import { UsersService } from "../users/users.service";
-import { AiService } from "../ai/ai.service";
+import { AiSyncService } from '../ai/ai-sync.service';
 import { ForbiddenException } from '@nestjs/common';
 
 describe('PostsService', () => {
@@ -27,7 +27,7 @@ describe('PostsService', () => {
           useValue: {},
         },
         {
-          provide: AiService,
+          provide: AiSyncService,
           useValue: {},
         },
       ],
@@ -51,7 +51,7 @@ describe('PostsService', () => {
       { findOne: jest.fn().mockResolvedValue(wikiPost) } as never,
       {} as never,
       {} as UsersService,
-      {} as AiService,
+      {} as AiSyncService,
     );
 
     await expect(protectedService.findOne(1, {
@@ -72,7 +72,7 @@ describe('PostsService', () => {
       { findOne: jest.fn().mockResolvedValue(wikiPost) } as never,
       {} as never,
       {} as UsersService,
-      {} as AiService,
+      {} as AiSyncService,
     );
 
     await expect(protectedService.findOne(1, {

@@ -93,21 +93,29 @@ export class AiService {
             tags: post.tags || [],
         };
 
-        try {
-            await this.postToAi('/documents', document);
-        } catch (error) {
-            console.log('AI 문서 동기화 실패', error);
+        const response = await fetch(`${this.getAiUrl()}/documents`, {
+            method: 'POST',
+            headers: this.getAiHeaders(),
+            body: JSON.stringify(document),
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI 문서 동기화 실패: HTTP ${response.status}`);
         }
     }
 
     async deletePost(post: Post): Promise<void> {
-        try {
-            await fetch(`${this.getAiUrl()}/documents/${this.getPostSourceId(post)}`, {
-                method: 'DELETE',
-                headers: this.getAiHeaders(),
-            });
-        } catch (error) {
-            console.log('AI 문서 삭제 동기화 실패', error);
+        await this.deleteDocumentBySourceId(this.getPostSourceId(post));
+    }
+
+    async deleteDocumentBySourceId(sourceId: string): Promise<void> {
+        const response = await fetch(`${this.getAiUrl()}/documents/${sourceId}`, {
+            method: 'DELETE',
+            headers: this.getAiHeaders(),
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI 문서 삭제 동기화 실패: HTTP ${response.status}`);
         }
     }
 

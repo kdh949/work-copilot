@@ -8,8 +8,9 @@ import { UsersService } from "../users/users.service";
 import { Comment } from "./comment.entity";
 import { CreateCommentDto } from "./dto/create-comment.dto";
 import { UpdateCommentDto } from "./dto/update-comment.dto";
-import { AiService } from "../ai/ai.service";
 import { canAccessWiki, type WikiAccessContext } from './wiki-access';
+import { AiSyncService } from '../ai/ai-sync.service';
+import { randomUUID } from 'crypto';
 
 // import {contains} from "class-validator"; // 타입 검증 미진행 (엔티티에서 할 예정)
 
@@ -60,7 +61,7 @@ export class PostsService {
         @InjectRepository(Comment)
         private readonly commentRepository: Repository<Comment>,
         private readonly usersService: UsersService,
-        private readonly aiService: AiService,
+        private readonly aiSyncService: AiSyncService,
     ) { }
 
     async findAll(options: FindAllPostsOptions, actor?: PostAccessContext): Promise<PagedPostsResponse> {
@@ -277,6 +278,7 @@ export class PostsService {
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const post = this.postRepository.create({
+            sourceId: `wiki-${randomUUID()}`,
             title: createPostDto.title,
             content: createPostDto.content,
             boardType: 'wiki',
@@ -290,8 +292,12 @@ export class PostsService {
             author,
         });
 
-        const savedPost = await this.postRepository.save(post);
-        await this.aiService.syncPost(savedPost);
+        const savedPost = await this.postRepository.manager.transaction(async (manager) => {
+            const saved = await manager.save(post);
+            await this.aiSyncService.enqueue(manager, this.getSyncSourceId(saved), 'upsert');
+            return saved;
+        });
+        this.aiSyncService.trigger();
 
         return savedPost;
     }
@@ -338,10 +344,18 @@ export class PostsService {
             post.summary = this.makeSummary(post.content);
         }
 
-        const savedPost = await this.postRepository.save(post);
+        const savedPost = await this.postRepository.manager.transaction(async (manager) => {
+            const saved = await manager.save(post);
+
+            if (saved.boardType === 'wiki') {
+                await this.aiSyncService.enqueue(manager, this.getSyncSourceId(saved), 'upsert');
+            }
+
+            return saved;
+        });
 
         if (savedPost.boardType === 'wiki') {
-            await this.aiService.syncPost(savedPost);
+            this.aiSyncService.trigger();
         }
 
         return savedPost;
@@ -353,10 +367,16 @@ export class PostsService {
 
         this.checkPostPermission(post, actor.userId, actor.role);
 
-        await this.postRepository.delete(post.id);
+        await this.postRepository.manager.transaction(async (manager) => {
+            if (post.boardType === 'wiki') {
+                await this.aiSyncService.enqueue(manager, this.getSyncSourceId(post), 'delete');
+            }
+
+            await manager.delete(Post, post.id);
+        });
 
         if (post.boardType === 'wiki') {
-            await this.aiService.deletePost(post);
+            this.aiSyncService.trigger();
         }
 
         return {
@@ -435,6 +455,10 @@ export class PostsService {
             role: user.role || fallbackRole,
             department: user.department,
         };
+    }
+
+    private getSyncSourceId(post: Post): string {
+        return post.sourceId || `post-${post.id}`;
     }
 
     private checkAdmin(userRole: string): void {
