@@ -91,3 +91,35 @@ export type ReadinessAssessment = {
   blockers: ReadinessBlocker[];
   evaluatedAt: string;
 };
+
+export type PublicationStep = {
+  key: string;
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "NEEDS_REVIEW";
+  attempts: number;
+  errorCode:
+    | "CONFLUENCE_VERSION_CONFLICT"
+    | "CONFLUENCE_WRITE_FAILED"
+    | "JIRA_REMOTE_LINK_FAILED"
+    | "JIRA_SUMMARY_COMMENT_FAILED"
+    | "JIRA_CHILD_TASK_FAILED"
+    | null;
+  retryable: boolean;
+};
+
+export type BriefPublication = {
+  id: string;
+  draftId: string;
+  draftVersion: number;
+  status:
+    | "PENDING"
+    | "PUBLISHING"
+    | "PUBLISHED"
+    | "PARTIALLY_PUBLISHED"
+    | "NEEDS_REVIEW";
+  executionMode: "mock";
+  externalWritePerformed: false;
+  canRetry: boolean;
+  requiresReview: boolean;
+  steps: PublicationStep[];
+  updatedAt: string;
+};

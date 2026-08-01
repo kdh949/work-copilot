@@ -13,6 +13,11 @@ describe('WorkBriefsController', () => {
   const readinessService = {
     assessDraft: jest.fn(),
   };
+  const publicationService = {
+    publish: jest.fn(),
+    findLatest: jest.fn(),
+    retry: jest.fn(),
+  };
 
   it('uses the protected brief-drafts API surface', () => {
     const guards = Reflect.getMetadata(
@@ -28,6 +33,7 @@ describe('WorkBriefsController', () => {
     const controller = new WorkBriefsController(
       service as never,
       readinessService as never,
+      publicationService as never,
     );
     const request = {
       user: { sub: 7 },
@@ -55,6 +61,7 @@ describe('WorkBriefsController', () => {
     const controller = new WorkBriefsController(
       service as never,
       readinessService as never,
+      publicationService as never,
     );
     readinessService.assessDraft.mockResolvedValue({ status: 'READY' });
 
@@ -66,6 +73,33 @@ describe('WorkBriefsController', () => {
     expect(readinessService.assessDraft).toHaveBeenCalledWith(
       7,
       'draft-id',
+      'correlation-id',
+    );
+  });
+
+  it('passes an idempotency key and explicit approval to the publication saga', async () => {
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+      publicationService as never,
+    );
+    publicationService.publish.mockResolvedValue({ status: 'PUBLISHED' });
+
+    await controller.publish(
+      'draft-id',
+      'publish-key-1',
+      { draftVersion: 3, approved: true },
+      { user: { sub: 7 }, correlationId: 'correlation-id' } as never,
+    );
+
+    expect(publicationService.publish).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      {
+        draftVersion: 3,
+        approved: true,
+        idempotencyKey: 'publish-key-1',
+      },
       'correlation-id',
     );
   });
