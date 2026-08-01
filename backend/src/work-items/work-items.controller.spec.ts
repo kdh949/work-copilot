@@ -11,7 +11,7 @@ describe('WorkItemsController', () => {
     ).toEqual([SessionAuthGuard]);
   });
 
-  it('passes only authenticated user and correlation metadata to the Jira adapter', async () => {
+  it('uses the documented context route and legacy alias for the same authenticated Jira read', async () => {
     const collectIssueEvidence = jest.fn(() =>
       Promise.resolve({ evidence: [] }),
     );
@@ -20,11 +20,25 @@ describe('WorkItemsController', () => {
       {} as ConfluenceWorkItemService,
     );
 
-    await controller.jiraIssue('ENG-1', {
+    const request = {
       user: { sub: 42 },
       correlationId: 'corr-42',
-    } as never);
+    } as never;
 
-    expect(collectIssueEvidence).toHaveBeenCalledWith(42, 'ENG-1', 'corr-42');
+    await controller.jiraContext('ENG-1', request);
+    await controller.jiraIssue('ENG-1', request);
+
+    expect(collectIssueEvidence).toHaveBeenNthCalledWith(
+      1,
+      42,
+      'ENG-1',
+      'corr-42',
+    );
+    expect(collectIssueEvidence).toHaveBeenNthCalledWith(
+      2,
+      42,
+      'ENG-1',
+      'corr-42',
+    );
   });
 });
