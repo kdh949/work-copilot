@@ -7,7 +7,7 @@ type User = {
   role: string;
 };
 
-export type MenuName = "posts" | "notes" | "login";
+export type MenuName = "posts" | "notes" | "admin" | "login";
 
 type HeaderProps = {
   title: string;
@@ -39,6 +39,15 @@ export function Header(props: HeaderProps) {
             >
               내 노트
             </button>
+            {props.user.role === "admin" && (
+              <button
+                type="button"
+                className={props.menu === "admin" ? "active" : ""}
+                onClick={() => props.onMenuClick("admin")}
+              >
+                연동 관리
+              </button>
+            )}
             <span>
               {props.user.nickname} · {props.user.department || "부서 미등록"} ·{" "}
               {props.user.employeeNumber || "사번 미등록"} · {props.user.role}
