@@ -94,6 +94,54 @@ class WorkBriefGenerationTests(unittest.TestCase):
         self.assertTrue(request_payload["text"]["format"]["strict"])
         self.assertEqual(result["evidenceIds"], ["jira:DEMO-1"])
 
+    def test_uses_shared_openai_model_unless_work_brief_override_is_configured(self) -> None:
+        output = {
+            "title": "배포 준비",
+            "summary": "완료",
+            "keyPoints": ["검증 완료"],
+            "risks": ["없음"],
+            "nextSteps": ["공유"],
+            "evidenceIds": ["jira:DEMO-1"],
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-openai-key",
+                "OPENAI_MODEL": "shared-deployment-model",
+            },
+            clear=True,
+        ):
+            with patch(
+                "work_brief.service.requests.post",
+                return_value=valid_model_response(output),
+            ) as post:
+                generate_work_brief(self.request("safe evidence"))
+
+        self.assertEqual(
+            post.call_args.kwargs["json"]["model"],
+            "shared-deployment-model",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-openai-key",
+                "OPENAI_MODEL": "shared-deployment-model",
+                "WORK_BRIEF_OPENAI_MODEL": "work-brief-override",
+            },
+            clear=True,
+        ):
+            with patch(
+                "work_brief.service.requests.post",
+                return_value=valid_model_response(output),
+            ) as post:
+                generate_work_brief(self.request("safe evidence"))
+
+        self.assertEqual(
+            post.call_args.kwargs["json"]["model"],
+            "work-brief-override",
+        )
+
     def test_secret_fixtures_never_reach_openai_or_database_paths(self) -> None:
         fixtures = (
             "sk-proj-abcdefghijklmnopqrstuvwxyz",

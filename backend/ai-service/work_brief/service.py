@@ -145,7 +145,13 @@ def _call_openai(instruction: str, evidence: list[dict[str, str]]) -> dict[str, 
         raise WorkBriefError("Work brief AI service is unavailable.")
 
     payload = {
-        "model": os.getenv("WORK_BRIEF_OPENAI_MODEL", "gpt-5.6"),
+        # Keep a work-brief-specific override, but honor the deployment-wide
+        # OpenAI model setting when no override is configured.
+        "model": (
+            os.getenv("WORK_BRIEF_OPENAI_MODEL")
+            or os.getenv("OPENAI_MODEL")
+            or "gpt-5.6"
+        ),
         "store": False,
         "input": [
             {"role": "system", "content": SYSTEM_INSTRUCTION},

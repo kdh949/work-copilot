@@ -24,7 +24,9 @@ type CleanupJobState = {
 };
 
 const JOBS: CleanupJob[] = ['transient_evidence', 'source_change_events'];
-const DEFAULT_MAX_AGE_SECONDS = 2 * 60 * 60;
+// The pilot runbook calls for an alert before a missed hourly cleanup job can
+// silently exceed the evidence/event retention window.
+const DEFAULT_MAX_AGE_SECONDS = 70 * 60;
 
 @Injectable()
 export class CleanupHealthService {
