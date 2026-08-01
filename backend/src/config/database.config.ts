@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { type PostgresDataSourceOptions } from 'typeorm/driver/postgres/PostgresDataSourceOptions';
 import { WorkCopilotFoundation1785510000000 } from '../database/migrations/2026080100000-work-copilot-foundation';
+import { KeycloakOidcSession1785596400000 } from '../database/migrations/2026080101000-keycloak-oidc-session';
 
 type Environment = NodeJS.ProcessEnv;
 
@@ -38,7 +39,10 @@ export const createDatabaseOptions = (
     synchronize: false,
     migrationsRun: false,
     migrationsTableName: 'schema_migrations',
-    migrations: [WorkCopilotFoundation1785510000000],
+    migrations: [
+      WorkCopilotFoundation1785510000000,
+      KeycloakOidcSession1785596400000,
+    ],
   };
 };
 

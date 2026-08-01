@@ -1,8 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PostsController } from './posts.controller';
-import { PostsService } from "./posts.service";
-import { JwtService } from "@nestjs/jwt";
-import { ConfigService } from "@nestjs/config";
+import { PostsService } from './posts.service';
+import { ConfigService } from '@nestjs/config';
+import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
+import { SessionService } from '../auth/session/session.service';
 
 describe('PostsController', () => {
   let controller: PostsController;
@@ -16,11 +17,15 @@ describe('PostsController', () => {
           useValue: {},
         },
         {
-          provide: JwtService,
+          provide: ConfigService,
           useValue: {},
         },
         {
-          provide: ConfigService,
+          provide: SessionAuthGuard,
+          useValue: {},
+        },
+        {
+          provide: SessionService,
           useValue: {},
         },
       ],

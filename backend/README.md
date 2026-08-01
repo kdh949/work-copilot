@@ -1,6 +1,6 @@
 # DH Company Wiki Backend
 
-NestJS 게시판 백엔드입니다. 회원가입, 로그인, 회사 위키, 개인 노트, 댓글, 태그, 검색, 페이징을 제공합니다.
+NestJS 게시판 백엔드입니다. Keycloak OIDC 로그인, 회사 위키, 개인 노트, 댓글, 태그, 검색, 페이징을 제공합니다.
 
 회사 위키 문서를 작성하거나 수정하면 FastAPI AI 서비스의 `/documents` API로 문서를 보내 RAG 검색 자료로 사용합니다.
 
@@ -20,8 +20,9 @@ docker compose up -d
 
 ## 주요 API
 
-- `POST /auth/signup`: 회원가입
-- `POST /auth/login`: 로그인
+- `GET /auth/oidc/login`: Keycloak OIDC 로그인 시작
+- `GET /auth/oidc/callback`: Keycloak OIDC callback
+- `POST /auth/logout`: 세션 로그아웃
 - `GET /auth/me`: 내 정보
 - `GET /posts?boardType=wiki`: 회사 위키 목록, 검색, 페이징
 - `POST /posts`: 회사 위키 작성, 관리자만 가능
@@ -40,12 +41,13 @@ docker compose up -d
 ## 환경변수
 
 - `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`: Postgres 연결 정보
-- `JWT_SECRET`, `JWT_EXPIRES_IN`: 로그인 토큰 설정
+- `KEYCLOAK_ISSUER`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_REDIRECT_URI`: Keycloak OIDC 설정
+- `KEYCLOAK_ALLOWED_EMAIL_DOMAINS`: 쉼표로 구분한 허용 회사 이메일 도메인
+- `OIDC_ATTEMPT_ENCRYPTION_KEY`: base64 32-byte OIDC PKCE verifier 암호화 키
+- `SESSION_TTL_SECONDS`: 300~86400초 범위의 BFF 세션 수명
 - `AI_SERVICE_URL`: FastAPI AI 서비스 주소
 
 ## 권한
 
-- 첫 번째로 가입한 사용자는 `admin`입니다.
-- 그 이후 가입한 사용자는 `employee`입니다.
-- `admin`은 회사 위키를 작성, 수정, 삭제할 수 있습니다.
-- `employee`는 회사 위키를 조회하고 본인 노트만 작성, 수정, 삭제할 수 있습니다.
+- Keycloak ID token의 `work-copilot-admin` claim이 있는 사용자만 관리자 권한을 가집니다.
+- 일반 사용자는 회사 위키를 조회하고 본인 노트만 작성, 수정, 삭제할 수 있습니다.

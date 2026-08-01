@@ -1,47 +1,24 @@
-### 첫 회원가입 - 첫 가입자는 admin
-POST http://localhost:3000/auth/signup
-Content-Type: application/json
+### Keycloak 로그인 시작
+# 브라우저에서 이 요청을 열어 Keycloak 로그인을 마칩니다.
+GET http://localhost:3000/auth/oidc/login
 
-{
-  "employeeNumber": "A0001",
-  "email": "admin@example.com",
-  "password": "12345678",
-  "nickname": "관리자"
-}
+### 현재 BFF 세션 확인
+# HTTP client의 cookie jar가 work_copilot_session을 보존해야 합니다.
+GET http://localhost:3000/auth/me
 
-### 직원 회원가입 - 이후 가입자는 employee
-POST http://localhost:3000/auth/signup
-Content-Type: application/json
-
-{
-  "employeeNumber": "E0001",
-  "email": "newbie@example.com",
-  "password": "12345678",
-  "nickname": "신입사원"
-}
-
-### 로그인
-# @name login
-POST http://localhost:3000/auth/login
-Content-Type: application/json
-
-{
-  "email": "admin@example.com",
-  "password": "12345678"
-}
+### 변경 요청용 CSRF 값 발급 및 세션 회전
+# 응답의 csrfToken은 메모리 변수로만 보관합니다.
+# @name csrf
+GET http://localhost:3000/auth/csrf
 
 > {%
-    client.global.set("accessToken", response.body.accessToken);
+    client.global.set("csrfToken", response.body.csrfToken);
 %}
 
-### 내 정보 - role 포함
-GET http://localhost:3000/auth/me
-Authorization: Bearer {{accessToken}}
-
-### 회사 위키 생성 - admin만 가능
+### 회사 위키 생성 - Keycloak work-copilot-admin claim 필요
 POST http://localhost:3000/posts
-Authorization: Bearer {{accessToken}}
 Content-Type: application/json
+X-CSRF-Token: {{csrfToken}}
 
 {
   "title": "인사팀 온보딩 안내",
@@ -50,100 +27,6 @@ Content-Type: application/json
   "tags": ["온보딩", "급여", "인사"]
 }
 
-### 회사 위키 목록
-GET http://localhost:3000/posts?boardType=wiki&page=1&limit=5&keyword=급여&department=인사&tag=온보딩
-
-### 회사 위키 상세
-GET http://localhost:3000/posts/1
-Authorization: Bearer {{accessToken}}
-
-### 회사 위키 수정 - admin만 가능
-PATCH http://localhost:3000/posts/1
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "title": "인사팀 온보딩 안내 수정",
-  "tags": ["온보딩", "급여", "계약"]
-}
-
-### 댓글 작성
-POST http://localhost:3000/posts/1/comments
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "content": "급여 계좌 등록 위치도 추가하면 좋겠습니다."
-}
-
-### 댓글 삭제 - 본인 또는 admin 가능
-DELETE http://localhost:3000/posts/1/comments/1
-Authorization: Bearer {{accessToken}}
-
-### 내 노트 생성
-POST http://localhost:3000/posts/notes
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "title": "급여 계좌 등록 정리",
-  "content": "급여 계좌 등록은 입사 첫날 완료해야 한다.",
-  "department": "인사",
-  "tags": ["급여", "노트"]
-}
-
-### 내 노트 목록 - 기존 question 타입도 함께 조회
-GET http://localhost:3000/posts/notes/my?page=1&limit=5&keyword=급여
-Authorization: Bearer {{accessToken}}
-
-### RAG 챗봇
-POST http://localhost:3000/ai/chat
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "question": "입사 첫날 무엇부터 해야 하나요?",
-  "department": "인사"
-}
-
-### 온보딩 추천
-POST http://localhost:3000/ai/onboarding
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "department": "인사",
-  "employeeName": "신입사원"
-}
-
-### 강의안 생성
-POST http://localhost:3000/ai/lecture
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "department": "인사",
-  "employeeName": "신입사원"
-}
-
-### Agent 실행
-POST http://localhost:3000/ai/agent
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "question": "온보딩 중 휴일과 급여 관련해서 확인할 내용을 알려줘",
-  "department": "인사"
-}
-
-### FastAPI MCP tools/list
-POST http://localhost:8000/mcp
-Content-Type: application/json
-X-API-Key: local-mcp-key
-
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list",
-  "params": {}
-}
+### 로그아웃
+POST http://localhost:3000/auth/logout
+X-CSRF-Token: {{csrfToken}}
