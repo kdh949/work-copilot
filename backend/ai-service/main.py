@@ -7,8 +7,16 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from work_brief.service import (
+    WorkBriefError,
+    WorkBriefGenerateRequest,
+    generate_work_brief as generate_work_brief_response,
+)
 
 try:
     import psycopg
@@ -30,6 +38,22 @@ app = FastAPI(title="DH Board AI Service")
 
 fallback_documents: list[dict[str, Any]] = []
 agent_memory: dict[str, list[dict[str, str]]] = {}
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    request: Request,
+    error: RequestValidationError,
+):
+    # Default FastAPI validation errors can echo an invalid request value.  The
+    # work-brief route accepts external evidence, so it intentionally exposes
+    # only a constant message rather than a pre-DLP source fragment.
+    if request.url.path.startswith("/work-brief/"):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Work brief request is invalid."},
+        )
+    return await request_validation_exception_handler(request, error)
 
 
 class DocumentRequest(BaseModel):
@@ -128,6 +152,18 @@ def delete_document(source_id: str) -> dict[str, bool]:
     return {
         "deleted": True,
     }
+
+
+@app.post("/work-brief/generate", dependencies=[Depends(require_internal_api_key)])
+def generate_work_brief(request: WorkBriefGenerateRequest) -> dict[str, Any]:
+    """Generate from DLP-masked transient evidence without wiki RAG access."""
+
+    try:
+        return generate_work_brief_response(request)
+    except WorkBriefError as error:
+        # The service deliberately discards provider/DLP detail before it reaches
+        # this boundary, so response payloads and framework logs stay safe.
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.post("/chat", dependencies=[Depends(require_internal_api_key)])
