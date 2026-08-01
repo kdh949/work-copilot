@@ -3,6 +3,7 @@ import { type PostgresDataSourceOptions } from 'typeorm/driver/postgres/Postgres
 import { WorkCopilotFoundation1785510000000 } from '../database/migrations/2026080100000-work-copilot-foundation';
 import { KeycloakOidcSession1785596400000 } from '../database/migrations/2026080101000-keycloak-oidc-session';
 import { PublicationSagaState1785609800000 } from '../database/migrations/2026080200000-publication-saga-state';
+import { WebhookFreshnessState1785613400000 } from '../database/migrations/2026080201000-webhook-freshness-state';
 
 type Environment = NodeJS.ProcessEnv;
 
@@ -44,6 +45,7 @@ export const createDatabaseOptions = (
       WorkCopilotFoundation1785510000000,
       KeycloakOidcSession1785596400000,
       PublicationSagaState1785609800000,
+      WebhookFreshnessState1785613400000,
     ],
   };
 };

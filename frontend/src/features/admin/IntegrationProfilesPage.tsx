@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { IntegrationProfileForm } from "./IntegrationProfileForm";
 import { IntegrationProfileList } from "./IntegrationProfileList";
+import { IntegrationOperationsPanel } from "./IntegrationOperationsPanel";
 import type {
   ApiRequest,
   IntegrationConnectionTest,
   IntegrationProfile,
   IntegrationProfileInput,
+  WorkCopilotOperationsHealth,
 } from "./integration-profile.types";
 import "./integration-profiles.css";
 
@@ -14,6 +16,7 @@ type IntegrationProfilesPageProps = {
 };
 
 const endpoint = "/admin/integration-profiles";
+const operationsEndpoint = "/admin/work-copilot/health";
 
 export function IntegrationProfilesPage({
   request,
@@ -30,6 +33,8 @@ export function IntegrationProfilesPage({
     null,
   );
   const [error, setError] = useState("");
+  const [operationsHealth, setOperationsHealth] =
+    useState<WorkCopilotOperationsHealth | null>(null);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -39,6 +44,16 @@ export function IntegrationProfilesPage({
       setError("연동 프로필을 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
+    }
+  }, [request]);
+
+  const loadOperationsHealth = useCallback(async () => {
+    try {
+      setOperationsHealth(
+        await request<WorkCopilotOperationsHealth>(operationsEndpoint),
+      );
+    } catch {
+      setOperationsHealth(null);
     }
   }, [request]);
 
@@ -54,6 +69,13 @@ export function IntegrationProfilesPage({
       })
       .finally(() => {
         if (isCurrent) setIsLoading(false);
+      });
+    void request<WorkCopilotOperationsHealth>(operationsEndpoint)
+      .then((health) => {
+        if (isCurrent) setOperationsHealth(health);
+      })
+      .catch(() => {
+        if (isCurrent) setOperationsHealth(null);
       });
 
     return () => {
@@ -85,6 +107,7 @@ export function IntegrationProfilesPage({
 
       setEditingProfile(null);
       await loadProfiles();
+      await loadOperationsHealth();
     } catch {
       setError(
         "프로필을 저장하지 못했습니다. HTTPS URL과 허용 scope를 다시 확인하세요.",
@@ -99,8 +122,24 @@ export function IntegrationProfilesPage({
       setError("");
       await request(`${endpoint}/${profile.id}/activate`, { method: "POST" });
       await loadProfiles();
+      await loadOperationsHealth();
     } catch {
       setError("프로필을 활성화하지 못했습니다.");
+    }
+  }
+
+  async function deactivateProfile(profile: IntegrationProfile) {
+    if (!window.confirm("이 프로필을 비활성화하고 새 외부 작업을 멈출까요?")) {
+      return;
+    }
+
+    try {
+      setError("");
+      await request(`${endpoint}/${profile.id}/deactivate`, { method: "POST" });
+      await loadProfiles();
+      await loadOperationsHealth();
+    } catch {
+      setError("프로필을 비활성화하지 못했습니다.");
     }
   }
 
@@ -132,6 +171,7 @@ export function IntegrationProfilesPage({
         current?.id === profile.id ? null : current,
       );
       await loadProfiles();
+      await loadOperationsHealth();
     } catch {
       setError(
         "프로필을 삭제하지 못했습니다. 활성 프로필은 먼저 다른 프로필을 활성화하세요.",
@@ -159,6 +199,10 @@ export function IntegrationProfilesPage({
         </p>
       )}
 
+      {operationsHealth && (
+        <IntegrationOperationsPanel health={operationsHealth} />
+      )}
+
       <div className="integration-admin-layout">
         <IntegrationProfileForm
           key={editingProfile?.id ?? "new"}
@@ -179,6 +223,7 @@ export function IntegrationProfilesPage({
             isTestingProfileId={isTestingProfileId}
             onEdit={setEditingProfile}
             onActivate={activateProfile}
+            onDeactivate={deactivateProfile}
             onTest={testProfile}
             onDelete={deleteProfile}
           />

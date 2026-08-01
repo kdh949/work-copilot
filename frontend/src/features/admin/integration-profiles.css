@@ -43,7 +43,8 @@
 
 .integration-profile-form,
 .integration-profile-card,
-.admin-empty-state {
+.admin-empty-state,
+.integration-operations {
   border: 1px solid #d8e0ea;
   border-radius: 8px;
   background: #fff;
@@ -106,6 +107,75 @@
 .integration-profile-list {
   display: grid;
   gap: 1rem;
+}
+
+.integration-operations {
+  display: grid;
+  gap: 1rem;
+}
+
+.integration-operations-heading,
+.integration-operation-details,
+.integration-cleanup-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.integration-operations-heading {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+}
+
+.integration-operations-heading h2,
+.integration-operations-heading p {
+  margin: 0;
+}
+
+.integration-operation-details {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.integration-operation-details div,
+.integration-cleanup-list > div {
+  min-width: 0;
+  border: 1px solid #d8e0ea;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.integration-operation-details dt,
+.integration-cleanup-list small {
+  color: #64748b;
+  font-size: 0.8125rem;
+}
+
+.integration-operation-details dd {
+  margin: 0.25rem 0 0;
+  font-weight: 800;
+}
+
+.integration-cleanup-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.integration-cleanup-list > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.integration-cleanup-list span {
+  color: #1d4ed8;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.operation-warning {
+  margin: 0;
+  border-left: 3px solid #f97316;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 0.75rem;
 }
 
 .integration-profile-card {
@@ -184,6 +254,10 @@
     grid-template-columns: 1fr;
   }
 
+  .integration-operation-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .integration-profile-form {
     position: static;
   }
@@ -191,7 +265,10 @@
 
 @media (max-width: 600px) {
   .integration-form-grid,
-  .integration-profile-details {
+  .integration-profile-details,
+  .integration-operations-heading,
+  .integration-operation-details,
+  .integration-cleanup-list {
     grid-template-columns: 1fr;
   }
 }

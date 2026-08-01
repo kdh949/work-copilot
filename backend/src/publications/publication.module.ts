@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
 import { ReadinessModule } from '../readiness/readiness.module';
+import { OperationsModule } from '../operations/operations.module';
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { BriefPublication } from './entities/brief-publication.entity';
 import { PublicationStep } from './entities/publication-step.entity';
@@ -12,6 +13,7 @@ import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
 @Module({
   imports: [
     ReadinessModule,
+    OperationsModule,
     TypeOrmModule.forFeature([
       WorkBriefDraft,
       IntegrationProfile,

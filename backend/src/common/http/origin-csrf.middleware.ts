@@ -12,6 +12,12 @@ export class OriginCsrfMiddleware implements NestMiddleware {
   constructor(private readonly allowedOrigins: readonly string[]) {}
 
   use(request: Request, _response: Response, next: NextFunction): void {
+    if (request.path?.startsWith('/webhooks/')) {
+      // Webhooks use a dedicated route secret and ingress allowlist instead of browser CSRF.
+      next();
+      return;
+    }
+
     if (SAFE_METHODS.has(request.method)) {
       next();
       return;

@@ -4,12 +4,14 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
 import { ReadinessService } from '../readiness/readiness.service';
+import { WorkCopilotMetricsService } from '../operations/work-copilot-metrics.service';
 import type {
   BriefChildTask,
   BriefContent,
@@ -60,6 +62,7 @@ export class PublicationService {
     private readonly readinessService: ReadinessService,
     @Inject(PUBLICATION_WRITE_GATEWAY)
     private readonly writeGateway: PublicationWriteGateway,
+    @Optional() private readonly metrics?: WorkCopilotMetricsService,
   ) {}
 
   async publish(
@@ -298,6 +301,10 @@ export class PublicationService {
       step.errorCode = null;
       step.updatedAt = new Date();
       await this.stepsRepository.save(step);
+      this.metrics?.increment('publication_stage_total', {
+        stage: this.metricStage(step.stepKey),
+        outcome: 'success',
+      });
       return result.providerObjectId;
     } catch (error) {
       const failure = this.failureFor(step.stepKey, error);
@@ -305,6 +312,10 @@ export class PublicationService {
       step.errorCode = failure.code;
       step.updatedAt = new Date();
       await this.stepsRepository.save(step);
+      this.metrics?.increment('publication_stage_total', {
+        stage: this.metricStage(step.stepKey),
+        outcome: 'failure',
+      });
       return null;
     }
   }
@@ -401,7 +412,9 @@ export class PublicationService {
     loadedSteps?: PublicationStep[],
   ): Promise<BriefPublicationView> {
     const steps = loadedSteps ?? (await this.stepsFor(publication.id));
-    const requiresReview = steps.some((step) => step.status === 'NEEDS_REVIEW');
+    const requiresReview =
+      Boolean(publication.reviewRequiredAt) ||
+      steps.some((step) => step.status === 'NEEDS_REVIEW');
     const canRetry = publication.status !== 'PUBLISHED';
 
     return {
@@ -480,6 +493,25 @@ export class PublicationService {
 
   private childTaskStepKey(task: Pick<BriefChildTask, 'clientTaskId'>): string {
     return `${CHILD_TASK_STEP_PREFIX}${task.clientTaskId}`;
+  }
+
+  private metricStage(
+    stepKey: string,
+  ):
+    | 'confluence_page'
+    | 'jira_remote_link'
+    | 'jira_summary_comment'
+    | 'jira_child_task' {
+    if (stepKey === CONFLUENCE_STEP) {
+      return 'confluence_page';
+    }
+    if (stepKey === REMOTE_LINK_STEP) {
+      return 'jira_remote_link';
+    }
+    if (stepKey === SUMMARY_COMMENT_STEP) {
+      return 'jira_summary_comment';
+    }
+    return 'jira_child_task';
   }
 
   private assertSafeDraftContent(content: BriefContent): void {
