@@ -48,6 +48,37 @@ class KoreanPiiRedactorTests(unittest.TestCase):
         for raw_value in ("user@example.com", "010-1234-5678", "900101-1234568", "123-45-67891"):
             self.assertNotIn(raw_value, masked)
 
+    def test_masks_additional_high_confidence_korean_pii_categories(self) -> None:
+        redactor = KoreanPiiRedactor()
+        context = redactor.new_context()
+        text = (
+            "운전면허 11-12-123456-12, 카드 4111-1111-1111-1111, "
+            "계좌번호: 110-123-456789, 주소: 서울특별시 강남구 테헤란로 123"
+        )
+
+        masked = redactor.sanitize(text, context)
+
+        self.assertIn("[KR_DRIVER_LICENSE_1]", masked)
+        self.assertIn("[CARD_1]", masked)
+        self.assertIn("[BANK_ACCOUNT_1]", masked)
+        self.assertIn("[ADDRESS_1]", masked)
+        for raw_value in (
+            "11-12-123456-12",
+            "4111-1111-1111-1111",
+            "110-123-456789",
+            "서울특별시 강남구 테헤란로 123",
+        ):
+            self.assertNotIn(raw_value, masked)
+
+    def test_does_not_mask_unlabelled_ticket_numbers_as_bank_accounts(self) -> None:
+        redactor = KoreanPiiRedactor()
+        masked = redactor.sanitize(
+            "배포 작업 번호는 110-123-456789 입니다.",
+            redactor.new_context(),
+        )
+
+        self.assertIn("110-123-456789", masked)
+
     def test_custom_rules_are_literal_only_and_can_block(self) -> None:
         rules = load_safe_custom_rules(json.dumps([
             {

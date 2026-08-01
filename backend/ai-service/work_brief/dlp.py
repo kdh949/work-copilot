@@ -32,6 +32,23 @@ EMAIL_PATTERN = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-
 PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+82[- ]?)?0?1[0-9][- ]?\d{3,4}[- ]?\d{4}(?!\d)")
 KOREAN_RESIDENT_NUMBER_PATTERN = re.compile(r"(?<!\d)\d{6}[- ]?\d{7}(?!\d)")
 KOREAN_BUSINESS_NUMBER_PATTERN = re.compile(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{5}(?!\d)")
+# Korean driver license numbers use a stable 2-2-6-2 segmented format. Keep
+# separators mandatory so an unrelated sequence of digits is not masked.
+KOREAN_DRIVER_LICENSE_PATTERN = re.compile(r"(?<!\d)\d{2}[- ]\d{2}[- ]\d{6}[- ]\d{2}(?!\d)")
+CARD_NUMBER_PATTERN = re.compile(r"(?<!\d)(?:\d{4}[- ]?){3}\d{4}(?!\d)")
+# A numeric account is only treated as PII when the writer explicitly labels
+# it as an account. This avoids classifying arbitrary ticket or build numbers.
+BANK_ACCOUNT_LABEL_PATTERN = re.compile(
+    r"(?:계좌(?:번호)?|은행\s*계좌|bank\s+account)\s*[:：]?\s*(?P<value>\d{2,6}(?:[- ]?\d{2,6}){1,3})",
+    re.IGNORECASE,
+)
+# Addresses vary too much for an unlabelled Korean regex. A labelled, single
+# line address with Korean administrative/street markers is a high-confidence
+# detector and preserves text around the address.
+ADDRESS_LABEL_PATTERN = re.compile(
+    r"(?:주소|address)\s*[:：]\s*(?P<value>[^\r\n.!?]{5,120})(?=$|[.!?\r\n])",
+    re.IGNORECASE,
+)
 
 SECRET_PATTERNS = (
     re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b", re.IGNORECASE),
@@ -156,6 +173,28 @@ def is_valid_korean_business_number(value: str) -> bool:
     return (10 - weighted_sum % 10) % 10 == int(digits[9])
 
 
+def is_valid_card_number(value: str) -> bool:
+    """Use Luhn validation before masking a card-like 16-digit value."""
+
+    digits = value.replace("-", "").replace(" ", "")
+    if len(digits) != 16 or not digits.isdigit():
+        return False
+
+    total = 0
+    for index, digit in enumerate(reversed(digits)):
+        number = int(digit)
+        if index % 2 == 1:
+            number *= 2
+            if number > 9:
+                number -= 9
+        total += number
+    return total % 10 == 0
+
+
+def is_likely_korean_address(value: str) -> bool:
+    return bool(re.search(r"[가-힣]+(?:시|도|구|군|읍|면|동|로|길)", value))
+
+
 class KoreanPiiRedactor:
     """Masks PII consistently inside one work-brief request."""
 
@@ -192,6 +231,8 @@ class KoreanPiiRedactor:
             ("PHONE", PHONE_PATTERN, lambda _: True),
             ("KR_RRN", KOREAN_RESIDENT_NUMBER_PATTERN, is_valid_korean_resident_number),
             ("KR_BUSINESS_NUMBER", KOREAN_BUSINESS_NUMBER_PATTERN, is_valid_korean_business_number),
+            ("KR_DRIVER_LICENSE", KOREAN_DRIVER_LICENSE_PATTERN, lambda _: True),
+            ("CARD", CARD_NUMBER_PATTERN, is_valid_card_number),
         )
         for entity_type, pattern, validator in patterns:
             for candidate in pattern.finditer(value):
@@ -215,6 +256,18 @@ class KoreanPiiRedactor:
                         matches.append(
                             DlpMatch(result.start, result.end, entity_type, detected_value),
                         )
+
+        for candidate in BANK_ACCOUNT_LABEL_PATTERN.finditer(value):
+            account = candidate.group("value")
+            if 10 <= len(account.replace("-", "").replace(" ", "")) <= 16:
+                start, end = candidate.span("value")
+                matches.append(DlpMatch(start, end, "BANK_ACCOUNT", account))
+
+        for candidate in ADDRESS_LABEL_PATTERN.finditer(value):
+            address = candidate.group("value").strip()
+            if is_likely_korean_address(address):
+                start, end = candidate.span("value")
+                matches.append(DlpMatch(start, end, "ADDRESS", address))
 
         return matches
 
