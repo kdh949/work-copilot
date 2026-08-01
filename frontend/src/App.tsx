@@ -7,6 +7,12 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const CHAT_SUGGESTIONS = ['입사 첫날 해야 할 일', '급여일과 휴가 규정', '우리 부서 온보딩', '필요한 계정 신청'];
 const SIGNUP_DEPARTMENTS = ['제품', '엔지니어링', '고객성공', '인사', '총무', '재무'];
 const WIKI_PAGE_SIZE = 12;
+let csrfToken: string | undefined;
+
+const getCsrfToken = (): string => {
+    csrfToken ??= crypto.randomUUID();
+    return csrfToken;
+};
 
 type User = {
     id: number;
@@ -159,6 +165,10 @@ function App() {
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
         };
+
+        if (!['GET', 'HEAD', 'OPTIONS'].includes((options.method ?? 'GET').toUpperCase())) {
+            headers['x-csrf-token'] = getCsrfToken();
+        }
 
         if (token) {
             headers.Authorization = `Bearer ${token}`;

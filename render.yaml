@@ -50,7 +50,7 @@ services:
     branch: main
     autoDeploy: true
     buildCommand: npm ci --include=dev && npm run build --workspace=backend
-    startCommand: npm run start:prod --workspace=backend
+    startCommand: npm run migration:run:compiled --workspace=backend && npm run start:prod --workspace=backend
     healthCheckPath: /health
     buildFilter:
       paths:
@@ -75,10 +75,22 @@ services:
         value: "true"
       - key: DB_SSL_REJECT_UNAUTHORIZED
         value: "false"
+      - key: FRONTEND_ORIGINS
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: JWT_EXPIRES_IN
         value: 1h
+      - key: KEYCLOAK_ISSUER
+        sync: false
+      - key: KEYCLOAK_CLIENT_ID
+        sync: false
+      - key: KEYCLOAK_CLIENT_SECRET
+        sync: false
+      - key: INTEGRATION_ENCRYPTION_KEY
+        sync: false
+      - key: TRANSIENT_CONTENT_ENCRYPTION_KEY
+        sync: false
       - key: AI_SERVICE_URL
         fromService:
           type: web
