@@ -77,16 +77,20 @@ services:
         value: "false"
       - key: FRONTEND_ORIGINS
         sync: false
-      - key: JWT_SECRET
-        sync: false
-      - key: JWT_EXPIRES_IN
-        value: 1h
       - key: KEYCLOAK_ISSUER
         sync: false
       - key: KEYCLOAK_CLIENT_ID
         sync: false
       - key: KEYCLOAK_CLIENT_SECRET
         sync: false
+      - key: KEYCLOAK_REDIRECT_URI
+        sync: false
+      - key: KEYCLOAK_ALLOWED_EMAIL_DOMAINS
+        sync: false
+      - key: OIDC_ATTEMPT_ENCRYPTION_KEY
+        sync: false
+      - key: SESSION_TTL_SECONDS
+        value: "3600"
       - key: INTEGRATION_ENCRYPTION_KEY
         sync: false
       - key: TRANSIENT_CONTENT_ENCRYPTION_KEY
