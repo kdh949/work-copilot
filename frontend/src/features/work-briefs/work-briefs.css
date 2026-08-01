@@ -17,6 +17,9 @@
 }
 
 .work-brief-source-form,
+.work-brief-confluence-source,
+.work-brief-confluence-form,
+.work-brief-evidence-section,
 .work-brief-citation-editor,
 .work-brief-list-editor,
 .work-brief-child-task {
@@ -35,6 +38,29 @@
 
 .work-brief-inline-form input {
   flex: 1;
+}
+
+.work-brief-confluence-source {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.work-brief-confluence-source h3,
+.work-brief-confluence-source p,
+.work-brief-evidence-section h3 {
+  margin: 0;
+}
+
+.work-brief-confluence-source p {
+  margin-top: 4px;
+  color: #64748b;
+}
+
+.work-brief-evidence-section > h3 {
+  font-size: 0.9375rem;
 }
 
 .work-brief-draft-header,

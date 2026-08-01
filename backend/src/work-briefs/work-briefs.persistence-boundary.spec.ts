@@ -22,8 +22,9 @@ describe('work brief persistence boundary', () => {
     expect(clientSource).not.toMatch(/\/documents|pgvector|wiki_document/);
     expect(clientSource).toContain('/work-brief/generate');
     expect(serviceSource).toContain('collectIssueDraftContext');
+    expect(serviceSource).toContain('collectDraftEvidence');
     expect(serviceSource).not.toMatch(
-      /createIssue|createSubtask|remoteLink|transitionIssue|Confluence/,
+      /createIssue|createSubtask|remoteLink|transitionIssue|createPage|updatePage/,
     );
   });
 });

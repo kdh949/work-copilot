@@ -34,13 +34,20 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
   const [instruction, setInstruction] = useState(
     "선택한 근거만 사용해 실행 브리프를 작성하세요.",
   );
-  const [evidence, setEvidence] = useState<WorkEvidence[]>([]);
+  const [jiraEvidence, setJiraEvidence] = useState<WorkEvidence[]>([]);
+  const [confluenceEvidence, setConfluenceEvidence] = useState<
+    WorkEvidence[]
+  >([]);
+  const [confluenceSpaceKey, setConfluenceSpaceKey] = useState("");
+  const [confluenceQuery, setConfluenceQuery] = useState("");
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>([]);
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [editingContent, setEditingContent] = useState<BriefContent | null>(
     null,
   );
   const [isLoadingEvidence, setIsLoadingEvidence] = useState(false);
+  const [isLoadingConfluenceEvidence, setIsLoadingConfluenceEvidence] =
+    useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -50,6 +57,11 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishApproved, setPublishApproved] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
+
+  const evidence = useMemo(
+    () => [...jiraEvidence, ...confluenceEvidence],
+    [jiraEvidence, confluenceEvidence],
+  );
 
   const selectedEvidence = useMemo(
     () => evidence.filter((item) => selectedEvidenceIds.includes(item.id)),
@@ -81,13 +93,15 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
         `/work-items/jira/issues/${encodeURIComponent(normalizedKey)}`,
       );
       if (result.accessStatus !== "accessible") {
-        setEvidence([]);
+        setJiraEvidence([]);
+        setConfluenceEvidence([]);
         setSelectedEvidenceIds([]);
         setMessage("현재 사용자 권한으로 이슈 근거를 읽을 수 없습니다.");
         return;
       }
       setIssueKey(normalizedKey);
-      setEvidence(result.evidence);
+      setJiraEvidence(result.evidence);
+      setConfluenceEvidence([]);
       setSelectedEvidenceIds(result.evidence.map((item) => item.id));
     } catch {
       setMessage(
@@ -95,6 +109,48 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
       );
     } finally {
       setIsLoadingEvidence(false);
+    }
+  }
+
+  async function collectConfluenceEvidence() {
+    const spaceKey = confluenceSpaceKey.trim().toUpperCase();
+    const query = confluenceQuery.trim();
+
+    if (!issueKey || jiraEvidence.length === 0) {
+      setMessage("먼저 Jira 이슈 근거를 조회하세요.");
+      return;
+    }
+    if (!spaceKey || !query) {
+      setMessage("Confluence space 키와 검색어를 입력하세요.");
+      return;
+    }
+
+    try {
+      setIsLoadingConfluenceEvidence(true);
+      setMessage("");
+      const result = await request<EvidenceCollection>(
+        `/work-items/confluence/spaces/${encodeURIComponent(spaceKey)}/search?q=${encodeURIComponent(query)}`,
+      );
+      if (result.accessStatus !== "accessible") {
+        setConfluenceEvidence([]);
+        setSelectedEvidenceIds((current) =>
+          current.filter((id) => !id.startsWith("confluence:")),
+        );
+        setMessage("현재 사용자 권한으로 Confluence 근거를 읽을 수 없습니다.");
+        return;
+      }
+
+      setConfluenceEvidence(result.evidence);
+      setSelectedEvidenceIds((current) => [
+        ...current.filter((id) => !id.startsWith("confluence:")),
+        ...result.evidence.map((item) => item.id),
+      ]);
+    } catch {
+      setMessage(
+        "Confluence 근거를 불러오지 못했습니다. 연결 상태와 허용 space를 확인하세요.",
+      );
+    } finally {
+      setIsLoadingConfluenceEvidence(false);
     }
   }
 
@@ -315,7 +371,7 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     <section className="work-brief-page" aria-labelledby="work-brief-title">
       <header className="work-brief-intro">
         <p className="eyebrow">권한 보존 · DLP 적용</p>
-        <h1 id="work-brief-title">Jira 실행 브리프</h1>
+        <h1 id="work-brief-title">Jira · Confluence 실행 브리프</h1>
         <p>
           원문은 저장하지 않습니다. 선택한 근거만 현재 사용자 OAuth 권한으로
           다시 읽고, 마스킹된 초안과 근거 ID·URL·버전만 보관합니다.
@@ -355,12 +411,60 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
           />
         </div>
 
-        {evidence.length > 0 && (
-          <EvidenceList
-            evidence={evidence}
-            selectedEvidenceIds={selectedEvidenceIds}
-            onToggle={toggleEvidence}
-          />
+        <section className="work-brief-confluence-source">
+          <div>
+            <h3>Confluence 추가 근거</h3>
+            <p>
+              선택 사항입니다. 허용된 space에서만 검색하며 페이지 원문은 이
+              화면이나 브리프 DB에 저장하지 않습니다.
+            </p>
+          </div>
+          <div className="work-brief-confluence-form">
+            <label htmlFor="brief-confluence-space">Space 키</label>
+            <input
+              id="brief-confluence-space"
+              value={confluenceSpaceKey}
+              placeholder="예: ENG"
+              onChange={(event) => setConfluenceSpaceKey(event.target.value)}
+            />
+            <label htmlFor="brief-confluence-query">검색어</label>
+            <div className="work-brief-inline-form">
+              <input
+                id="brief-confluence-query"
+                value={confluenceQuery}
+                placeholder="예: 배포 결정"
+                onChange={(event) => setConfluenceQuery(event.target.value)}
+              />
+              <button
+                type="button"
+                onClick={collectConfluenceEvidence}
+                disabled={isLoadingConfluenceEvidence || isLoadingEvidence}
+              >
+                {isLoadingConfluenceEvidence ? "검색 중" : "근거 검색"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {jiraEvidence.length > 0 && (
+          <section className="work-brief-evidence-section">
+            <h3>Jira 근거</h3>
+            <EvidenceList
+              evidence={jiraEvidence}
+              selectedEvidenceIds={selectedEvidenceIds}
+              onToggle={toggleEvidence}
+            />
+          </section>
+        )}
+        {confluenceEvidence.length > 0 && (
+          <section className="work-brief-evidence-section">
+            <h3>Confluence 근거</h3>
+            <EvidenceList
+              evidence={confluenceEvidence}
+              selectedEvidenceIds={selectedEvidenceIds}
+              onToggle={toggleEvidence}
+            />
+          </section>
         )}
         <div className="button-row">
           <button
