@@ -17,19 +17,19 @@ export class AiController {
 
     @UseGuards(JwtAuthGuard)
     @Post('onboarding')
-    onboarding(@Body() aiOnboardingDto: AiOnboardingDto) {
-        return this.aiService.onboarding(aiOnboardingDto);
+    onboarding(@Body() aiOnboardingDto: AiOnboardingDto, @Req() request: AuthenticatedRequest) {
+        return this.aiService.onboarding(aiOnboardingDto, request.user.sub);
     }
 
     @UseGuards(JwtAuthGuard)
     @Post('lecture')
-    lecture(@Body() aiOnboardingDto: AiOnboardingDto) {
-        return this.aiService.lecture(aiOnboardingDto);
+    lecture(@Body() aiOnboardingDto: AiOnboardingDto, @Req() request: AuthenticatedRequest) {
+        return this.aiService.lecture(aiOnboardingDto, request.user.sub);
     }
 
     @UseGuards(JwtAuthGuard)
     @Post('agent')
-    agent(@Body() aiChatDto: AiChatDto) {
-        return this.aiService.agent(aiChatDto);
+    agent(@Body() aiChatDto: AiChatDto, @Req() request: AuthenticatedRequest) {
+        return this.aiService.agent(aiChatDto, request.user.sub);
     }
 }

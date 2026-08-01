@@ -39,15 +39,20 @@ class DocumentRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class AccessContext(BaseModel):
+    role: str
+    department: str
+
+
 class ChatRequest(BaseModel):
     question: str
-    department: str | None = None
-    userDepartment: str | None = None
+    access: AccessContext
 
 
 class OnboardingRequest(BaseModel):
     department: str
     employeeName: str | None = None
+    access: AccessContext
 
 
 class JsonRpcRequest(BaseModel):
@@ -117,8 +122,8 @@ def delete_document(source_id: str) -> dict[str, bool]:
 
 @app.post("/chat", dependencies=[Depends(require_internal_api_key)])
 def chat(request: ChatRequest) -> dict[str, Any]:
-    department_filter = choose_department_filter(request.question, request.userDepartment or request.department)
-    documents = search_documents_for_intent(request.question, department_filter)
+    department_filter = choose_department_filter(request.question, request.access.department)
+    documents = search_documents_for_intent(request.question, department_filter, request.access)
     answer = make_answer(
         "회사 위키 내용을 바탕으로 질문에 답변해주세요.",
         request.question,
@@ -138,7 +143,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
 def onboarding(request: OnboardingRequest) -> dict[str, Any]:
     employee_name = request.employeeName or '신입 직원'
     question = f"{request.department} 부서에 새로 온 {employee_name}이 입사 직후 해야 할 일을 추천해주세요."
-    documents = search_documents(question, request.department)
+    documents = search_documents(question, request.department, request.access)
     answer = make_answer(
         "신입 직원 온보딩 체크리스트를 만들어주세요.",
         question,
@@ -155,7 +160,7 @@ def onboarding(request: OnboardingRequest) -> dict[str, Any]:
 @app.post("/lecture", dependencies=[Depends(require_internal_api_key)])
 def lecture(request: OnboardingRequest) -> dict[str, Any]:
     question = f"{request.department} 부서 신입 직원 교육 강의안을 만들어주세요."
-    documents = search_documents(question, request.department)
+    documents = search_documents(question, request.department, request.access)
     answer = make_answer(
         "신입 직원에게 설명할 짧은 강의안을 만들어주세요.",
         question,
@@ -208,7 +213,8 @@ def mcp(request: JsonRpcRequest, x_api_key: str | None = Header(default=None)) -
 def run_agent(request: ChatRequest) -> dict[str, Any]:
     state = {
         "question": request.question,
-        "department": request.department or '공통',
+        "department": request.access.department,
+        "access": request.access,
         "steps": [],
         "documents": [],
         "holiday": None,
@@ -224,7 +230,8 @@ def run_agent(request: ChatRequest) -> dict[str, Any]:
         tool_name = choose_tool(request.question, step)
         tool_arguments = {
             "question": request.question,
-            "department": request.department,
+            "department": request.access.department,
+            "access": request.access,
         }
 
         tool_result = tool_functions[tool_name](tool_arguments)
@@ -242,7 +249,8 @@ def run_agent(request: ChatRequest) -> dict[str, Any]:
     if not state["documents"]:
         wiki_result = tool_search_wiki({
             "question": request.question,
-            "department": request.department,
+            "department": request.access.department,
+            "access": request.access,
         })
         state["documents"] = wiki_result.get('documents', [])
         state["steps"].append({
@@ -254,7 +262,7 @@ def run_agent(request: ChatRequest) -> dict[str, Any]:
         "필요한 도구를 선택해 실행한 뒤 최종 답변을 만들어주세요.",
         request.question,
         state["documents"],
-        request.department,
+        request.access.department,
     )
 
     save_agent_memory(state["department"], request.question, answer)
@@ -335,22 +343,34 @@ def delete_document_from_memory(source_id: str) -> None:
             fallback_documents.remove(document)
 
 
-def search_documents(question: str, department: str | None) -> list[dict[str, Any]]:
+def is_document_visible(access: AccessContext, document_department: str) -> bool:
+    return access.role == 'admin' or document_department in ['공통', access.department]
+
+
+def search_documents(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
     if can_use_database():
         try:
-            return search_documents_from_database(question, department)
+            return search_documents_from_database(question, preferred_department, access)
         except Exception:
-            return search_documents_from_memory(question, department)
+            return search_documents_from_memory(question, preferred_department, access)
 
-    return search_documents_from_memory(question, department)
+    return search_documents_from_memory(question, preferred_department, access)
 
 
-def search_documents_for_intent(question: str, department: str | None) -> list[dict[str, Any]]:
-    documents = search_documents(question, department)
+def search_documents_for_intent(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
+    documents = search_documents(question, preferred_department, access)
 
-    if department and len(documents) < 5:
+    if preferred_department and len(documents) < 5:
         existing_source_ids = {document["sourceId"] for document in documents}
-        fallback_documents_for_question = search_documents(question, None)
+        fallback_documents_for_question = search_documents(question, None, access)
 
         for document in fallback_documents_for_question:
             if document["sourceId"] not in existing_source_ids:
@@ -363,31 +383,47 @@ def search_documents_for_intent(question: str, department: str | None) -> list[d
     return documents[:5]
 
 
-def search_documents_from_database(question: str, department: str | None) -> list[dict[str, Any]]:
+def search_documents_from_database(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
     embedding = make_vector_text(make_embedding(question))
-    department_value = department or ''
+    department_value = preferred_department or ''
 
     with psycopg.connect(get_database_url()) as connection:
         rows = connection.execute(
             """
-            SELECT source_id, title, content, department, tags
-            FROM wiki_documents
-            WHERE (%s = '' OR department = %s OR department = '공통')
-            ORDER BY embedding <-> %s::vector
+            SELECT documents.source_id, documents.title, documents.content, documents.department, documents.tags
+            FROM wiki_documents AS documents
+            JOIN "post" AS post
+              ON post."sourceId" = documents.source_id
+              OR (post."sourceId" IS NULL AND documents.source_id = CONCAT('post-', post.id))
+            WHERE post."boardType" = 'wiki'
+              AND (%s OR post.department = '공통' OR post.department = %s)
+              AND (%s = '' OR documents.department = %s OR documents.department = '공통')
+            ORDER BY documents.embedding <-> %s::vector
             LIMIT 5
             """,
-            (department_value, department_value, embedding),
+            (access.role == 'admin', access.department, department_value, department_value, embedding),
         ).fetchall()
 
     return rows_to_documents(rows)
 
 
-def search_documents_from_memory(question: str, department: str | None) -> list[dict[str, Any]]:
+def search_documents_from_memory(
+    question: str,
+    preferred_department: str | None,
+    access: AccessContext,
+) -> list[dict[str, Any]]:
     words = question.lower().split()
     results: list[dict[str, Any]] = []
 
     for document in fallback_documents:
-        if department and document["department"] not in [department, '공통']:
+        if not is_document_visible(access, document["department"]):
+            continue
+
+        if preferred_department and document["department"] not in [preferred_department, '공통']:
             continue
 
         text = f"{document['title']} {document['content']} {' '.join(document['tags'])}".lower()
@@ -479,7 +515,12 @@ def choose_department_filter(question: str, user_department: str | None) -> str 
 def tool_search_wiki(arguments: dict[str, Any]) -> dict[str, Any]:
     question = str(arguments.get('question', ''))
     department = arguments.get('department')
-    documents = search_documents(question, department)
+    raw_access = arguments.get('access')
+    access = raw_access if isinstance(raw_access, AccessContext) else AccessContext(
+        role=str(raw_access.get('role', 'employee')) if isinstance(raw_access, dict) else 'employee',
+        department=str(raw_access.get('department', '공통')) if isinstance(raw_access, dict) else '공통',
+    )
+    documents = search_documents(question, department, access)
 
     return {
         "documents": documents,

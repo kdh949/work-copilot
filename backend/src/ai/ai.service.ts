@@ -30,6 +30,11 @@ type AiChatResponse = {
     [key: string]: unknown;
 };
 
+type AiAccessContext = {
+    role: string;
+    department: string;
+};
+
 @Injectable()
 export class AiService {
     constructor(
@@ -40,26 +45,43 @@ export class AiService {
     ) {}
 
     async chat(aiChatDto: AiChatDto, userId?: number) {
-        const user = userId ? await this.usersService.findById(userId) : null;
+        const access = await this.getAccessContext(userId);
 
         const response = await this.postToAi('/chat', {
             question: aiChatDto.question,
-            userDepartment: user?.department || aiChatDto.department,
+            access,
         }) as AiChatResponse;
 
         return this.enrichSourcesWithPostIds(response);
     }
 
-    async onboarding(aiOnboardingDto: AiOnboardingDto) {
-        return this.postToAi('/onboarding', aiOnboardingDto);
+    async onboarding(aiOnboardingDto: AiOnboardingDto, userId?: number) {
+        const access = await this.getAccessContext(userId);
+
+        return this.postToAi('/onboarding', {
+            ...aiOnboardingDto,
+            department: this.getPermittedDepartment(aiOnboardingDto.department, access),
+            access,
+        });
     }
 
-    async lecture(aiOnboardingDto: AiOnboardingDto) {
-        return this.postToAi('/lecture', aiOnboardingDto);
+    async lecture(aiOnboardingDto: AiOnboardingDto, userId?: number) {
+        const access = await this.getAccessContext(userId);
+
+        return this.postToAi('/lecture', {
+            ...aiOnboardingDto,
+            department: this.getPermittedDepartment(aiOnboardingDto.department, access),
+            access,
+        });
     }
 
-    async agent(aiChatDto: AiChatDto) {
-        return this.postToAi('/agent/run', aiChatDto);
+    async agent(aiChatDto: AiChatDto, userId?: number) {
+        const access = await this.getAccessContext(userId);
+
+        return this.postToAi('/agent/run', {
+            question: aiChatDto.question,
+            access,
+        });
     }
 
     async syncPost(post: Post): Promise<void> {
@@ -135,6 +157,23 @@ export class AiService {
             'Content-Type': 'application/json',
             'X-AI-Service-Key': apiKey,
         };
+    }
+
+    private async getAccessContext(userId?: number): Promise<AiAccessContext> {
+        const user = userId ? await this.usersService.findById(userId) : null;
+
+        return {
+            role: user?.role || 'employee',
+            department: user?.department || '공통',
+        };
+    }
+
+    private getPermittedDepartment(requestedDepartment: string, access: AiAccessContext): string {
+        if (access.role === 'admin') {
+            return requestedDepartment;
+        }
+
+        return access.department;
     }
 
     private getPostSourceId(post: Post): string {

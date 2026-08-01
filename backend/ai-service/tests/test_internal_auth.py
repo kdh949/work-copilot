@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from main import require_internal_api_key
+from main import AccessContext, is_document_visible, require_internal_api_key
 
 
 class InternalApiKeyTests(unittest.TestCase):
@@ -30,6 +30,20 @@ class InternalApiKeyTests(unittest.TestCase):
                 require_internal_api_key("anything")
 
         self.assertEqual(error.exception.status_code, 503)
+
+
+class RetrievalAccessTests(unittest.TestCase):
+    def test_employee_can_only_retrieve_common_or_own_department_documents(self) -> None:
+        actor = AccessContext(role="employee", department="엔지니어링")
+
+        self.assertTrue(is_document_visible(actor, "공통"))
+        self.assertTrue(is_document_visible(actor, "엔지니어링"))
+        self.assertFalse(is_document_visible(actor, "인사"))
+
+    def test_administrator_can_retrieve_every_department_document(self) -> None:
+        actor = AccessContext(role="admin", department="인사")
+
+        self.assertTrue(is_document_visible(actor, "엔지니어링"))
 
 
 if __name__ == "__main__":
