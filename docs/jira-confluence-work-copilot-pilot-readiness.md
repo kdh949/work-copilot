@@ -2,7 +2,7 @@
 
 기준일: 2026-08-02
 
-현재 판정: **No-Go**. 코드·mock 검증은 준비됐지만 실제 OAuth/ingress 관리자 확인이 아직 없고, 기존 frontend 전체 lint 차단 항목도 해소되지 않았다.
+현재 판정: **No-Go**. 로컬 코드·mock 검증은 통과했지만 실제 OAuth/ingress 관리자 확인, 독립 cleanup worker/cron, browser e2e, DC staging smoke와 ZDR project 증명이 남아 있다. 상세 대조표는 `jira-confluence-work-copilot-final-acceptance-checklist.md`를 따른다.
 
 ## 기본 안전 동작
 
@@ -10,7 +10,7 @@
 - 기본값은 `manual_refresh`다. `WEBHOOK_SHADOW_MODE=true`, `WEBHOOK_INGRESS_VERIFIED=true`, 유효한 `WEBHOOK_INGRESS_ALLOWED_CIDRS`, 활성 프로필의 암호화된 route secret이 모두 있을 때만 `shadow` intake가 된다.
 - shadow intake는 관련 draft와 기존 publication을 재검토 상태로만 표시한다. Jira·Confluence 외부 write는 호출하지 않는다.
 - 같은 profile/source ID/version의 재전송은 24시간 안전 metadata fingerprint로 억제한다. 자체 Confluence operation ID가 붙은 이벤트는 freshness 전이 전에 무시한다.
-- 암호화된 evidence 발췌와 source-change metadata는 최대 24시간 TTL이며, 정리 작업의 성공 시각·삭제 건수만 운영 화면에 표시한다.
+- 암호화된 evidence 발췌와 source-change metadata는 최대 24시간 TTL이며, API read는 만료 행을 즉시 제외한다. 현재 web process timer가 정리를 수행하고 health를 표시하지만, 운영 Go 전에는 독립 worker/cron과 70분 경보를 증명해야 한다.
 - 관리자가 활성 프로필을 비활성화하면 새 OAuth 기반 읽기와 mock publish 시작은 차단되고, 기존 wiki 기능은 영향을 받지 않는다.
 
 ## 자동 검증 매트릭스
@@ -25,6 +25,7 @@
 | webhook replay | `webhook-ingest.service.spec.ts`가 unique fingerprint 재전송을 freshness 전이 없이 무시하는지 확인 |
 | TTL·cleanup health | transient evidence와 source-change event의 만료 삭제 및 health 상태를 확인 |
 | provider mock/e2e | mock publication gateway와 `work-copilot-webhooks.e2e-spec.ts`가 외부 provider 연결 없이 HTTP 경계를 검증 |
+| browser e2e | 아직 없음 — 실제 파일럿 Go 전 추가 필요 |
 
 ## Go / No-Go
 
@@ -35,7 +36,7 @@
 | webhook ingress | 기본 차단 | reverse proxy/WAF의 provider IP 또는 mTLS 경계와 앱 CIDR을 함께 검증한 뒤에만 `WEBHOOK_INGRESS_VERIFIED=true` 설정 |
 | shadow freshness | 준비됨 | synthetic 변경 이벤트가 관련 draft만 `review_required`로 만드는지 staging에서 확인 |
 | 외부 write | mock 전용 | 파일럿 동안 real write adapter는 승인 전까지 추가·활성화하지 않음 |
-| TTL 정리 | 준비됨 | 운영 화면의 두 cleanup job이 healthy이고 마지막 성공 시각이 허용 최대 age 안인지 확인 |
+| TTL 정리 | API read filter·process purge 준비됨 | 독립 worker/cron의 두 cleanup job과 70분 alert를 운영에서 확인 |
 | 로그·감사 | 준비됨 | 로그 수집/오류 추적 샘플에서 title·본문·payload·token·route secret이 없는지 확인 |
 
 다음 중 하나라도 미충족이면 **No-Go**다: ingress 검증 플래그가 없는 상태에서 shadow를 강제하려는 경우, 사용자가 아닌 공유 OAuth를 쓰는 경우, DLP/TTL/권한 격리 테스트 실패, cleanup health가 degraded인 경우, 또는 real external write가 mock 경계를 우회하는 경우.
@@ -54,6 +55,8 @@
 
 ## 검증 기록
 
-- backend build와 전체 unit test 62 suite/161 test, provider-mock e2e 2 suite/2 test는 통과했다.
-- frontend production build와 P3 관리자 파일 scoped lint는 통과했다.
-- 전체 frontend lint는 기존 `frontend/src/App.tsx`의 선언 전 함수 접근 4건과 불필요 escape 1건(경고 4건 포함)으로 현재 실패한다. P3 변경 파일에서 발생한 오류는 아니며, 파일럿 전 UI 공통 정리 작업에서 해당 함수를 hook/callback 순서로 정리하고 전체 lint를 다시 통과시켜야 한다.
+- `npm run build`는 backend와 frontend production build를 통과했다.
+- `npm test`는 62 suite/168 test를 통과했다. Jest config에서 Watchman을 꺼 sandbox 환경에서도 동일 명령을 사용한다.
+- provider-mock e2e는 2 suite/2 test를 통과했다. loopback bind가 필요한 실행은 외부 provider 호출 없이 local-only 실행 환경에서 검증했다.
+- FastAPI 전체 test corpus는 26 test를 통과했다.
+- frontend 전체 lint와 production build는 모두 통과했다.
