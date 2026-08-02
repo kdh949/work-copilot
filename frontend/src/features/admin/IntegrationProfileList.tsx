@@ -2,6 +2,7 @@ import type {
   IntegrationConnectionTest,
   IntegrationProfile,
 } from "./integration-profile.types";
+import { Alert, Badge, Button } from "../../design-system/components";
 
 type IntegrationProfileListProps = {
   profiles: IntegrationProfile[];
@@ -26,7 +27,7 @@ function ConnectionResult({ result }: { result: IntegrationConnectionTest }) {
   const confluenceStatuses = Object.entries(result.confluence.allowedResources);
 
   return (
-    <div className="connection-result" role="status">
+    <Alert tone="info" className="connection-result">
       <strong>연결 확인 결과</strong>
       <p>Jira discovery: 확인됨 · Confluence discovery: 확인됨</p>
       {jiraStatuses.map(([key, status]) => (
@@ -40,7 +41,7 @@ function ConnectionResult({ result }: { result: IntegrationConnectionTest }) {
         </p>
       ))}
       <p>브리프 상위 페이지: {statusLabel(result.confluence.parentPage)}</p>
-    </div>
+    </Alert>
   );
 }
 
@@ -56,7 +57,7 @@ export function IntegrationProfileList({
 }: IntegrationProfileListProps) {
   if (profiles.length === 0) {
     return (
-      <section className="admin-empty-state" role="status">
+      <section className="admin-empty-state ds-card" role="status">
         <h2>등록된 연동 프로필이 없습니다</h2>
         <p>
           허용된 Jira 프로젝트와 Confluence space만 포함한 프로필을 먼저
@@ -69,7 +70,7 @@ export function IntegrationProfileList({
   return (
     <section className="integration-profile-list" aria-label="연동 프로필 목록">
       {profiles.map((profile) => (
-        <article className="integration-profile-card" key={profile.id}>
+        <article className="integration-profile-card ds-card" key={profile.id}>
           <div className="integration-profile-card-heading">
             <div>
               <h2>
@@ -80,9 +81,9 @@ export function IntegrationProfileList({
               <p>{profile.jiraBaseUrl}</p>
               <p>{profile.confluenceBaseUrl}</p>
             </div>
-            <span className={profile.isActive ? "status active" : "status"}>
+            <Badge tone={profile.isActive ? "success" : "neutral"}>
               {profile.isActive ? "활성" : "비활성"}
-            </span>
+            </Badge>
           </div>
 
           <dl className="integration-profile-details">
@@ -118,43 +119,43 @@ export function IntegrationProfileList({
           </p>
 
           <div className="button-row">
-            <button
+            <Button
               type="button"
-              className="secondary"
+              variant="secondary"
               onClick={() => onEdit(profile)}
             >
               수정
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="secondary"
+              variant="secondary"
               disabled={isTestingProfileId === profile.id}
               onClick={() => onTest(profile)}
             >
               {isTestingProfileId === profile.id ? "확인 중" : "연결 확인"}
-            </button>
+            </Button>
             {!profile.isActive && (
-              <button type="button" onClick={() => onActivate(profile)}>
+              <Button type="button" onClick={() => onActivate(profile)}>
                 이 프로필 활성화
-              </button>
+              </Button>
             )}
             {profile.isActive && (
-              <button
+              <Button
                 type="button"
-                className="danger"
+                variant="danger"
                 onClick={() => onDeactivate(profile)}
               >
                 이 프로필 비활성화
-              </button>
+              </Button>
             )}
             {!profile.isActive && (
-              <button
+              <Button
                 type="button"
-                className="danger"
+                variant="danger"
                 onClick={() => onDelete(profile)}
               >
                 삭제
-              </button>
+              </Button>
             )}
           </div>
 

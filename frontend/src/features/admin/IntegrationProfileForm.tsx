@@ -1,4 +1,10 @@
 import { useState, type FormEvent } from "react";
+import {
+  Alert,
+  Button,
+  TextArea,
+  TextInput,
+} from "../../design-system/components";
 import type {
   ChildTaskTemplateFieldValue,
   IntegrationProfile,
@@ -119,16 +125,16 @@ export function IntegrationProfileForm({
   };
 
   return (
-    <form className="integration-profile-form" onSubmit={submit}>
+    <form className="integration-profile-form ds-card" onSubmit={submit}>
       <div className="admin-section-heading">
         <div>
           <h2>{isEditing ? "연동 프로필 수정" : "새 연동 프로필"}</h2>
           <p>비밀값은 저장 후 다시 표시되지 않습니다.</p>
         </div>
         {isEditing && (
-          <button type="button" className="secondary" onClick={onCancelEdit}>
+          <Button type="button" variant="secondary" onClick={onCancelEdit}>
             새 프로필 만들기
-          </button>
+          </Button>
         )}
       </div>
 
@@ -136,7 +142,7 @@ export function IntegrationProfileForm({
         <fieldset>
           <legend>Jira</legend>
           <label htmlFor="jira-base-url">HTTPS base URL</label>
-          <input
+          <TextInput
             id="jira-base-url"
             type="url"
             required
@@ -145,7 +151,7 @@ export function IntegrationProfileForm({
             onChange={(event) => updateField("jiraBaseUrl", event.target.value)}
           />
           <label htmlFor="jira-client-id">Client ID</label>
-          <input
+          <TextInput
             id="jira-client-id"
             required
             value={form.jiraClientId}
@@ -156,7 +162,7 @@ export function IntegrationProfileForm({
           <label htmlFor="jira-client-secret">
             Client secret {profile?.jiraClientSecretConfigured && "(설정됨)"}
           </label>
-          <input
+          <TextInput
             id="jira-client-secret"
             type="password"
             required={!isEditing}
@@ -168,14 +174,14 @@ export function IntegrationProfileForm({
             }
           />
           <label htmlFor="jira-scopes">허용 OAuth scope</label>
-          <input
+          <TextInput
             id="jira-scopes"
             required
             value={form.jiraScopes}
             onChange={(event) => updateField("jiraScopes", event.target.value)}
           />
           <label htmlFor="jira-projects">허용 프로젝트 키</label>
-          <input
+          <TextInput
             id="jira-projects"
             placeholder="COPILOT, PLATFORM"
             value={form.allowedProjectKeys}
@@ -184,7 +190,7 @@ export function IntegrationProfileForm({
             }
           />
           <label htmlFor="child-task-issue-type">하위 작업 issue type ID</label>
-          <input
+          <TextInput
             id="child-task-issue-type"
             placeholder="예: 10001"
             value={form.childTaskIssueTypeId}
@@ -195,7 +201,7 @@ export function IntegrationProfileForm({
           <label htmlFor="child-task-template-fields">
             하위 작업 필수 field 템플릿(JSON)
           </label>
-          <textarea
+          <TextArea
             id="child-task-template-fields"
             rows={5}
             placeholder={'{\n  "customfield_10100": "value"\n}'}
@@ -209,7 +215,7 @@ export function IntegrationProfileForm({
         <fieldset>
           <legend>Confluence</legend>
           <label htmlFor="confluence-base-url">HTTPS base URL</label>
-          <input
+          <TextInput
             id="confluence-base-url"
             type="url"
             required
@@ -220,7 +226,7 @@ export function IntegrationProfileForm({
             }
           />
           <label htmlFor="confluence-client-id">Client ID</label>
-          <input
+          <TextInput
             id="confluence-client-id"
             required
             value={form.confluenceClientId}
@@ -232,7 +238,7 @@ export function IntegrationProfileForm({
             Client secret{" "}
             {profile?.confluenceClientSecretConfigured && "(설정됨)"}
           </label>
-          <input
+          <TextInput
             id="confluence-client-secret"
             type="password"
             required={!isEditing}
@@ -244,7 +250,7 @@ export function IntegrationProfileForm({
             }
           />
           <label htmlFor="confluence-scopes">허용 OAuth scope</label>
-          <input
+          <TextInput
             id="confluence-scopes"
             required
             value={form.confluenceScopes}
@@ -253,7 +259,7 @@ export function IntegrationProfileForm({
             }
           />
           <label htmlFor="confluence-spaces">허용 space 키</label>
-          <input
+          <TextInput
             id="confluence-spaces"
             placeholder="ENG, PRODUCT"
             value={form.allowedSpaceKeys}
@@ -265,7 +271,7 @@ export function IntegrationProfileForm({
       </div>
 
       <label htmlFor="brief-parent-page-id">브리프 상위 페이지 ID</label>
-      <input
+      <TextInput
         id="brief-parent-page-id"
         required
         value={form.briefParentPageId}
@@ -278,14 +284,14 @@ export function IntegrationProfileForm({
         다시 제공되지 않습니다.
       </p>
       {formError && (
-        <p className="message" role="alert">
+        <Alert tone="danger" className="integration-form-error">
           {formError}
-        </p>
+        </Alert>
       )}
       <div className="button-row">
-        <button type="submit" disabled={isSaving}>
+        <Button type="submit" disabled={isSaving}>
           {isSaving ? "저장 중" : isEditing ? "변경 저장" : "프로필 저장"}
-        </button>
+        </Button>
       </div>
     </form>
   );

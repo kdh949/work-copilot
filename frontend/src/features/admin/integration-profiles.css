@@ -1,19 +1,19 @@
 .integration-admin-page {
   display: grid;
-  gap: 1.5rem;
+  gap: var(--space-6);
 }
 
 .integration-admin-intro {
-  max-width: 760px;
+  max-width: var(--content-intro-width);
 }
 
 .integration-admin-intro h1,
 .integration-admin-intro p {
-  margin: 0;
+  margin: var(--space-0);
 }
 
 .integration-admin-intro h1 {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2);
 }
 
 .integration-admin-intro > p:last-child,
@@ -22,22 +22,28 @@
 .integration-profile-card-heading p,
 .secret-state,
 .connection-result p {
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 .eyebrow {
-  margin-bottom: 0.5rem !important;
-  color: #1d4ed8 !important;
-  font-size: 0.8125rem;
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-link);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-extrabold);
+  letter-spacing: var(--letter-spacing-wide);
   text-transform: uppercase;
+}
+
+.integration-admin-message {
+  margin: var(--space-0);
 }
 
 .integration-admin-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
-  gap: 1.25rem;
+  grid-template-columns:
+    minmax(var(--layout-panel-min-width), 0.9fr)
+    minmax(var(--layout-panel-wide-min-width), 1.1fr);
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -45,15 +51,12 @@
 .integration-profile-card,
 .admin-empty-state,
 .integration-operations {
-  border: 1px solid #d8e0ea;
-  border-radius: 8px;
-  background: #fff;
-  padding: 1.25rem;
+  padding: var(--space-5);
 }
 
 .integration-profile-form {
   position: sticky;
-  top: 1rem;
+  top: var(--space-4);
 }
 
 .admin-section-heading,
@@ -62,7 +65,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -72,181 +75,175 @@
 .integration-profile-card-heading p,
 .admin-empty-state h2,
 .admin-empty-state p {
-  margin: 0;
+  margin: var(--space-0);
 }
 
 .integration-form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
+  gap: var(--space-4);
 }
 
 .integration-form-grid fieldset {
-  min-width: 0;
-  margin: 1rem 0 0;
-  border: 1px solid #d8e0ea;
-  border-radius: 6px;
-  padding: 0.75rem;
+  min-width: var(--space-0);
+  margin: var(--space-4) var(--space-0) var(--space-0);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-3);
+  padding: var(--space-3);
 }
 
 .integration-form-grid legend {
-  padding: 0 0.25rem;
-  font-weight: 800;
+  padding: var(--space-0) var(--space-1);
+  font-weight: var(--font-weight-extrabold);
 }
 
 .integration-profile-form label {
-  font-size: 0.875rem;
+  font-size: var(--font-size-14);
 }
 
 .form-help {
-  margin: 0.75rem 0 1rem;
-  font-size: 0.875rem;
-  line-height: 1.45;
+  margin: var(--space-3) var(--space-0) var(--space-4);
+  font-size: var(--font-size-14);
+  line-height: var(--line-height-normal);
+}
+
+.integration-form-error {
+  margin-top: var(--space-3);
 }
 
 .integration-profile-list {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .integration-operations {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .integration-operations-heading,
 .integration-operation-details,
 .integration-cleanup-list {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .integration-operations-heading {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(var(--space-0), 1fr) auto;
   align-items: start;
 }
 
 .integration-operations-heading h2,
 .integration-operations-heading p {
-  margin: 0;
+  margin: var(--space-0);
+}
+
+.integration-operations-heading .ds-badge {
+  justify-self: end;
 }
 
 .integration-operation-details {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0;
+  grid-template-columns: repeat(4, minmax(var(--space-0), 1fr));
+  margin: var(--space-0);
 }
 
 .integration-operation-details div,
 .integration-cleanup-list > div {
-  min-width: 0;
-  border: 1px solid #d8e0ea;
-  border-radius: 6px;
-  padding: 0.75rem;
+  min-width: var(--space-0);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-3);
+  padding: var(--space-3);
 }
 
 .integration-operation-details dt,
 .integration-cleanup-list small {
-  color: #64748b;
-  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
 }
 
 .integration-operation-details dd {
-  margin: 0.25rem 0 0;
-  font-weight: 800;
+  margin: var(--space-1) var(--space-0) var(--space-0);
+  font-weight: var(--font-weight-extrabold);
 }
 
 .integration-cleanup-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
 }
 
 .integration-cleanup-list > div {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 
-.integration-cleanup-list span {
-  color: #1d4ed8;
-  font-size: 0.875rem;
-  font-weight: 700;
+.integration-cleanup-list .ds-badge {
+  justify-self: start;
 }
 
 .operation-warning {
-  margin: 0;
-  border-left: 3px solid #f97316;
-  background: #fff7ed;
-  color: #9a3412;
-  padding: 0.75rem;
+  margin: var(--space-0);
+  border-left-width: var(--border-width-emphasis);
 }
 
 .integration-profile-card {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .integration-profile-card-heading h2 {
-  font-size: 1rem;
+  font-size: var(--font-size-16);
 }
 
 .integration-profile-card-heading p {
   overflow-wrap: anywhere;
-  font-size: 0.875rem;
+  font-size: var(--font-size-14);
 }
 
-.status {
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  padding: 0.25rem 0.625rem;
-  color: #475569;
-  font-size: 0.8125rem;
-  font-weight: 800;
-}
-
-.status.active {
-  border-color: #86efac;
-  background: #dcfce7;
-  color: #166534;
+.integration-profile-card-heading .ds-badge {
+  flex: 0 0 auto;
 }
 
 .integration-profile-details {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin: 0;
+  grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
+  gap: var(--space-3);
+  margin: var(--space-0);
 }
 
 .integration-profile-details div {
-  min-width: 0;
+  min-width: var(--space-0);
 }
 
 .integration-profile-details dt {
-  color: #64748b;
-  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
 }
 
 .integration-profile-details dd {
-  margin: 0.25rem 0 0;
+  margin: var(--space-1) var(--space-0) var(--space-0);
   overflow-wrap: anywhere;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .secret-state {
-  margin: 0;
-  font-size: 0.875rem;
+  margin: var(--space-0);
+  font-size: var(--font-size-14);
 }
 
 .connection-result {
-  border-left: 3px solid #2563eb;
-  background: #eff6ff;
-  padding: 0.75rem;
+  border-left-width: var(--border-width-emphasis);
 }
 
 .connection-result p {
-  margin: 0.25rem 0 0;
-  font-size: 0.875rem;
+  margin: var(--space-1) var(--space-0) var(--space-0);
+  font-size: var(--font-size-14);
 }
 
 .admin-empty-state {
-  color: #475569;
+  display: grid;
+  align-content: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-12) * 4);
+  color: var(--color-text-subtle);
 }
 
 @media (max-width: 900px) {
@@ -255,7 +252,7 @@
   }
 
   .integration-operation-details {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
   }
 
   .integration-profile-form {
@@ -270,5 +267,9 @@
   .integration-operation-details,
   .integration-cleanup-list {
     grid-template-columns: 1fr;
+  }
+
+  .integration-operations-heading .ds-badge {
+    justify-self: start;
   }
 }

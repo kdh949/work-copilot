@@ -129,6 +129,8 @@
   --content-narrow-width: 27.5rem;
   --content-side-column-min-width: 11.25rem;
   --layout-rail-medium: 20rem;
+  --layout-panel-min-width: 20rem;
+  --layout-panel-wide-min-width: 22.5rem;
   --workspace-rail-left: 18.25rem;
   --workspace-rail-right: 21.5rem;
 

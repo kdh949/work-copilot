@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Alert } from "../../design-system/components";
 import { IntegrationProfileForm } from "./IntegrationProfileForm";
 import { IntegrationProfileList } from "./IntegrationProfileList";
 import { IntegrationOperationsPanel } from "./IntegrationOperationsPanel";
@@ -194,9 +195,9 @@ export function IntegrationProfilesPage({
       </header>
 
       {error && (
-        <p className="message" role="alert">
+        <Alert tone="warning" className="integration-admin-message">
           {error}
-        </p>
+        </Alert>
       )}
 
       {operationsHealth && (
@@ -213,7 +214,7 @@ export function IntegrationProfilesPage({
         />
 
         {isLoading ? (
-          <section className="admin-empty-state" aria-busy="true">
+          <section className="admin-empty-state ds-card" aria-busy="true" role="status">
             프로필을 불러오는 중입니다.
           </section>
         ) : (
