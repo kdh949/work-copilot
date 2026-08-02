@@ -2,7 +2,7 @@
 
 기준 계획: `docs/jira-confluence-work-copilot-implementation-plan.md`
 점검일: 2026-08-02
-코드 기준: `3636113` 이후 로컬 작업 트리
+코드 기준: `fix/jira-confluence-copilot-acceptance`의 `a6adbae` 이후 작업 트리
 
 ## 판정 기호
 
@@ -15,9 +15,9 @@
 
 | 범위 | 판정 | 근거 |
 | --- | --- | --- |
-| 로컬 기능 인수 | 조건부 통과 | build, unit, provider-mock e2e, AI DLP corpus, frontend lint/build가 통과했다. |
-| 보안 경계 | 조건부 통과 | 사용자 OAuth 분리, raw 원문 비영속 경계, DLP, citation, mock-only publish가 코드·테스트에 있다. |
-| 실제 파일럿 Go/No-Go | **No-Go** | 실제 Keycloak/Atlassian OAuth, ingress 증명, 독립 cleanup worker/cron, browser e2e, DC staging smoke, ZDR project 증명이 남아 있다. |
+| 로컬 기능 인수 | 조건부 통과 | build, 64개 unit suite/178 test, provider-mock e2e, AI DLP corpus, frontend lint/build, 실제 임시 PostgreSQL cleanup을 통과했다. |
+| 보안 경계 | 조건부 통과 | 사용자 OAuth 분리, raw 원문 비영속 경계, DLP, citation, key rotation, mock-only publish가 코드·테스트에 있다. |
+| 실제 파일럿 Go/No-Go | **No-Go** | 실제 Keycloak/Atlassian OAuth, ingress 증명, 독립 cleanup scheduler/alert, 자동 browser e2e, DC staging smoke, OpenAI ZDR 증명이 남아 있다. 저장된 OpenAI credential의 인증 진단도 HTTP 401로 실패했다. |
 | 외부 쓰기 | 차단 유지 | 실제 Jira/Confluence write adapter는 없고 mock gateway만 사용한다. 사용자 승인도 없다. |
 
 ## 1. 목적과 확정된 결정
@@ -29,7 +29,7 @@
 - [x] Jira·Confluence 원문은 `Post`/`wiki_documents`/`wiki_document_chunks`/pgvector 경로로 보내지 않는다. persistence boundary test와 AI source test가 확인한다.
 - [x] 기존 wiki RAG와 `work_brief` FastAPI 모듈을 분리했고, work brief 요청에는 vector indexing·web/MCP tool이 없다.
 - [x] secret 차단, 한국어 PII 마스킹, AI 출력 재검사를 구현했다.
-- [~] 원문 발췌는 AES-256-GCM과 24시간 read filter·delete로 처리한다. 웹 프로세스 timer 외의 독립 worker/cron 운영 증명은 아직 없다.
+- [~] 원문 발췌는 AES-256-GCM과 24시간 read filter·delete로 처리한다. 독립 실행 명령 `cleanup:run:compiled`은 추가하고 실제 임시 DB의 두 만료 테이블 삭제를 확인했지만, 운영 scheduler/70분 경보는 아직 증명되지 않았다.
 - [x] webhook은 source ID/version/event time/fingerprint만 처리하고 draft/publication을 `REVIEW_REQUIRED`로 바꾼다. 원문 재조회·AI·write를 하지 않는다.
 - [x] readiness는 coverage, createmeta, 1-hop blocker, freshness를 읽기 전용으로 평가하고 publish gate에 연결한다.
 - [-] 작성자·리뷰어·승인자 다단계 approval은 계획상 MVP 제외이며 구현하지 않는다.
@@ -87,7 +87,7 @@
 
 - [x] 만료 발췌/event는 API read query에서 즉시 제외하고 purge 대상으로 삼는다.
 - [x] cleanup health 기본 stale 임계값은 계획의 70분(4200초)으로 고정했다.
-- [~] web 프로세스 timer로 purge는 수행하지만, 계획이 요구한 독립 시간 단위 worker/cron 또는 PostgreSQL scheduler는 구현·배포되지 않았다.
+- [~] web 프로세스 timer와 별도로 `cleanup:run:compiled` 실행 경로를 구현했다. 실제 scheduler/cron을 Render 등에 배포하면 비용·운영 권한을 발생시키므로 이번 인수에서는 생성하지 않았다.
 - [ ] 독립 cleanup job의 마지막 성공 시각·70분 경보를 실제 운영 monitor에서 증명한다.
 
 ## 5. 데이터 모델과 보존 정책
@@ -106,14 +106,15 @@
 | `readiness_assessments`: finding code/evidence only, read-only result | [x] | readiness specs |
 | `brief_publications`/`publication_steps`: safe code·operation·retry state | [x] | publication specs |
 | `security_audit_events`: actor/action/IDs/correlation, no raw values | [x] | safe-audit/persistence specs |
-| blank DB와 existing DB copy migration up/down | [ ] | 실제 PostgreSQL 사본이 필요하며 아직 실행하지 않았다. |
+| blank DB migration up/down | [x] | 임시 PostgreSQL에서 네 migration을 적용하고 모두 revert한 뒤 `migration:show`가 전부 `[ ]`인 것을 확인했다. |
+| existing DB rollback safety | [~] | synthetic Keycloak-only 사용자(`password IS NULL`)가 있는 DB에서 foundation down은 `WORK_COPILOT_LEGACY_PASSWORD_ROLLBACK_BLOCKED`로 destructive drop 전 차단된다. 실제 운영 DB 사본에는 권한 없이 실행하지 않았다. |
 
 ### 암호화·오류 보존 기준
 
 - [x] profile/token encryption key와 transient-content key를 분리한다.
-- [x] AES-256-GCM ciphertext/IV/tag/key version을 사용하고 secret column은 기본 select에서 제외한다.
+- [x] AES-256-GCM ciphertext/IV/tag/key version을 사용하고 secret column은 기본 select에서 제외한다. current/previous key를 읽고 profile secret·OAuth token·active transient fragment를 current key로 재암호화한다.
 - [x] 안전한 오류 code/correlation 중심으로 처리하며 provider body, token, source text를 로그/audit에 기록하지 않는다.
-- [ ] Render secret 입력과 current/previous key rotation은 사용자 승인과 실제 비밀값이 필요하다.
+- [~] `INTEGRATION_*`와 `TRANSIENT_CONTENT_*`의 current/previous key 환경변수는 example/Render secret declaration까지 반영했고 crypto 회귀 테스트를 통과했다. 실제 Render secret 입력·rotation cutover는 사용자 승인과 비밀값이 필요하다.
 
 ## 6. API 계약과 권한
 
@@ -182,6 +183,7 @@
 
 - [x] 공식 OpenAI 문서 기준 Responses API `store:false`와 `text.format` + strict JSON schema를 유지한다.
 - [x] `WORK_BRIEF_OPENAI_MODEL` override가 없으면 deployment `OPENAI_MODEL`을 사용한다.
+- [ ] 실제 OpenAI work-brief smoke는 통과하지 않았다. 로컬에 설정된 credential로 `/v1/models` 인증만 최소 진단했으며 HTTP 401을 받았다. 키 값·응답 본문은 출력하거나 저장하지 않았고, 비용이 발생할 generation 재시도는 하지 않았다.
 - [ ] 운영 OpenAI project의 ZDR/Modified Abuse Monitoring 승인·project setting은 관리자 증명이 필요하다. `store:false`만으로 ZDR이 보장되지는 않는다.
 
 ## 8. 승인형 publish saga와 복구
@@ -202,7 +204,7 @@
 - [x] Origin allowlist, correlation ID, safe exception mapping을 적용했다.
 - [x] Render YAML에는 secret name만 두고 비밀값은 `sync:false`로 둔다.
 - [x] unauthorized Origin/CSRF boundary는 automated specs로 검증했다.
-- [ ] blank/existing PostgreSQL migration up/down은 실제 DB가 있어야 한다.
+- [~] blank DB 네 migration up/down은 실제 임시 PostgreSQL에서 통과했다. Keycloak-only synthetic user가 있는 existing-like DB는 down safety guard가 destructive rollback을 차단한다. 실제 운영 사본 검증은 승인 필요다.
 
 ### P0-2 Keycloak OIDC BFF
 
@@ -224,6 +226,7 @@
 
 - [x] Jira/Confluence authorize/callback, PKCE state, encrypted access/refresh token, disconnect를 구현했다.
 - [x] refresh rotation은 advisory/row locking으로 경쟁 요청을 직렬화한다.
+- [x] key rotation 중에는 current/previous key로 legacy token을 읽고, 아직 유효한 token을 읽는 즉시 current key ciphertext로 다시 저장한다.
 - [x] API/UI는 connected/expired/reauthorization-required 같은 safe status만 보인다.
 - [x] user A/B token isolation과 provider 401/403 safe conversion을 mock test로 확인했다.
 - [ ] 실제 Incoming Link token refresh는 target DC에서 확인해야 한다.
@@ -244,7 +247,7 @@
 - [x] Korean PII placeholder consistency 및 additional high-confidence categories를 테스트했다.
 - [x] mock OpenAI request는 PII/secret/tools/vector indexing payload가 없고 strict structured output을 사용한다.
 - [x] encrypted transient fragment 24-hour expiry/read filter/purge를 테스트했다.
-- [~] custom rule admin policy/audit lifecycle과 independent cleanup worker/cron은 남아 있다.
+- [~] custom rule admin policy/audit lifecycle과 independent cleanup scheduler/alert은 남아 있다. CLI cleanup은 실제 임시 DB에서 two-table expiry deletion을 통과했다.
 
 ### P2-1 brief draft API와 UI
 
@@ -286,7 +289,7 @@
 - [x] unit tests는 user isolation, OAuth expiry, DLP, conflict, partial publish, TTL, replay, readiness finding을 다룬다.
 - [x] active profile deactivation은 new OAuth read/mock publish start를 차단하고 wiki RAG와 분리된다.
 - [~] active profile 비활성화 rollback과 TTL 동작은 파일럿 readiness 문서에 있다. 독립적인 incident/data-deletion runbook은 아직 없다.
-- [ ] browser e2e suite는 아직 없다.
+- [~] 자동 browser e2e suite는 아직 없다. 다만 합성 로그인 API를 사용한 실제 browser 인수에서 login 화면, 업무 브리프 화면, 빈 이슈 key validation, provider 오류 안내, accessibility tree, console warning/error 0건을 확인했다.
 - [ ] actual DC staging smoke는 아직 없다.
 
 ## 10. 파일럿 순서와 Go/No-Go
@@ -303,15 +306,15 @@
 - [ ] 실제 DC OAuth Incoming Link가 user permission으로 동작함
 - [ ] two-user evidence isolation staging proof
 - [x] synthetic secret fixture가 local AI/DB/log safe boundary를 통과하지 못함
-- [ ] `store:false`와 approved ZDR project proof
+- [ ] 유효한 OpenAI credential로 `store:false` work-brief smoke 및 approved ZDR project proof (현재 최소 인증 진단은 HTTP 401)
 - [x] mock idempotency/recovery contract는 검증됨
-- [~] 24-hour API read block은 검증됐으나 independent cleanup monitor proof 없음
+- [~] 24-hour API read block 및 standalone cleanup의 실제 expiry deletion은 검증됐으나 independent cleanup scheduler/monitor proof 없음
 - [ ] webhook route secret + allowlist/mTLS ingress proof
 - [x] readiness inaccessible dependency redaction은 synthetic test로 검증됨
 
 ## 11. 배포 환경변수와 비밀값
 
-- [x] Render YAML은 Keycloak, profile encryption, transient encryption, OAuth callback/host allowlist, AI service key 등 현재 코드가 사용하는 비밀값을 `sync:false`로 선언한다.
+- [x] Render YAML은 Keycloak, profile/transient encryption의 current/previous key, OAuth callback/host allowlist, AI service key 등 현재 코드가 사용하는 비밀값을 `sync:false`로 선언한다.
 - [x] `OPENAI_MODEL` fallback, `WORK_COPILOT_CLEANUP_MAX_AGE_SECONDS=4200`, webhook default-off flags를 configuration에 맞췄다.
 - [x] session/CSRF는 random opaque server-side state/hash를 사용하므로 계획의 legacy signing-secret 이름에 의존하지 않는다.
 - [ ] 실제 secret 입력, hostname/CIDR, Keycloak/OAuth provider values, key rotation은 사용자/관리자 승인 없이 수행하지 않는다.
@@ -330,13 +333,35 @@
 | 명령 | 결과 |
 | --- | --- |
 | `npm run build` | 통과 (backend + frontend production build) |
-| `npm test` | 통과: 62 suites, 168 tests |
+| `npm test` | 통과: 64 suites, 178 tests |
+| `npm run test:cov --workspace=backend -- --runInBand` | 통과: 64 suites, 178 tests; statements 72.70%, branches 64.34%, functions 72.70%, lines 72.27% |
 | `npm run test:e2e --workspace=backend -- --runInBand` | 통과: 2 suites, 2 tests (loopback bind가 필요한 sandbox 실행은 승인된 local-only 환경에서 수행) |
 | `backend/ai-service/.venv/bin/python -m unittest discover -s tests -v` | 통과: 26 tests |
 | `npm run lint --workspace=frontend` | 통과 |
+| `backend: tsc --noEmit --incremental false -p tsconfig.build.json` | 통과 (production source typecheck) |
+| 이번 변경 파일 ESLint | 통과 (crypto rotation, OAuth token rotation, transient rotation, Render config spec) |
+| `docker compose config --quiet` | 통과 |
+| blank PostgreSQL migration | 통과: 네 migration up → 네 migration down → `migration:show` 전부 `[ ]` |
+| existing-like rollback guard | 통과: synthetic Keycloak-only user가 있으면 `WORK_COPILOT_LEGACY_PASSWORD_ROLLBACK_BLOCKED`로 destructive down 전 중단 |
+| `cleanup:run:compiled` + PostgreSQL | 통과: synthetic expired `transient_evidence_fragments`/`source_change_events`를 각각 1건씩 삭제하고 count `0|0` 확인 |
+| compiled API HTTP smoke | 통과: 합성 config + temporary DB에서 `/health` = `OK`, unauthenticated `/auth/me` = 401, untrusted Origin write = 403 |
+| browser acceptance | 통과: 합성 login API로 업무 브리프 UI와 client validation/error, accessibility tree, console warning/error 0건 확인 |
+| OpenAI API authentication diagnostic | 실패(예상 No-Go): configured credential의 `/v1/models` 최소 인증이 HTTP 401. 키/응답 본문은 노출하지 않았고 generation call은 수행하지 않음 |
 | `git diff --check` | 통과 |
 
-`SafeHttpExceptionFilter`의 synthetic 500 warning과 FastAPI/Starlette deprecation warning은 테스트 fixture/runtime dependency warning이며 test failure가 아니다. 각각 실제 production error body나 source text를 출력하지 않는다.
+`SafeHttpExceptionFilter`의 synthetic 500 warning과 FastAPI/Starlette deprecation warning은 테스트 fixture/runtime dependency warning이며 test failure가 아니다. 각각 실제 production error body나 source text를 출력하지 않는다. 전체 backend ESLint는 이번 작업 이전부터 존재한 formatting/test typing 문제로 733건을 보고하므로 전체 lint 통과 증거로 사용하지 않았다. 대신 production source typecheck와 이번 변경 파일 lint를 통과시켰다.
+
+## 이번 인수에서 수정·커밋한 결함
+
+| 커밋 | 수정 및 검증 |
+| --- | --- |
+| `6ed498d` | webhook 재검토 뒤 unchanged source refresh가 draft를 영구 `REVIEW_REQUIRED`에 두던 결함을 수정하고 회귀 테스트 추가 |
+| `20ebb9e` | Render frontend API URL과 OpenAI `store:false`/transient key version 선언 수정 |
+| `385eb3a` | 독립 실행 가능한 expiry cleanup runner/CLI와 unit·실제 PostgreSQL deletion test 추가 |
+| `9ffffb5` | Keycloak-only account가 있는 migration rollback을 destructive DDL 전에 차단하는 guard 추가 |
+| `63da314` | current/previous encryption key 호환 및 profile/OAuth/transient lazy re-encryption 추가 |
+| `74287f4` | key rotation 회귀 test의 타입/lint 안전성 보강 |
+| `a6adbae` | OAuth 설정을 위해 읽은 legacy profile secret 전체를 CAS 조건으로 현재 키에 재암호화 |
 
 ## 실제 staging 인수에 필요한 제출물
 
@@ -345,7 +370,7 @@
 - [ ] `createmeta` required-field result와 child template mapping
 - [ ] reverse proxy/WAF CIDR 또는 mTLS verification record, webhook body exclusion setting
 - [ ] OpenAI project data-control/ZDR approval evidence
-- [ ] blank/existing DB migration up/down log (secret 제외)
+- [~] blank DB migration up/down log (local temporary DB 통과; 실제 existing DB copy는 approval 필요)
 - [ ] independent cleanup scheduler last-success/70-minute alert evidence
-- [ ] browser e2e report와 actual DC read-only/shadow-mode smoke report
+- [~] browser manual acceptance report (통과)와 automated browser e2e report, actual DC read-only/shadow-mode smoke report
 - [ ] real write adapter approval, Confluence-only then Jira link/comment then child task rollout evidence
