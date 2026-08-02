@@ -59,4 +59,30 @@ describe('SafeHttpExceptionFilter', () => {
       correlationId: 'correlation-456',
     });
   });
+
+  it('logs an account mapping diagnostic without exposing it to the browser', () => {
+    const status = jest.fn().mockReturnThis();
+    const json = jest.fn();
+    const response = {
+      status,
+      json,
+    } as unknown as Response;
+    const host = {
+      switchToHttp: () => ({
+        getRequest: () => ({ correlationId: 'correlation-789' }),
+        getResponse: () => response,
+      }),
+    } as unknown as ArgumentsHost;
+    const exception = Object.assign(new UnauthorizedException(), {
+      diagnosticCode: 'AUTH_PILOT_ACCOUNT_NOT_FOUND',
+    });
+
+    new SafeHttpExceptionFilter().catch(exception, host);
+
+    expect(json).toHaveBeenCalledWith({
+      statusCode: HttpStatus.UNAUTHORIZED,
+      code: 'UNAUTHORIZED',
+      correlationId: 'correlation-789',
+    });
+  });
 });

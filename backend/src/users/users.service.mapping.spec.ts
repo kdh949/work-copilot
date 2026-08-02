@@ -1,5 +1,5 @@
-import { UnauthorizedException } from '@nestjs/common';
 import { EntityManager, Repository } from 'typeorm';
+import { AccountMappingRejectedException } from '../auth/account-mapping-rejected.exception';
 import { User } from './user.entity';
 import { UsersService } from './users.service';
 
@@ -87,6 +87,36 @@ describe('UsersService.mapVerifiedKeycloakIdentity', () => {
         subject: 'keycloak-subject',
         email: 'pilot@example.test',
       }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toMatchObject<Partial<AccountMappingRejectedException>>({
+      diagnosticCode: 'AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY',
+    });
+  });
+
+  it('rejects a verified identity without a pre-provisioned pilot account', async () => {
+    const manager = {
+      createQueryBuilder: jest
+        .fn()
+        .mockReturnValueOnce(selectBuilder(null))
+        .mockReturnValueOnce(selectBuilder(null)),
+    };
+    const transaction = jest.fn(
+      (callback: (entityManager: EntityManager) => Promise<User>) =>
+        callback(manager as unknown as EntityManager),
+    );
+    const repository = {
+      manager: {
+        transaction,
+      },
+    } as unknown as Repository<User>;
+    const service = new UsersService(repository);
+
+    await expect(
+      service.mapVerifiedKeycloakIdentity({
+        subject: 'keycloak-subject',
+        email: 'pilot@example.test',
+      }),
+    ).rejects.toMatchObject<Partial<AccountMappingRejectedException>>({
+      diagnosticCode: 'AUTH_PILOT_ACCOUNT_NOT_FOUND',
+    });
   });
 });

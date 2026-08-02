@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
+import { AccountMappingRejectedException } from '../auth/account-mapping-rejected.exception';
 import { User } from './user.entity';
 
 export type KeycloakUserIdentity = {
@@ -60,9 +57,7 @@ export class UsersService {
 
     if (bySubject) {
       if (bySubject.email.trim().toLowerCase() !== identity.email) {
-        throw new UnauthorizedException(
-          'Keycloak identity does not match the mapped account.',
-        );
+        this.reject('AUTH_MAPPED_IDENTITY_EMAIL_MISMATCH');
       }
 
       return bySubject;
@@ -75,16 +70,14 @@ export class UsersService {
       .getOne();
 
     if (!legacyUser) {
-      throw new UnauthorizedException('No matching pilot account exists.');
+      this.reject('AUTH_PILOT_ACCOUNT_NOT_FOUND');
     }
 
     if (
       legacyUser.keycloakSubject &&
       legacyUser.keycloakSubject !== identity.subject
     ) {
-      throw new UnauthorizedException(
-        'This account is already mapped to another identity.',
-      );
+      this.reject('AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY');
     }
 
     if (legacyUser.keycloakSubject === identity.subject) {
@@ -120,8 +113,12 @@ export class UsersService {
       return concurrentlyMappedUser;
     }
 
-    throw new UnauthorizedException(
-      'This account is already mapped to another identity.',
-    );
+    this.reject('AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY');
+  }
+
+  private reject(
+    code: AccountMappingRejectedException['diagnosticCode'],
+  ): never {
+    throw new AccountMappingRejectedException(code);
   }
 }
