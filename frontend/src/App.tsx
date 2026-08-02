@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
+import { Alert, Button, Card } from "./design-system/components";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
@@ -1191,19 +1192,27 @@ function App() {
       />
 
       <main className={menu === "workBriefs" ? "app-main--workspace" : undefined}>
-        {message && <p className="message">{message}</p>}
+        {message && (
+          <Alert tone="warning" className="app-message">
+            {message}
+          </Alert>
+        )}
 
         {menu === "login" && (
-          <section className="auth-layout">
-            <section className="panel auth-card">
-              <h2>회사 계정 로그인</h2>
+          <section className="auth-layout" aria-labelledby="login-title">
+            <Card className="auth-card">
+              <p className="auth-eyebrow">회사 계정 인증</p>
+              <h2 id="login-title">회사 계정 로그인</h2>
               <p className="auth-subtitle">
                 Keycloak 회사 계정으로만 로그인할 수 있습니다.
               </p>
-              <button type="button" onClick={startKeycloakLogin}>
+              <Button type="button" onClick={startKeycloakLogin}>
                 회사 계정으로 계속
-              </button>
-            </section>
+              </Button>
+              <p className="auth-security-note">
+                인증은 회사 계정 페이지에서 안전하게 진행됩니다.
+              </p>
+            </Card>
           </section>
         )}
 

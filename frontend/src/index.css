@@ -200,6 +200,10 @@ main {
   color: var(--color-text-warning);
 }
 
+.app-message {
+  margin-bottom: var(--space-4);
+}
+
 .grid {
   display: grid;
   grid-template-columns: var(--layout-rail-medium) minmax(var(--space-0), 1fr);
@@ -207,20 +211,45 @@ main {
 }
 
 .auth-layout {
-  max-width: 440px;
+  max-width: var(--content-narrow-width);
   display: grid;
-  gap: 14px;
-  margin: 40px auto 0;
+  gap: var(--space-3-5);
+  margin: var(--space-10) auto var(--space-0);
+}
+
+.auth-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6);
 }
 
 .auth-card h2,
 .signup-small h2 {
-  margin-bottom: 6px;
+  margin: var(--space-0);
+  font-size: var(--font-size-22);
+  line-height: var(--line-height-tight);
+}
+
+.auth-eyebrow {
+  margin: var(--space-0);
+  color: var(--color-text-link);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
 }
 
 .auth-subtitle {
-  margin-top: 0;
-  color: #64748b;
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-normal);
+}
+
+.auth-security-note {
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-normal);
 }
 
 .signup-small {
