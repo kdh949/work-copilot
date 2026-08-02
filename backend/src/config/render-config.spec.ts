@@ -1,16 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-describe('Render deployment configuration', () => {
-  it('points the production frontend at the work-copilot API service', () => {
+describe('production deployment configuration', () => {
+  it('uses Render for APIs and Vercel for the frontend', () => {
     const renderConfig = readFileSync(
       join(__dirname, '../../../render.yaml'),
       'utf8',
     );
-
-    expect(renderConfig).toMatch(
-      /- key: VITE_API_URL\s+value: https:\/\/work-copilot-api\.onrender\.com/,
+    const vercelConfig = readFileSync(
+      join(__dirname, '../../../vercel.json'),
+      'utf8',
     );
+
+    expect(renderConfig).not.toContain('name: work-copilot-web');
     expect(renderConfig).not.toContain('week15-board-api.onrender.com');
     expect(renderConfig).toMatch(/- key: OPENAI_STORE\s+value: "false"/);
     expect(renderConfig).toMatch(
@@ -27,6 +29,20 @@ describe('Render deployment configuration', () => {
     );
     expect(renderConfig).toMatch(
       /- key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION\s+sync: false/,
+    );
+    expect(vercelConfig).toContain('"outputDirectory": "frontend/dist"');
+    expect(vercelConfig).toContain(
+      '"VITE_API_URL": "https://api.work-copilot.dhkim.cloud"',
+    );
+    expect(vercelConfig).toContain('"destination": "/index.html"');
+    expect(renderConfig).toContain(
+      'value: https://work-copilot.dhkim.cloud,https://work-copilot-web.vercel.app',
+    );
+    expect(renderConfig).toContain(
+      'value: https://api.work-copilot.dhkim.cloud/auth/oidc/callback',
+    );
+    expect(renderConfig).toContain(
+      'value: https://work-copilot-ai.onrender.com',
     );
   });
 });

@@ -5,7 +5,7 @@ services:
     repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
-    branch: main
+    branch: feature/rename-work-copilot
     rootDir: backend/ai-service
     autoDeploy: true
     buildCommand: pip install -r requirements.txt
@@ -49,7 +49,7 @@ services:
     repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
-    branch: main
+    branch: feature/rename-work-copilot
     autoDeploy: true
     buildCommand: npm ci --include=dev && npm run build --workspace=backend
     startCommand: npm run migration:run:compiled --workspace=backend && npm run start:prod --workspace=backend
@@ -63,6 +63,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false
       - key: DB_HOST
         sync: false
       - key: DB_PORT
@@ -78,7 +80,7 @@ services:
       - key: DB_SSL_REJECT_UNAUTHORIZED
         value: "false"
       - key: FRONTEND_ORIGINS
-        sync: false
+        value: https://work-copilot.dhkim.cloud,https://work-copilot-web.vercel.app
       - key: KEYCLOAK_ISSUER
         sync: false
       - key: KEYCLOAK_CLIENT_ID
@@ -86,7 +88,7 @@ services:
       - key: KEYCLOAK_CLIENT_SECRET
         sync: false
       - key: KEYCLOAK_REDIRECT_URI
-        sync: false
+        value: https://api.work-copilot.dhkim.cloud/auth/oidc/callback
       - key: KEYCLOAK_ALLOWED_EMAIL_DOMAINS
         sync: false
       - key: OIDC_ATTEMPT_ENCRYPTION_KEY
@@ -102,7 +104,7 @@ services:
       - key: INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION
         sync: false
       - key: INTEGRATION_CALLBACK_BASE_URL
-        sync: false
+        value: https://api.work-copilot.dhkim.cloud
       - key: INTEGRATION_BASE_URL_HOST_ALLOWLIST
         sync: false
       - key: INTEGRATION_JIRA_SCOPE_ALLOWLIST
@@ -118,10 +120,7 @@ services:
       - key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION
         sync: false
       - key: AI_SERVICE_URL
-        fromService:
-          type: web
-          name: work-copilot-ai
-          property: host
+        value: https://work-copilot-ai.onrender.com
       - key: AI_SERVICE_API_KEY
         sync: false
       - key: WORK_COPILOT_CLEANUP_MAX_AGE_SECONDS
@@ -132,25 +131,3 @@ services:
         value: "false"
       - key: WEBHOOK_INGRESS_ALLOWED_CIDRS
         sync: false
-
-  - type: web
-    name: work-copilot-web
-    runtime: static
-    repo: https://github.com/kdh949/work-copilot
-    branch: main
-    autoDeploy: true
-    buildCommand: npm ci && npm run build --workspace=frontend
-    staticPublishPath: frontend/dist
-    buildFilter:
-      paths:
-        - frontend/**
-        - package.json
-        - package-lock.json
-        - render.yaml
-    envVars:
-      - key: VITE_API_URL
-        value: https://work-copilot-api.onrender.com
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html

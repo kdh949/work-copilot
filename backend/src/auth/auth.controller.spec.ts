@@ -80,6 +80,43 @@ describe('AuthController', () => {
     expect(redirect).toHaveBeenCalledWith('https://app.example.test');
   });
 
+  it('permits the production session cookie on the separately hosted frontend', async () => {
+    const credentials = {
+      sessionToken: 'opaque-session-token',
+      csrfToken: 'csrf-token-that-must-not-be-in-the-cookie',
+      expiresAt: new Date('2026-08-02T01:00:00.000Z'),
+    };
+    const authService = {
+      completeAuthorization: jest.fn().mockResolvedValue(credentials),
+    } as unknown as AuthService;
+    const configService = {
+      get: jest.fn((key: string) =>
+        key === 'NODE_ENV' ? 'production' : 'https://app.example.test',
+      ),
+    } as unknown as ConfigService;
+    const cookie = jest.fn();
+    const response = {
+      cookie,
+      redirect: jest.fn(),
+    } as unknown as Response;
+    const subject = new AuthController(authService, configService);
+
+    await subject.callback(
+      { code: 'authorization-code', state: 'state' },
+      response,
+    );
+
+    expect(cookie).toHaveBeenCalledWith(
+      'work_copilot_session',
+      credentials.sessionToken,
+      expect.objectContaining({
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+      }),
+    );
+  });
+
   it('returns only a rotated CSRF token to the browser', async () => {
     const credentials = {
       sessionToken: 'new-opaque-session-token',
@@ -96,7 +133,10 @@ describe('AuthController', () => {
       cookie,
       json,
     } as unknown as Response;
-    const subject = new AuthController(authService, {} as ConfigService);
+    const subject = new AuthController(
+      authService,
+      { get: jest.fn() } as unknown as ConfigService,
+    );
 
     await subject.csrf(
       { authSession: { id: 'session-id' } as AuthSession },

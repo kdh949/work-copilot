@@ -24,14 +24,19 @@ export const createDatabaseOptions = (
   environment: Environment = process.env,
 ): PostgresDataSourceOptions => {
   const useSsl = isEnabled(environment.DB_SSL);
+  const databaseUrl = environment.DATABASE_URL?.trim();
 
   return {
     type: 'postgres',
-    host: environment.DB_HOST,
-    port: databasePort(environment.DB_PORT),
-    username: environment.DB_USERNAME,
-    password: environment.DB_PASSWORD,
-    database: environment.DB_DATABASE,
+    ...(databaseUrl
+      ? { url: databaseUrl }
+      : {
+          host: environment.DB_HOST,
+          port: databasePort(environment.DB_PORT),
+          username: environment.DB_USERNAME,
+          password: environment.DB_PASSWORD,
+          database: environment.DB_DATABASE,
+        }),
     ssl: useSsl
       ? {
           rejectUnauthorized:
@@ -54,6 +59,7 @@ export const createDatabaseOptionsFromConfig = (
   configService: ConfigService,
 ): PostgresDataSourceOptions =>
   createDatabaseOptions({
+    DATABASE_URL: configService.get<string>('DATABASE_URL'),
     DB_HOST: configService.get<string>('DB_HOST'),
     DB_PORT: configService.get<string>('DB_PORT'),
     DB_USERNAME: configService.get<string>('DB_USERNAME'),

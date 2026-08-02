@@ -435,7 +435,7 @@ export function WorkBriefsPage({
           <form className="work-brief-issue-form" onSubmit={(event) => { event.preventDefault(); void collectEvidence(); }}>
             <label htmlFor="brief-issue-key">이슈 키</label>
             <div>
-              <input id="brief-issue-key" value={issueKey} placeholder="예: PROJ-284" onChange={(event) => setIssueKey(event.target.value)} />
+              <input id="brief-issue-key" value={issueKey} placeholder="이슈 키 입력" onChange={(event) => setIssueKey(event.target.value)} />
               <Button type="submit" size="sm" disabled={isLoadingEvidence}>{isLoadingEvidence ? "조회 중" : "불러오기"}</Button>
             </div>
           </form>
