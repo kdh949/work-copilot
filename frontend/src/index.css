@@ -4,14 +4,9 @@
 
 body {
   margin: 0;
-  font-family:
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          'Segoe UI',
-          sans-serif;
-  background: #f4f6f8;
-  color: #172033;
+  font-family: var(--font-family-sans);
+  background: var(--color-surface-canvas);
+  color: var(--color-text-strong);
 }
 
 button,
@@ -77,37 +72,115 @@ main {
   padding: 28px 20px;
 }
 
+.app-main--workspace {
+  max-width: none;
+  min-height: calc(100vh - var(--header-height));
+  margin: 0;
+  padding: 0;
+}
+
 .header {
+  position: relative;
+  z-index: var(--layer-header);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px 28px;
-  background: #0f172a;
-  color: white;
+  gap: var(--space-6);
+  height: var(--header-height);
+  padding: 0 var(--space-6);
+  background: var(--color-brand-950);
+  color: var(--color-text-inverse);
 }
 
-.header h1 {
-  margin: 0;
-  font-size: 22px;
+.header-brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: white;
+  font-size: var(--font-size-16);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.header-brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: var(--radius-3);
+  background: var(--color-action-600);
 }
 
 .header nav {
   display: flex;
+  align-self: stretch;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1);
+  margin-inline: auto;
 }
 
 .header nav button {
+  position: relative;
+  height: 100%;
+  padding: 0 var(--space-4);
   background: transparent;
-  border: 1px solid #334155;
+  border: 0;
+  border-radius: 0;
+  color: #aebbd0;
+  font-size: var(--font-size-14);
+  font-weight: var(--font-weight-medium);
 }
 
 .header nav button.active {
-  background: #22c55e;
-  border-color: #22c55e;
-  color: #06210f;
+  background: transparent;
+  color: white;
+}
+
+.header nav button.active::after {
+  position: absolute;
+  right: var(--space-4);
+  bottom: 0;
+  left: var(--space-4);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: #4d8dff;
+  content: "";
+}
+
+.header-actions,
+.header-profile-trigger {
+  display: flex;
+  align-items: center;
+}
+
+.header-actions { flex: 0 0 auto; gap: var(--space-1); }
+.header-notification { position: relative; }
+.header-notification::after { position: absolute; top: 8px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: #fb7185; content: ""; }
+.header-profile { position: relative; margin-left: var(--space-2); }
+.header-profile-trigger { gap: var(--space-2); padding: 4px 6px 4px 4px; background: transparent; color: white; }
+.header-avatar { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #dbeafe; color: var(--color-action-700); font-size: var(--font-size-13); font-weight: 700; }
+.header-profile-name { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-13); }
+.header-profile-menu { position: absolute; z-index: var(--layer-menu); top: calc(100% + 10px); right: 0; display: grid; width: 260px; gap: 5px; padding: var(--space-4); border: 1px solid var(--color-border-default); border-radius: var(--radius-4); background: white; box-shadow: var(--shadow-menu); color: var(--color-text-strong); }
+.header-profile-menu span { color: var(--color-text-muted); font-size: var(--font-size-12); }
+.header-profile-menu button { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding: 10px; background: var(--color-surface-subtle); color: var(--color-text-default); }
+
+@media (max-width: 1040px) {
+  .header { padding-inline: var(--space-4); }
+  .header-brand > span:last-child { display: none; }
+  .header-profile-name { display: none; }
+}
+
+@media (max-width: 760px) {
+  .header { gap: var(--space-2); }
+  .header nav { min-width: 0; justify-content: flex-start; overflow-x: auto; }
+  .header nav button { padding-inline: var(--space-3); white-space: nowrap; }
+  .header-actions { display: none; }
 }
 
 .message {

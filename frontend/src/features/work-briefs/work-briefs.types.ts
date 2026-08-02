@@ -13,6 +13,10 @@ export type WorkEvidence = {
   accessStatus: "accessible";
   dlpStatus: "not_evaluated";
   aiStatus?: "included" | "excluded";
+  updatedAt?: string;
+  location?: string;
+  tags?: string[];
+  state?: "current" | "review" | "restricted";
 };
 
 export type EvidenceCollection = {

@@ -1,3 +1,13 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  IconBell,
+  IconBrandJira,
+  IconChevronDown,
+  IconHelpCircle,
+  IconLogout,
+} from "@tabler/icons-react";
+import { IconButton } from "../design-system/components";
+
 type User = {
   id: number;
   email: string;
@@ -23,43 +33,54 @@ type HeaderProps = {
   onLogout: () => void;
 };
 
+const NAV_ITEMS: { menu: MenuName; label: string }[] = [
+  { menu: "posts", label: "회사 위키" },
+  { menu: "notes", label: "내 노트" },
+  { menu: "workBriefs", label: "업무 브리프" },
+  { menu: "integrations", label: "내 연동" },
+];
+
 export function Header(props: HeaderProps) {
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function closeProfile(event: MouseEvent) {
+      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false);
+    }
+    document.addEventListener("mousedown", closeProfile);
+    return () => document.removeEventListener("mousedown", closeProfile);
+  }, []);
+
   return (
     <header className="header">
-      <h1>{props.title}</h1>
+      <button
+        type="button"
+        className="header-brand"
+        onClick={() => props.user && props.onMenuClick("workBriefs")}
+        aria-label={`${props.title} 홈`}
+      >
+        <span className="header-brand-mark" aria-hidden="true">
+          <IconBrandJira size={20} stroke={2.1} />
+        </span>
+        <span>{props.title}</span>
+      </button>
 
-      <nav>
-        {props.user ? (
-          <>
-            <button
-              type="button"
-              className={props.menu === "posts" ? "active" : ""}
-              onClick={() => props.onMenuClick("posts")}
-            >
-              회사 위키
-            </button>
-            <button
-              type="button"
-              className={props.menu === "notes" ? "active" : ""}
-              onClick={() => props.onMenuClick("notes")}
-            >
-              내 노트
-            </button>
-            <button
-              type="button"
-              className={props.menu === "workBriefs" ? "active" : ""}
-              onClick={() => props.onMenuClick("workBriefs")}
-            >
-              업무 브리프
-            </button>
-            <button
-              type="button"
-              className={props.menu === "integrations" ? "active" : ""}
-              onClick={() => props.onMenuClick("integrations")}
-            >
-              내 연동
-            </button>
-            {props.user.role === "admin" && (
+      {props.user ? (
+        <>
+          <nav aria-label="주요 메뉴">
+            {NAV_ITEMS.map((item) => (
+              <button
+                type="button"
+                key={item.menu}
+                className={props.menu === item.menu ? "active" : ""}
+                onClick={() => props.onMenuClick(item.menu)}
+                aria-current={props.menu === item.menu ? "page" : undefined}
+              >
+                {item.label}
+              </button>
+            ))}
+            {props.user.role === "admin" ? (
               <button
                 type="button"
                 className={props.menu === "admin" ? "active" : ""}
@@ -67,17 +88,40 @@ export function Header(props: HeaderProps) {
               >
                 연동 관리
               </button>
-            )}
-            <span>
-              {props.user.nickname} · {props.user.department || "부서 미등록"} ·{" "}
-              {props.user.employeeNumber || "사번 미등록"} · {props.user.role}
-            </span>
-            <button type="button" onClick={props.onLogout}>
-              로그아웃
-            </button>
-          </>
-        ) : null}
-      </nav>
+            ) : null}
+          </nav>
+
+          <div className="header-actions">
+            <IconButton label="도움말" inverse><IconHelpCircle size={20} /></IconButton>
+            <IconButton label="알림" inverse className="header-notification"><IconBell size={20} /></IconButton>
+            <div className="header-profile" ref={profileRef}>
+              <button
+                type="button"
+                className="header-profile-trigger"
+                onClick={() => setProfileOpen((current) => !current)}
+                aria-expanded={profileOpen}
+                aria-haspopup="menu"
+              >
+                <span className="header-avatar" aria-hidden="true">
+                  {props.user.nickname.trim().slice(0, 1) || "사"}
+                </span>
+                <span className="header-profile-name">{props.user.nickname}</span>
+                <IconChevronDown size={16} />
+              </button>
+              {profileOpen ? (
+                <div className="header-profile-menu" role="menu">
+                  <strong>{props.user.nickname}</strong>
+                  <span>{props.user.email}</span>
+                  <span>{props.user.department || "부서 미등록"} · {props.user.employeeNumber || "사번 미등록"}</span>
+                  <button type="button" role="menuitem" onClick={props.onLogout}>
+                    <IconLogout size={17} /> 로그아웃
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : null}
     </header>
   );
 }

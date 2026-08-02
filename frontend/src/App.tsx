@@ -5,6 +5,12 @@ import { Header, type MenuName } from "./components/Header";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
+import {
+  previewWorkBriefRequest,
+  WORK_BRIEF_PREVIEW_EVIDENCE,
+  WORK_BRIEF_PREVIEW_ISSUE,
+  WORK_BRIEF_PREVIEW_USER,
+} from "./features/work-briefs/work-briefs.preview";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const CHAT_SUGGESTIONS = [
@@ -15,6 +21,7 @@ const CHAT_SUGGESTIONS = [
 ];
 const WIKI_PAGE_SIZE = 12;
 let csrfToken = "";
+const IS_WORK_BRIEF_PREVIEW = import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "work-brief";
 
 type User = {
   id: number;
@@ -101,8 +108,8 @@ function getAncestorPathKeys(path: string[]) {
 }
 
 function App() {
-  const [menu, setMenu] = useState<MenuName>("login");
-  const [user, setUser] = useState<User | null>(null);
+  const [menu, setMenu] = useState<MenuName>(IS_WORK_BRIEF_PREVIEW ? "workBriefs" : "login");
+  const [user, setUser] = useState<User | null>(IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_USER : null);
   const [message, setMessage] = useState("");
 
   const [wikiPosts, setWikiPosts] = useState<BoardPost[]>([]);
@@ -503,6 +510,7 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (IS_WORK_BRIEF_PREVIEW) return;
     let isCurrent = true;
     void request<User>("/auth/me")
       .then(async (me) => {
@@ -1182,7 +1190,7 @@ function App() {
         onLogout={handleLogout}
       />
 
-      <main>
+      <main className={menu === "workBriefs" ? "app-main--workspace" : undefined}>
         {message && <p className="message">{message}</p>}
 
         {menu === "login" && (
@@ -1480,7 +1488,14 @@ function App() {
           <IntegrationProfilesPage request={request} />
         )}
 
-        {menu === "workBriefs" && user && <WorkBriefsPage request={request} />}
+        {menu === "workBriefs" && user && (
+          <WorkBriefsPage
+            request={IS_WORK_BRIEF_PREVIEW ? previewWorkBriefRequest : request}
+            onOpenIntegrations={() => setMenu("integrations")}
+            initialIssueKey={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_ISSUE : undefined}
+            initialEvidence={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_EVIDENCE : undefined}
+          />
+        )}
 
         {menu === "integrations" && user && (
           <IntegrationConnectionsPage request={request} />
@@ -1648,7 +1663,7 @@ function App() {
         )}
       </main>
 
-      {user && (
+      {user && !IS_WORK_BRIEF_PREVIEW && (
         <div className="chat-widget-area">
           {isChatOpen && (
             <section className="chat-widget">
