@@ -1,4 +1,4 @@
-# Jira–Confluence 업무 코파일럿 최종 인수 체크리스트
+# Work Copilot 최종 인수 체크리스트
 
 기준 계획: `docs/jira-confluence-work-copilot-implementation-plan.md`
 점검일: 2026-08-02

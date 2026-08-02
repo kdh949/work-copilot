@@ -1,4 +1,4 @@
-# Jira–Confluence 업무 코파일럿 파일럿 준비 상태
+# Work Copilot 파일럿 준비 상태
 
 기준일: 2026-08-02
 
