@@ -5,7 +5,7 @@ services:
     repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
-    branch: feature/rename-work-copilot
+    branch: main
     rootDir: backend/ai-service
     autoDeploy: true
     buildCommand: pip install -r requirements.txt
@@ -49,7 +49,7 @@ services:
     repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
-    branch: feature/rename-work-copilot
+    branch: main
     autoDeploy: true
     buildCommand: npm ci --include=dev && npm run build --workspace=backend
     startCommand: npm run migration:run:compiled --workspace=backend && npm run start:prod --workspace=backend

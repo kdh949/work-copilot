@@ -14,6 +14,8 @@ describe('production deployment configuration', () => {
 
     expect(renderConfig).not.toContain('name: work-copilot-web');
     expect(renderConfig).not.toContain('week15-board-api.onrender.com');
+    expect(renderConfig).not.toContain('branch: feature/rename-work-copilot');
+    expect(renderConfig.match(/branch: main/g)).toHaveLength(2);
     expect(renderConfig).toMatch(/- key: OPENAI_STORE\s+value: "false"/);
     expect(renderConfig).toMatch(
       /- key: TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION\s+value: "1"/,
