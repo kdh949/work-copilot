@@ -35,5 +35,14 @@ describe('production deployment configuration', () => {
       '"VITE_API_URL": "https://work-copilot-api.onrender.com"',
     );
     expect(vercelConfig).toContain('"destination": "/index.html"');
+    expect(renderConfig).toContain(
+      'value: https://work-copilot-web.vercel.app',
+    );
+    expect(renderConfig).toContain(
+      'value: https://work-copilot-api.onrender.com/auth/oidc/callback',
+    );
+    expect(renderConfig).toContain(
+      'value: https://work-copilot-ai.onrender.com',
+    );
   });
 });

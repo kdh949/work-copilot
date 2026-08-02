@@ -27,4 +27,17 @@ describe('createDatabaseOptions', () => {
       }),
     ).toThrow('DB_PORT must be a valid TCP port.');
   });
+
+  it('prefers a managed database URL when one is provided', () => {
+    const options = createDatabaseOptions({
+      DATABASE_URL: 'postgresql://service:secret@database.internal:5432/app',
+      DB_PORT: 'not-a-port',
+      DB_SSL: 'true',
+    });
+
+    expect(options.url).toBe(
+      'postgresql://service:secret@database.internal:5432/app',
+    );
+    expect(options.host).toBeUndefined();
+  });
 });
