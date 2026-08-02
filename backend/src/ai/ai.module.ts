@@ -5,11 +5,13 @@ import { AuthModule } from "../auth/auth.module";
 import { UsersModule } from "../users/users.module";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { Post } from "../posts/post.entity";
+import { AiSyncOutbox } from './ai-sync-outbox.entity';
+import { AiSyncService } from './ai-sync.service';
 
 @Module({
-    imports: [AuthModule, UsersModule, TypeOrmModule.forFeature([Post])],
+    imports: [AuthModule, UsersModule, TypeOrmModule.forFeature([Post, AiSyncOutbox])],
     controllers: [AiController],
-    providers: [AiService],
-    exports: [AiService],
+    providers: [AiService, AiSyncService],
+    exports: [AiService, AiSyncService],
 })
 export class AiModule {}

@@ -24,6 +24,16 @@ services:
         value: gpt-4o-mini
       - key: OPENAI_EMBEDDING_MODEL
         value: text-embedding-3-small
+      - key: AI_SERVICE_API_KEY
+        sync: false
+      - key: RAG_RETRIEVAL_MODE
+        value: hybrid-chunks
+      - key: RAG_MIN_CONFIDENCE
+        value: "0"
+      - key: OPENAI_INPUT_COST_PER_1M
+        value: "0.15"
+      - key: OPENAI_OUTPUT_COST_PER_1M
+        value: "0.60"
       - key: MCP_API_KEY
         sync: false
       - key: HOLIDAY_COUNTRY
@@ -74,6 +84,8 @@ services:
           type: web
           name: week15-board-ai
           property: host
+      - key: AI_SERVICE_API_KEY
+        sync: false
 
   - type: web
     name: week15-board-web

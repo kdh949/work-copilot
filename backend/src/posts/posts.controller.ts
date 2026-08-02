@@ -11,7 +11,7 @@ import {
     Req,
     UseGuards,
 } from '@nestjs/common'; // 이름이 게시글의 post와 겹치므로 Post as HttpPost 를 이용해서 HttpPost로 변경
-import { PostsService } from "./posts.service";
+import { PostsService, type PostAccessContext } from "./posts.service";
 import { Post } from './post.entity';
 import { CreatePostDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
@@ -26,8 +26,10 @@ export class PostsController {
     constructor(private readonly postsService: PostsService) {
     }
 
+    @UseGuards(JwtAuthGuard)
     @Get()
     findAll(
+        @Req() request: AuthenticatedRequest,
         @Query('keyword') keyword?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
@@ -35,23 +37,26 @@ export class PostsController {
         @Query('department') department?: string,
         @Query('boardType') boardType?: string,
     ) {
-        return this.postsService.findAll({ keyword, page, limit, tag, department, boardType });
+        return this.postsService.findAll({ keyword, page, limit, tag, department, boardType }, this.getActor(request));
     }
 
+    @UseGuards(JwtAuthGuard)
     @Get('wiki/tree')
-    findWikiTree() {
-        return this.postsService.findWikiTree();
+    findWikiTree(@Req() request: AuthenticatedRequest) {
+        return this.postsService.findWikiTree(this.getActor(request));
     }
 
+    @UseGuards(JwtAuthGuard)
     @Get('wiki')
     findWikiPosts(
+        @Req() request: AuthenticatedRequest,
         @Query('keyword') keyword?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
         @Query('tag') tag?: string,
         @Query('path') path?: string | string[],
     ) {
-        return this.postsService.findWikiPosts({ keyword, page, limit, tag, path });
+        return this.postsService.findWikiPosts({ keyword, page, limit, tag, path }, this.getActor(request));
     }
 
     @UseGuards(JwtAuthGuard)
@@ -106,7 +111,7 @@ export class PostsController {
         @Param('id', ParseIntPipe) id: number,
         @Req() request: AuthenticatedRequest,
     ): Promise<Post> {
-        return this.postsService.findOne(id, request.user.sub);
+        return this.postsService.findOne(id, this.getActor(request));
     }
 
     @UseGuards(JwtAuthGuard)
@@ -179,5 +184,13 @@ export class PostsController {
         @Req() request: AuthenticatedRequest,
     ): Promise<{ deleted: boolean }> {
         return this.postsService.removeComment(commentId, request.user.sub, request.user.role);
+    }
+
+    private getActor(request: AuthenticatedRequest): PostAccessContext {
+        return {
+            userId: request.user.sub,
+            role: request.user.role,
+            department: request.user.department,
+        };
     }
 }

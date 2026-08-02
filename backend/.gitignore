@@ -26,3 +26,4 @@ lerna-debug.log*
 
 # Webstorm
 .idea
+ai-service/evals/reports/

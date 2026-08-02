@@ -75,6 +75,18 @@ npm test
 docker compose config
 ```
 
+AI 서비스 단위 테스트와 실제 모델 평가 도구는 다음과 같이 실행합니다.
+
+```bash
+cd backend/ai-service
+source .venv/bin/activate
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+`AI_SERVICE_API_KEY`는 NestJS와 AI 서비스에 같은 비밀값으로 설정해야 합니다. 이 값과 OpenAI 키는 `.env`에만 보관하며 저장소에 포함하지 않습니다.
+
+1,000개 위키를 적재한 뒤 실제 `sourceId`로 Golden Set을 채우면 기준선과 하이브리드 검색을 같은 모델에서 비교할 수 있습니다. 자세한 형식과 실행 명령은 [Evals 안내](backend/ai-service/evals/README.md)를 참고하세요.
+
 ## 배포
 
 - API: `https://week15-board-api.onrender.com`

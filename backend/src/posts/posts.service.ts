@@ -8,7 +8,9 @@ import { UsersService } from "../users/users.service";
 import { Comment } from "./comment.entity";
 import { CreateCommentDto } from "./dto/create-comment.dto";
 import { UpdateCommentDto } from "./dto/update-comment.dto";
-import { AiService } from "../ai/ai.service";
+import { canAccessWiki, type WikiAccessContext } from './wiki-access';
+import { AiSyncService } from '../ai/ai-sync.service';
+import { randomUUID } from 'crypto';
 
 // import {contains} from "class-validator"; // 타입 검증 미진행 (엔티티에서 할 예정)
 
@@ -47,6 +49,10 @@ type WikiTreeNode = {
     documentCount: number;
 };
 
+export type PostAccessContext = WikiAccessContext & {
+    userId: number;
+};
+
 @Injectable()
 export class PostsService {
     constructor(
@@ -55,10 +61,10 @@ export class PostsService {
         @InjectRepository(Comment)
         private readonly commentRepository: Repository<Comment>,
         private readonly usersService: UsersService,
-        private readonly aiService: AiService,
+        private readonly aiSyncService: AiSyncService,
     ) { }
 
-    async findAll(options: FindAllPostsOptions): Promise<PagedPostsResponse> {
+    async findAll(options: FindAllPostsOptions, actor?: PostAccessContext): Promise<PagedPostsResponse> {
         const page = this.toNumber(options.page, 1);
         const limit = this.toNumber(options.limit, 5);
 
@@ -91,6 +97,11 @@ export class PostsService {
             }
         }
 
+        if (options.boardType === 'wiki') {
+            this.requireWikiAccessContext(actor);
+            this.applyWikiReadFilter(query, actor);
+        }
+
         if (options.mine && options.userId) {
             query.andWhere('author.id = :userId', {
                 userId: options.userId,
@@ -120,8 +131,8 @@ export class PostsService {
         };
     }
 
-    async findWikiTree(): Promise<WikiTreeNode[]> {
-        const posts = await this.postRepository
+    async findWikiTree(actor: PostAccessContext): Promise<WikiTreeNode[]> {
+        const posts = this.postRepository
             .createQueryBuilder('post')
             .select([
                 'post.id',
@@ -129,12 +140,16 @@ export class PostsService {
                 'post.department',
                 'post.wikiPath',
             ])
-            .where('post.boardType = :boardType', { boardType: 'wiki' })
+            .where('post.boardType = :boardType', { boardType: 'wiki' });
+
+        this.applyWikiReadFilter(posts, actor);
+
+        const wikiPosts = await posts
             .getMany();
 
         const nodeMap = new Map<string, WikiTreeNode>();
 
-        for (const post of posts) {
+        for (const post of wikiPosts) {
             const categoryPath = this.getPostCategoryPath(post);
 
             for (let index = 0; index < categoryPath.length; index += 1) {
@@ -164,7 +179,7 @@ export class PostsService {
         });
     }
 
-    async findWikiPosts(options: FindWikiPostsOptions): Promise<PagedPostsResponse> {
+    async findWikiPosts(options: FindWikiPostsOptions, actor: PostAccessContext): Promise<PagedPostsResponse> {
         const page = this.toNumber(options.page, 1);
         const limit = this.toNumber(options.limit, 20);
         const path = this.normalizePathQuery(options.path);
@@ -201,6 +216,8 @@ export class PostsService {
             .skip((page - 1) * limit)
             .take(limit);
 
+        this.applyWikiReadFilter(query, actor);
+
         if (options.keyword) {
             query.andWhere('(post.title ILIKE :keyword OR post.content ILIKE :keyword OR "post"."summary" ILIKE :keyword)', {
                 keyword: `%${options.keyword}%`,
@@ -226,7 +243,7 @@ export class PostsService {
         };
     }
 
-    async findOne(id: number, userId?: number): Promise<Post> {
+    async findOne(id: number, actor?: PostAccessContext): Promise<Post> {
         const post = await this.postRepository.findOne({
             where: { id },
             relations: {
@@ -240,7 +257,15 @@ export class PostsService {
             throw new NotFoundException('게시글을 찾을 수 없습니다.');
         }
 
-        if ((post.boardType === 'note' || post.boardType === 'question') && post.author.id !== userId) {
+        if (post.boardType === 'wiki') {
+            this.requireWikiAccessContext(actor);
+
+            if (!canAccessWiki(actor, post.department)) {
+                throw new ForbiddenException('열람 권한이 없는 회사 위키입니다.');
+            }
+        }
+
+        if ((post.boardType === 'note' || post.boardType === 'question') && post.author.id !== actor?.userId) {
             throw new ForbiddenException('본인의 노트만 볼 수 있습니다.');
         }
 
@@ -253,6 +278,7 @@ export class PostsService {
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const post = this.postRepository.create({
+            sourceId: `wiki-${randomUUID()}`,
             title: createPostDto.title,
             content: createPostDto.content,
             boardType: 'wiki',
@@ -266,8 +292,12 @@ export class PostsService {
             author,
         });
 
-        const savedPost = await this.postRepository.save(post);
-        await this.aiService.syncPost(savedPost);
+        const savedPost = await this.postRepository.manager.transaction(async (manager) => {
+            const saved = await manager.save(post);
+            await this.aiSyncService.enqueue(manager, this.getSyncSourceId(saved), 'upsert');
+            return saved;
+        });
+        this.aiSyncService.trigger();
 
         return savedPost;
     }
@@ -292,9 +322,10 @@ export class PostsService {
     }
 
     async update(id: number, updatePostDto: UpdatePostDto, userId: number, userRole: string): Promise<Post> {
-        const post = await this.findOne(id, userId);
+        const actor = await this.getActor(userId, userRole);
+        const post = await this.findOne(id, actor);
 
-        this.checkPostPermission(post, userId, userRole);
+        this.checkPostPermission(post, actor.userId, actor.role);
 
         if (updatePostDto.title) {
             post.title = updatePostDto.title;
@@ -313,24 +344,39 @@ export class PostsService {
             post.summary = this.makeSummary(post.content);
         }
 
-        const savedPost = await this.postRepository.save(post);
+        const savedPost = await this.postRepository.manager.transaction(async (manager) => {
+            const saved = await manager.save(post);
+
+            if (saved.boardType === 'wiki') {
+                await this.aiSyncService.enqueue(manager, this.getSyncSourceId(saved), 'upsert');
+            }
+
+            return saved;
+        });
 
         if (savedPost.boardType === 'wiki') {
-            await this.aiService.syncPost(savedPost);
+            this.aiSyncService.trigger();
         }
 
         return savedPost;
     }
 
     async remove(id: number, userId: number, userRole: string): Promise<{ deleted: boolean }> {
-        const post = await this.findOne(id, userId);
+        const actor = await this.getActor(userId, userRole);
+        const post = await this.findOne(id, actor);
 
-        this.checkPostPermission(post, userId, userRole);
+        this.checkPostPermission(post, actor.userId, actor.role);
 
-        await this.postRepository.delete(post.id);
+        await this.postRepository.manager.transaction(async (manager) => {
+            if (post.boardType === 'wiki') {
+                await this.aiSyncService.enqueue(manager, this.getSyncSourceId(post), 'delete');
+            }
+
+            await manager.delete(Post, post.id);
+        });
 
         if (post.boardType === 'wiki') {
-            await this.aiService.deletePost(post);
+            this.aiSyncService.trigger();
         }
 
         return {
@@ -339,7 +385,8 @@ export class PostsService {
     }
 
     async createComment(postId: number, createCommentDto: CreateCommentDto, authorId: number): Promise<Comment> {
-        const post = await this.findOne(postId, authorId);
+        const actor = await this.getActor(authorId);
+        const post = await this.findOne(postId, actor);
         const author = await this.usersService.findByIdOrFail(authorId);
 
         const comment = this.commentRepository.create({
@@ -378,6 +425,40 @@ export class PostsService {
         if (post.author.id !== userId) {
             throw new ForbiddenException('본인의 게시글만 수정/삭제할 수 있습니다.');
         }
+    }
+
+    private requireWikiAccessContext(actor?: PostAccessContext): asserts actor is PostAccessContext {
+        if (!actor) {
+            throw new ForbiddenException('회사 위키 열람에는 인증이 필요합니다.');
+        }
+    }
+
+    private applyWikiReadFilter(
+        query: ReturnType<Repository<Post>['createQueryBuilder']>,
+        actor: PostAccessContext,
+    ): void {
+        if (actor.role === 'admin') {
+            return;
+        }
+
+        query.andWhere('(post.department = :commonDepartment OR post.department = :actorDepartment)', {
+            commonDepartment: '공통',
+            actorDepartment: actor.department || '',
+        });
+    }
+
+    private async getActor(userId: number, fallbackRole = 'employee'): Promise<PostAccessContext> {
+        const user = await this.usersService.findByIdOrFail(userId);
+
+        return {
+            userId: user.id,
+            role: user.role || fallbackRole,
+            department: user.department,
+        };
+    }
+
+    private getSyncSourceId(post: Post): string {
+        return post.sourceId || `post-${post.id}`;
     }
 
     private checkAdmin(userRole: string): void {

@@ -274,8 +274,11 @@ def print_summary(documents: list[WikiDocument], dry_run: bool) -> None:
 
 
 class EmbeddingProvider:
-    def embed_documents(self, documents: list[WikiDocument]) -> list[list[float]]:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         raise NotImplementedError
+
+    def embed_documents(self, documents: list[WikiDocument]) -> list[list[float]]:
+        return self.embed_texts([make_document_text(document) for document in documents])
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -287,18 +290,16 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         )
 
-    def embed_documents(self, documents: list[WikiDocument]) -> list[list[float]]:
-        texts = [make_document_text(document) for document in documents]
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return self.embeddings.embed_documents(texts)
 
 
 class FakeEmbeddingProvider(EmbeddingProvider):
-    def embed_documents(self, documents: list[WikiDocument]) -> list[list[float]]:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import hashlib
 
         vectors: list[list[float]] = []
-        for document in documents:
-            text = make_document_text(document)
+        for text in texts:
             values: list[float] = []
             for index in range(1536):
                 digest = hashlib.sha256(f"{text}-{index}".encode()).hexdigest()
@@ -333,9 +334,25 @@ def import_documents(database_url: str, documents: list[WikiDocument], embedding
             if len(embeddings) != len(batch):
                 fail("Embedding provider returned an unexpected number of vectors.")
 
+            chunk_specs = [
+                (document, chunk_index, chunk)
+                for document in batch
+                for chunk_index, chunk in enumerate(chunk_document_text(document.content))
+            ]
+            chunk_embeddings = embedding_provider.embed_texts([
+                f"{document.title}\n{chunk}" for document, _, chunk in chunk_specs
+            ])
+
+            if len(chunk_embeddings) != len(chunk_specs):
+                fail("Chunk embedding provider returned an unexpected number of vectors.")
+
+            chunks_by_source: dict[str, list[tuple[int, str, list[float]]]] = {}
+            for (document, chunk_index, chunk), chunk_embedding in zip(chunk_specs, chunk_embeddings):
+                chunks_by_source.setdefault(document.source_id, []).append((chunk_index, chunk, chunk_embedding))
+
             with connection.transaction():
                 for document, embedding in zip(batch, embeddings):
-                    upsert_document(connection, author_id, document, embedding)
+                    upsert_document(connection, author_id, document, embedding, chunks_by_source.get(document.source_id, []))
 
             imported += len(batch)
             print(f"imported={imported}/{len(documents)}")
@@ -359,6 +376,18 @@ def prepare_database(connection: Any) -> None:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wiki_document_chunks (
+            id SERIAL PRIMARY KEY,
+            source_id VARCHAR(100) NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            embedding vector(1536),
+            UNIQUE (source_id, chunk_index)
+        )
+        """
+    )
     connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "sourceId" character varying')
     connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "wikiPath" jsonb')
     connection.execute('ALTER TABLE "post" ADD COLUMN IF NOT EXISTS "parentSourceId" character varying')
@@ -377,6 +406,7 @@ def prepare_database(connection: Any) -> None:
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_post_department" ON "post" ("department")')
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_post_wiki_path" ON "post" USING gin ("wikiPath")')
     connection.execute('CREATE INDEX IF NOT EXISTS "IDX_wiki_documents_department" ON wiki_documents (department)')
+    connection.execute('CREATE INDEX IF NOT EXISTS "IDX_wiki_document_chunks_source_id" ON wiki_document_chunks (source_id)')
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS "IDX_wiki_documents_embedding"
@@ -422,7 +452,13 @@ def ensure_author(connection: Any) -> int:
     return int(row[0])
 
 
-def upsert_document(connection: Any, author_id: int, document: WikiDocument, embedding: list[float]) -> None:
+def upsert_document(
+    connection: Any,
+    author_id: int,
+    document: WikiDocument,
+    embedding: list[float],
+    document_chunks: list[tuple[int, str, list[float]]],
+) -> None:
     tags_value = ",".join(document.tags)
     vector_value = make_vector_text(embedding)
 
@@ -465,6 +501,15 @@ def upsert_document(connection: Any, author_id: int, document: WikiDocument, emb
             document.updated_at,
         ),
     )
+    connection.execute("DELETE FROM wiki_document_chunks WHERE source_id = %s", (document.source_id,))
+    for chunk_index, chunk, chunk_embedding in document_chunks:
+        connection.execute(
+            """
+            INSERT INTO wiki_document_chunks (source_id, chunk_index, content, embedding)
+            VALUES (%s, %s, %s, %s::vector)
+            """,
+            (document.source_id, chunk_index, chunk, make_vector_text(chunk_embedding)),
+        )
     connection.execute(
         """
         INSERT INTO wiki_documents (source_id, title, content, department, tags, embedding, created_at)
@@ -494,6 +539,10 @@ def rollback(database_url: str, documents: list[WikiDocument]) -> None:
 
     with psycopg.connect(database_url) as connection:
         with connection.transaction():
+            chunk_deleted = connection.execute(
+                "DELETE FROM wiki_document_chunks WHERE source_id = ANY(%s)",
+                (source_ids,),
+            ).rowcount
             wiki_deleted = connection.execute(
                 "DELETE FROM wiki_documents WHERE source_id = ANY(%s)",
                 (source_ids,),
@@ -503,7 +552,7 @@ def rollback(database_url: str, documents: list[WikiDocument]) -> None:
                 (source_ids,),
             ).rowcount
 
-    print(f"rollback_complete=true posts_deleted={post_deleted} wiki_documents_deleted={wiki_deleted}")
+    print(f"rollback_complete=true posts_deleted={post_deleted} wiki_documents_deleted={wiki_deleted} chunks_deleted={chunk_deleted}")
 
 
 def chunks(values: list[WikiDocument], size: int) -> list[list[WikiDocument]]:
@@ -512,6 +561,26 @@ def chunks(values: list[WikiDocument], size: int) -> list[list[WikiDocument]]:
 
 def make_document_text(document: WikiDocument) -> str:
     return f"{document.title}\n{document.department}\n{','.join(document.tags)}\n{document.content}"
+
+
+def chunk_document_text(text: str, chunk_size: int = 220, overlap: int = 40) -> list[str]:
+    words = text.split()
+    if not words:
+        return []
+
+    safe_chunk_size = max(1, chunk_size)
+    safe_overlap = min(max(0, overlap), safe_chunk_size - 1)
+    step = safe_chunk_size - safe_overlap
+    values: list[str] = []
+
+    for start in range(0, len(words), step):
+        chunk = " ".join(words[start:start + safe_chunk_size])
+        if chunk:
+            values.append(chunk)
+        if start + safe_chunk_size >= len(words):
+            break
+
+    return values
 
 
 def make_vector_text(values: list[float]) -> str:
