@@ -29,7 +29,7 @@ const diagnosticCode = (exception: unknown): string | undefined => {
   const value = (exception as HttpException & { diagnosticCode?: unknown })
     .diagnosticCode;
 
-  return typeof value === 'string' && /^OIDC_[A-Z_]{1,96}$/.test(value)
+  return typeof value === 'string' && /^(?:OIDC|AUTH)_[A-Z_]{1,96}$/.test(value)
     ? value
     : undefined;
 };
