@@ -592,7 +592,9 @@ export class IntegrationsOAuthService {
     connection: AtlassianOAuthConnection,
     tokens: StoredTokenPair,
   ): boolean {
-    if (!this.cryptoService.needsReencryption(connection.encryptionKeyVersion)) {
+    if (
+      !this.cryptoService.needsReencryption(connection.encryptionKeyVersion)
+    ) {
       return false;
     }
 

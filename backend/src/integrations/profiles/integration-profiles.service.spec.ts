@@ -275,7 +275,9 @@ describe('IntegrationProfilesService', () => {
       {} as ConfigService,
       {
         currentKeyVersion: jest.fn(() => 2),
-        decrypt: jest.fn((value) => `plain-${value.ciphertext}`),
+        decrypt: jest.fn(
+          (value: { ciphertext: string }) => `plain-${value.ciphertext}`,
+        ),
         encrypt: jest.fn((value: string) => ({
           ciphertext: `${value}-ciphertext`,
           iv: 'iv',

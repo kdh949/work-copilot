@@ -90,9 +90,7 @@ export class TransientEvidenceFragmentsService
         const content = this.cryptoService.decrypt(fragment);
 
         if (
-          this.cryptoService.needsReencryption(
-            fragment.encryptionKeyVersion,
-          )
+          this.cryptoService.needsReencryption(fragment.encryptionKeyVersion)
         ) {
           const encrypted = this.cryptoService.encrypt(content);
           await this.fragmentsRepository.update({ id: fragment.id }, encrypted);

@@ -124,32 +124,33 @@ function makeHarness() {
     return query;
   };
 
+  const save = jest.fn((value: unknown) => {
+    if (isAuditEvent(value)) {
+      auditEvents.push(value);
+      return Promise.resolve(value);
+    }
+
+    if (isAuthorizationAttempt(value)) {
+      value.id ||= `attempt-${++id}`;
+      if (!attempts.includes(value)) {
+        attempts.push(value);
+      }
+      return Promise.resolve(value);
+    }
+
+    if (isConnection(value)) {
+      value.id ||= `connection-${++id}`;
+      if (!connections.includes(value)) {
+        connections.push(value);
+      }
+      return Promise.resolve(value);
+    }
+
+    return Promise.resolve(value);
+  });
   const manager = {
     create: jest.fn(<T>(_entity: unknown, value: T): T => value),
-    save: jest.fn((value: unknown) => {
-      if (isAuditEvent(value)) {
-        auditEvents.push(value);
-        return Promise.resolve(value);
-      }
-
-      if (isAuthorizationAttempt(value)) {
-        value.id ||= `attempt-${++id}`;
-        if (!attempts.includes(value)) {
-          attempts.push(value);
-        }
-        return Promise.resolve(value);
-      }
-
-      if (isConnection(value)) {
-        value.id ||= `connection-${++id}`;
-        if (!connections.includes(value)) {
-          connections.push(value);
-        }
-        return Promise.resolve(value);
-      }
-
-      return Promise.resolve(value);
-    }),
+    save,
     remove: jest.fn((value: AtlassianOAuthConnection) => {
       const index = connections.indexOf(value);
       if (index >= 0) {
@@ -181,6 +182,7 @@ function makeHarness() {
     ),
   } as unknown as DataSource;
 
+  const needsReencryption = jest.fn((keyVersion: number) => keyVersion !== 1);
   const crypto = {
     encrypt: jest.fn((value: string) => ({
       ciphertext: Buffer.from(value).toString('base64'),
@@ -191,7 +193,7 @@ function makeHarness() {
     decrypt: jest.fn((value: { ciphertext: string }) =>
       Buffer.from(value.ciphertext, 'base64').toString(),
     ),
-    needsReencryption: jest.fn((keyVersion: number) => keyVersion !== 1),
+    needsReencryption,
   } as unknown as IntegrationProfileCryptoService;
   const createAuthorizationUrl = jest.fn(
     (_configuration: unknown, state: string, verifier: string) =>
@@ -242,6 +244,8 @@ function makeHarness() {
     refresh,
     revoke,
     crypto,
+    needsReencryption,
+    save,
     manager,
   };
 }
@@ -405,7 +409,7 @@ describe('IntegrationsOAuthService', () => {
   });
 
   it('re-encrypts a still-valid legacy token pair when it is read', async () => {
-    const { service, connections, crypto, manager } = harness;
+    const { service, connections, crypto, needsReencryption, save } = harness;
     const encrypted = crypto.encrypt(
       JSON.stringify({
         accessToken: 'legacy-access',
@@ -428,20 +432,20 @@ describe('IntegrationsOAuthService', () => {
       updatedAt: new Date(),
     });
 
-    await expect(service.getAccessToken(101, 'jira', 'corr-legacy')).resolves.toBe(
-      'legacy-access',
-    );
+    await expect(
+      service.getAccessToken(101, 'jira', 'corr-legacy'),
+    ).resolves.toBe('legacy-access');
 
-    expect(crypto.needsReencryption).toHaveBeenCalledWith(0);
+    expect(needsReencryption).toHaveBeenCalledWith(0);
     expect(connections[0]).toEqual(
       expect.objectContaining({
         encryptionKeyVersion: 1,
-        tokenExpiresAt: expect.any(Date),
         tokenVersion: 1,
       }),
     );
-    expect(JSON.stringify(manager.save.mock.calls)).not.toContain('legacy-access');
-    expect(JSON.stringify(manager.save.mock.calls)).not.toContain('legacy-refresh');
+    expect(connections[0]?.tokenExpiresAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(save.mock.calls)).not.toContain('legacy-access');
+    expect(JSON.stringify(save.mock.calls)).not.toContain('legacy-refresh');
   });
 
   it('revokes when possible and always removes only the current user connection', async () => {

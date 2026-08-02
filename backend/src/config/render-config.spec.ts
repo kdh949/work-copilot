@@ -12,9 +12,7 @@ describe('Render deployment configuration', () => {
       /- key: VITE_API_URL\s+value: https:\/\/work-copilot-api\.onrender\.com/,
     );
     expect(renderConfig).not.toContain('week15-board-api.onrender.com');
-    expect(renderConfig).toMatch(
-      /- key: OPENAI_STORE\s+value: "false"/,
-    );
+    expect(renderConfig).toMatch(/- key: OPENAI_STORE\s+value: "false"/);
     expect(renderConfig).toMatch(
       /- key: TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION\s+value: "1"/,
     );

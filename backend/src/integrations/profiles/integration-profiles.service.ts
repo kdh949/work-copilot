@@ -121,7 +121,7 @@ export class IntegrationProfilesService {
   ): Promise<IntegrationProfileResponse> {
     return this.dataSource.transaction(async (manager) => {
       const existing = await this.findProfile(manager, id);
-      const input = await this.normalizeUpdate(dto, existing);
+      const input = this.normalizeUpdate(dto, existing);
       const profile = Object.assign(existing, input);
       const savedProfile = await manager.save(profile);
 
@@ -349,10 +349,10 @@ export class IntegrationProfilesService {
     };
   }
 
-  private async normalizeUpdate(
+  private normalizeUpdate(
     dto: UpdateIntegrationProfileDto,
     existing: IntegrationProfile,
-  ): Promise<Partial<IntegrationProfile>> {
+  ): Partial<IntegrationProfile> {
     const update: Partial<IntegrationProfile> = {
       ...this.reencryptProfileSecretsIfNeeded(existing),
     };
