@@ -1,83 +1,127 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { User } from "./user.entity";
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, Repository } from 'typeorm';
+import { User } from './user.entity';
 
-type CreateUserInput = {
-    email: string;
-    password: string;
-    nickname: string;
-    department: string;
-    employeeNumber: string;
-    role?: string;
+export type KeycloakUserIdentity = {
+  subject: string;
+  email: string;
 };
 
 @Injectable()
 export class UsersService {
-    constructor(@InjectRepository(User) private readonly userRepository: Repository<User>) {}
+  constructor(
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+  ) {}
 
-    async findByEmail(email: string): Promise<User | null> {
-        return this.userRepository.findOne({
-            where: { email },
-        });
+  async findByEmail(email: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { email },
+    });
+  }
+
+  async findById(id: number): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { id },
+    });
+  }
+
+  async findByIdOrFail(id: number): Promise<User> {
+    const user = await this.findById(id);
+
+    if (!user) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다.');
     }
 
-    async findByEmailWithPassword(email: string): Promise<User | null> {
-        return this.userRepository
-            .createQueryBuilder('user')
-            .addSelect('user.password')
-            .where('user.email = :email', { email })
-            .getOne();
+    return user;
+  }
+
+  async mapVerifiedKeycloakIdentity(
+    identity: KeycloakUserIdentity,
+  ): Promise<User> {
+    return this.userRepository.manager.transaction((manager) =>
+      this.mapVerifiedKeycloakIdentityInTransaction(manager, identity),
+    );
+  }
+
+  private async mapVerifiedKeycloakIdentityInTransaction(
+    manager: EntityManager,
+    identity: KeycloakUserIdentity,
+  ): Promise<User> {
+    const bySubject = await manager
+      .createQueryBuilder(User, 'user')
+      .setLock('pessimistic_write')
+      .where('user.keycloakSubject = :subject', { subject: identity.subject })
+      .getOne();
+
+    if (bySubject) {
+      if (bySubject.email.trim().toLowerCase() !== identity.email) {
+        throw new UnauthorizedException(
+          'Keycloak identity does not match the mapped account.',
+        );
+      }
+
+      return bySubject;
     }
 
-    async findByEmployeeNumber(employeeNumber: string): Promise<User | null> {
-        return this.userRepository.findOne({
-            where: { employeeNumber },
-        });
+    const legacyUser = await manager
+      .createQueryBuilder(User, 'user')
+      .setLock('pessimistic_write')
+      .where('LOWER(user.email) = :email', { email: identity.email })
+      .getOne();
+
+    if (!legacyUser) {
+      throw new UnauthorizedException('No matching pilot account exists.');
     }
 
-    async findById(id: number): Promise<User | null> {
-        return this.userRepository.findOne({
-            where: { id },
-        });
+    if (
+      legacyUser.keycloakSubject &&
+      legacyUser.keycloakSubject !== identity.subject
+    ) {
+      throw new UnauthorizedException(
+        'This account is already mapped to another identity.',
+      );
     }
 
-    async findByIdOrFail(id: number): Promise<User> {
-        const user = await this.findById(id);
-
-        if (!user) {
-            throw new NotFoundException('사용자를 찾을 수 없습니다.');
-        }
-
-        return user;
+    if (legacyUser.keycloakSubject === identity.subject) {
+      return legacyUser;
     }
 
-    async create(input: CreateUserInput): Promise<User> {
-        const existingUser = await this.findByEmail((input.email));
+    const mappingResult = await manager
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        keycloakSubject: identity.subject,
+        identityProvider: 'keycloak',
+        legacyMigratedAt: new Date(),
+      })
+      .where('id = :id', { id: legacyUser.id })
+      .andWhere('keycloakSubject IS NULL')
+      .execute();
 
-        if (existingUser) {
-            throw new ConflictException('이미 사용 중인 이메일입니다.');
-        }
-
-        const existingEmployee = await this.findByEmployeeNumber(input.employeeNumber);
-
-        if (existingEmployee) {
-            throw new ConflictException('이미 사용 중인 사번입니다.');
-        }
-
-        const user = this.userRepository.create({
-            email: input.email,
-            password: input.password,
-            nickname: input.nickname,
-            department: input.department,
-            employeeNumber: input.employeeNumber,
-            role: input.role || 'employee',
-        });
-
-        return this.userRepository.save(user);
+    if (mappingResult.affected === 1) {
+      legacyUser.keycloakSubject = identity.subject;
+      legacyUser.identityProvider = 'keycloak';
+      legacyUser.legacyMigratedAt = new Date();
+      return legacyUser;
     }
 
-    async count(): Promise<number> {
-        return this.userRepository.count();
+    const concurrentlyMappedUser = await manager
+      .createQueryBuilder(User, 'user')
+      .setLock('pessimistic_write')
+      .where('user.id = :id', { id: legacyUser.id })
+      .getOne();
+
+    if (concurrentlyMappedUser?.keycloakSubject === identity.subject) {
+      return concurrentlyMappedUser;
     }
+
+    throw new UnauthorizedException(
+      'This account is already mapped to another identity.',
+    );
+  }
 }

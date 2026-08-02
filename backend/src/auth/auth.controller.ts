@@ -1,28 +1,100 @@
-import { Body, Post, Controller, Get, Req, UseGuards } from '@nestjs/common';
-import { AuthService } from "./auth.service";
-import { SignupDto } from "./dto/signup.dto";
-import { LoginDto } from "./dto/login.dto";
-import { Request } from "express";
-import { JwtAuthGuard } from "./guards/jwt-auth.guard";
-import type { AuthenticatedRequest } from "./guards/jwt-auth.guard";
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Response } from 'express';
+import { parseFrontendOrigins } from '../config/security.config';
+import { AuthService } from './auth.service';
+import { OidcCallbackDto } from './dto/oidc-callback.dto';
+import {
+  SessionAuthGuard,
+  type AuthenticatedRequest,
+} from './guards/session-auth.guard';
+import {
+  SESSION_COOKIE_NAME,
+  SessionCredentials,
+} from './session/session.service';
 
 @Controller('auth')
 export class AuthController {
-    constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
-    @Post('signup')
-    signup(@Body() signupDto: SignupDto) {
-        return this.authService.signup(signupDto);
-    }
+  @Get('oidc/login')
+  async login(@Res() response: Response): Promise<void> {
+    response.redirect(await this.authService.createAuthorizationUrl());
+  }
 
-    @Post('login')
-    login(@Body() loginDto: LoginDto) {
-        return this.authService.login(loginDto);
-    }
+  @Get('oidc/callback')
+  async callback(
+    @Query() callback: OidcCallbackDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const credentials = await this.authService.completeAuthorization(
+      callback.code,
+      callback.state,
+    );
+    this.setSessionCookie(response, credentials);
+    response.redirect(
+      parseFrontendOrigins(
+        this.configService.get<string>('FRONTEND_ORIGINS'),
+      )[0],
+    );
+  }
 
-    @UseGuards(JwtAuthGuard) // GET /auth/me 요청은 JwtAuthGuard를 통과해야 실행됨
-    @Get('me')
-    me(@Req() request: AuthenticatedRequest) {
-        return this.authService.me(request.user.sub); // 여기서 sub는 JWT payload에 넣었던 사용자 id
-    }
+  @UseGuards(SessionAuthGuard)
+  @Get('me')
+  me(@Req() request: AuthenticatedRequest) {
+    return this.authService.me(request.authSession);
+  }
+
+  @UseGuards(SessionAuthGuard)
+  @Get('csrf')
+  async csrf(@Req() request: AuthenticatedRequest, @Res() response: Response) {
+    const credentials = await this.authService.rotateSession(
+      request.authSession,
+    );
+    this.setSessionCookie(response, credentials);
+    return response.json({ csrfToken: credentials.csrfToken });
+  }
+
+  @UseGuards(SessionAuthGuard)
+  @Post('logout')
+  @HttpCode(204)
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Res() response: Response,
+  ): Promise<void> {
+    await this.authService.logout(request.authSession);
+    response.clearCookie(SESSION_COOKIE_NAME, this.cookieOptions());
+    response.status(204).send();
+  }
+
+  private setSessionCookie(
+    response: Response,
+    credentials: SessionCredentials,
+  ): void {
+    response.cookie(SESSION_COOKIE_NAME, credentials.sessionToken, {
+      ...this.cookieOptions(),
+      expires: credentials.expiresAt,
+    });
+  }
+
+  private cookieOptions() {
+    return {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax' as const,
+      path: '/',
+    };
+  }
 }

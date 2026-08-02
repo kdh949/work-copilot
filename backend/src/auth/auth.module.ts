@@ -1,27 +1,30 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { UsersModule } from "../users/users.module";
-import { JwtModule, JwtSignOptions } from "@nestjs/jwt";
-import { ConfigModule, ConfigService } from "@nestjs/config";
-import { JwtAuthGuard } from "./guards/jwt-auth.guard";
+import { AuthSession } from './entities/auth-session.entity';
+import { OidcAuthorizationAttempt } from './entities/oidc-authorization-attempt.entity';
+import { SessionAuthGuard } from './guards/session-auth.guard';
+import { WorkCopilotAdminGuard } from './guards/work-copilot-admin.guard';
+import { OidcAttemptCryptoService } from './oidc/oidc-attempt-crypto.service';
+import { KeycloakOidcService } from './oidc/keycloak-oidc.service';
+import { SessionService } from './session/session.service';
 
 @Module({
-    imports: [
-        UsersModule,
-        JwtModule.registerAsync({
-            imports: [ConfigModule],
-            inject: [ConfigService],
-            useFactory: (configService: ConfigService) => ({
-                secret: configService.getOrThrow<string>('JWT_SECRET'),
-                signOptions: {
-                    expiresIn: configService.getOrThrow<string>(`JWT_EXPIRES_IN`) as JwtSignOptions['expiresIn'],
-                },
-            }),
-        }),
-    ], // 필요한 모듈 가져오기
-    controllers: [AuthController],
-    providers: [AuthService, JwtAuthGuard],
-    exports: [JwtAuthGuard, JwtModule,], // JwtAuthGuard를 PostsModule에서도 쓸 수 있게 export
+  imports: [
+    UsersModule,
+    TypeOrmModule.forFeature([AuthSession, OidcAuthorizationAttempt]),
+  ],
+  controllers: [AuthController],
+  providers: [
+    AuthService,
+    KeycloakOidcService,
+    OidcAttemptCryptoService,
+    SessionService,
+    SessionAuthGuard,
+    WorkCopilotAdminGuard,
+  ],
+  exports: [SessionAuthGuard, SessionService, WorkCopilotAdminGuard],
 })
 export class AuthModule {}

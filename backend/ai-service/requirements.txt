@@ -5,3 +5,4 @@ requests
 psycopg[binary]
 langchain
 langchain-openai
+presidio-analyzer

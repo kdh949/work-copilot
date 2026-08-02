@@ -1,107 +1,59 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
-import { UsersService } from "../users/users.service";
-import { SignupDto } from "./dto/signup.dto";
-import { LoginDto } from "./dto/login.dto";
-import { JwtService } from "@nestjs/jwt";
+import { Injectable } from '@nestjs/common';
+import { AuthSession } from './entities/auth-session.entity';
+import { KeycloakOidcService } from './oidc/keycloak-oidc.service';
+import { SessionCredentials, SessionService } from './session/session.service';
+import { UsersService } from '../users/users.service';
 
-type SignupResponse = {
-    id: number;
-    email: string;
-    nickname: string;
-    department: string | null;
-    employeeNumber: string | null;
-    role: string;
-    createdAt: Date;
-};
-
-type LoginResponse = {
-    accessToken: string;
-};
-
-type MeResponse = {
-    id: number;
-    email: string;
-    nickname: string;
-    department: string | null;
-    employeeNumber: string | null;
-    role: string;
+export type MeResponse = {
+  id: number;
+  email: string;
+  nickname: string;
+  department: string | null;
+  employeeNumber: string | null;
+  role: 'admin' | 'employee';
 };
 
 @Injectable()
 export class AuthService {
-    constructor(
-        private readonly usersService: UsersService,
-        private readonly jwtService: JwtService,
-    ) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly keycloakOidcService: KeycloakOidcService,
+    private readonly sessionService: SessionService,
+  ) {}
 
-    async signup(signupDto: SignupDto): Promise<SignupResponse> {
-        const hashedPassword = await bcrypt.hash(signupDto.password, 10);
-        const userCount = await this.usersService.count();
-        const role = userCount === 0 ? 'admin' : 'employee';
+  async createAuthorizationUrl(): Promise<string> {
+    return this.keycloakOidcService.createAuthorizationUrl();
+  }
 
-        const user = await this.usersService.create({
-            email: signupDto.email,
-            password: hashedPassword,
-            nickname: signupDto.nickname,
-            department: signupDto.department,
-            employeeNumber: signupDto.employeeNumber,
-            role,
-        });
+  async completeAuthorization(
+    code: string,
+    state: string,
+  ): Promise<SessionCredentials> {
+    const identity = await this.keycloakOidcService.completeAuthorization(
+      code,
+      state,
+    );
+    const user = await this.usersService.mapVerifiedKeycloakIdentity(identity);
 
-        return {
-            id: user.id,
-            email: user.email,
-            nickname: user.nickname,
-            department: user.department,
-            employeeNumber: user.employeeNumber,
-            role: user.role,
-            createdAt: user.createdAt,
-        }; // UsersService의 반환값을 그대로 반환하지 않고, AuthService에서 응답 객체를 직접 만들어 반환함
-           // 이를 통해 password를 반환에 포함시키지 않을 수 있음
-    }
+    return this.sessionService.create(user, identity.isWorkCopilotAdmin);
+  }
 
-    async login(loginDto: LoginDto): Promise<LoginResponse> {
-        const user = await this.usersService.findByEmailWithPassword(loginDto.email);
+  async rotateSession(session: AuthSession): Promise<SessionCredentials> {
+    return this.sessionService.rotate(session);
+  }
 
-        if (!user) {
-            throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
-        }
+  async logout(session: AuthSession): Promise<void> {
+    await this.sessionService.revoke(session);
+  }
 
-        const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
-
-        if (!isPasswordValid) {
-            throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
-        }
-
-        const payload = {
-            sub: user.id,
-            email: user.email,
-            role: user.role,
-            department: user.department,
-        };
-
-        const accessToken = await this.jwtService.signAsync(payload);
-
-        return {
-            accessToken,
-        };
-    }
-
-    async me(userId: number): Promise<MeResponse> {
-        const user = await this.usersService.findById(userId);
-
-        if (!user) {
-            throw new UnauthorizedException();
-        }
-
-        return {
-            id: user.id,
-            email: user.email,
-            nickname: user.nickname,
-            department: user.department,
-            employeeNumber: user.employeeNumber,
-            role: user.role,
-        };
-    }
+  me(session: AuthSession): MeResponse {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      nickname: session.user.nickname,
+      department: session.user.department,
+      employeeNumber: session.user.employeeNumber,
+      role: session.isWorkCopilotAdmin ? 'admin' : 'employee',
+    };
+  }
 }

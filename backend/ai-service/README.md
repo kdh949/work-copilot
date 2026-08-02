@@ -8,6 +8,7 @@ FastAPI로 만든 회사 위키 AI 서비스입니다.
 - `/lecture`: 부서별 교육 강의안 생성
 - `/mcp`: JSON-RPC MCP 서버
 - `/agent/run`: 간단한 도구 선택 Agent 실행
+- `/work-brief/generate`: DLP 마스킹 뒤 Structured Outputs로 생성하는 내부 전용 업무 브리프
 
 ## 실행
 
@@ -20,6 +21,10 @@ uvicorn main:app --reload --port 8000
 ```
 
 `OPENAI_API_KEY`가 있으면 LangChain으로 OpenAI 모델과 임베딩을 사용합니다. 키가 없으면 게시글 내용을 바탕으로 간단한 로컬 응답을 반환합니다.
+
+업무 브리프 경로는 위키 RAG와 분리되어 있습니다. Jira·Confluence 원문은 이 경로에서
+벡터 저장소나 `/documents`로 보내지 않으며, secret을 먼저 차단하고 한국어 PII와
+literal-only custom rule을 마스킹한 뒤에만 OpenAI Responses API에 `store: false`로 전송합니다.
 
 ## 위키 더미 데이터 적재
 

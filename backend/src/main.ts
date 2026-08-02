@@ -1,24 +1,45 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module'; // 앱의 루트 모듈
-import { ValidationPipe } from "@nestjs/common";
+import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { CorrelationIdMiddleware } from './common/http/correlation-id.middleware';
+import { OriginCsrfMiddleware } from './common/http/origin-csrf.middleware';
+import { SafeHttpExceptionFilter } from './common/http/safe-http-exception.filter';
+import {
+  isAllowedOrigin,
+  parseFrontendOrigins,
+} from './config/security.config';
 
 async function bootstrap() {
-    const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
+  const allowedOrigins = parseFrontendOrigins(
+    configService.get<string>('FRONTEND_ORIGINS'),
+  );
 
-    app.enableCors({
-        origin: true,
-        credentials: true,
-    });
+  const correlationIdMiddleware = new CorrelationIdMiddleware();
+  const originCsrfMiddleware = new OriginCsrfMiddleware(allowedOrigins);
 
-    app.useGlobalPipes(
-        new ValidationPipe({
-            whitelist: true, // DTO에 없는 속성은 제거
-            forbidNonWhitelisted: true, // DTO에 없는 속성이 오면 에러
-            transform: true // 요청 데이터를 DTO 타입에 맞게 변환하려고 시도
-        }),
-    );
+  app.use(correlationIdMiddleware.use.bind(correlationIdMiddleware));
 
-    await app.listen(process.env.PORT ?? 3000);
+  app.enableCors({
+    origin: (origin, callback) => {
+      callback(null, !origin || isAllowedOrigin(origin, allowedOrigins));
+    },
+    credentials: true,
+  });
+  app.use(originCsrfMiddleware.use.bind(originCsrfMiddleware));
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // DTO에 없는 속성은 제거
+      forbidNonWhitelisted: true, // DTO에 없는 속성이 오면 에러
+      transform: true, // 요청 데이터를 DTO 타입에 맞게 변환하려고 시도
+    }),
+  );
+  app.useGlobalFilters(new SafeHttpExceptionFilter());
+
+  await app.listen(process.env.PORT ?? 3000);
 }
 
 bootstrap();
