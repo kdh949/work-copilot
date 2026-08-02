@@ -8,7 +8,7 @@ const ComponentPreviews = () => {
         <Previews palette={<PaletteTree/>}>
             <ComponentPreview path="/Header">
                 <Header
-                    title="DH Company Wiki"
+                    title="Jira–Confluence Work Copilot"
                     menu="posts"
                     user={null}
                     onMenuClick={() => undefined}

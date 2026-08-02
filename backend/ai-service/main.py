@@ -36,7 +36,7 @@ except Exception:
 
 load_dotenv()
 
-app = FastAPI(title="DH Board AI Service")
+app = FastAPI(title="Jira–Confluence Work Copilot AI Service")
 
 fallback_documents: list[dict[str, Any]] = []
 agent_memory: dict[str, list[dict[str, str]]] = {}

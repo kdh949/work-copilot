@@ -1,6 +1,6 @@
-# DH Company Wiki Backend
+# Jira–Confluence Work Copilot Backend
 
-NestJS 게시판 백엔드입니다. Keycloak OIDC 로그인, 회사 위키, 개인 노트, 댓글, 태그, 검색, 페이징을 제공합니다.
+Jira–Confluence Work Copilot의 NestJS 백엔드입니다. Keycloak OIDC 로그인, 회사 위키, 개인 노트, 댓글, 태그, 검색, 페이징을 제공합니다.
 
 회사 위키 문서를 작성하거나 수정하면 FastAPI AI 서비스의 `/documents` API로 문서를 보내 RAG 검색 자료로 사용합니다.
 
