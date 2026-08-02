@@ -1,4 +1,10 @@
 import { useEffect, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  StatusIndicator,
+} from "../../design-system/components";
 import type { ApiRequest } from "../admin/integration-profile.types";
 import "./integration-connections.css";
 
@@ -153,16 +159,16 @@ export function IntegrationConnectionsPage({
       </header>
 
       {message && (
-        <p className="message" role="alert">
+        <Alert tone="warning" className="integration-connections-message">
           {message}
-        </p>
+        </Alert>
       )}
 
       {profileUnavailable && (
-        <p className="integration-connections-warning" role="status">
+        <Alert tone="warning" className="integration-connections-warning">
           아직 활성 연동 프로필이 없습니다. 관리자가 읽기 전용 범위와 허용 대상부터
           설정해야 연결을 시작할 수 있습니다.
-        </p>
+        </Alert>
       )}
 
       <div className="integration-connection-list" aria-busy={isLoading}>
@@ -175,35 +181,38 @@ export function IntegrationConnectionsPage({
           const isConnected = status === "connected";
 
           return (
-            <article className="integration-connection-card" key={provider.id}>
+            <article className="integration-connection-card ds-card" key={provider.id}>
               <div>
                 <p className="eyebrow">읽기 전용 · 사용자별</p>
                 <h2>{provider.name}</h2>
                 <p>{provider.description}</p>
               </div>
               <div className="integration-connection-status">
-                <span className={`status ${isConnected ? "active" : ""}`}>
+                <Badge tone={isConnected ? "success" : "warning"}>
                   {copy.label}
-                </span>
+                </Badge>
+                <StatusIndicator tone={isConnected ? "success" : "warning"}>
+                  {isConnected ? "연결 상태 정상" : "사용자 조치 필요"}
+                </StatusIndicator>
                 <p>{copy.detail}</p>
               </div>
               <div className="button-row">
-                <button
+                <Button
                   type="button"
                   onClick={() => startAuthorization(provider.id)}
                   disabled={isLoading || isPending || profileUnavailable}
                 >
                   {isPending ? "처리 중" : isConnected ? "다시 연결" : "연결"}
-                </button>
+                </Button>
                 {isConnected && (
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="secondary"
                     onClick={() => disconnect(provider.id)}
                     disabled={isPending}
                   >
                     연결 해제
-                  </button>
+                  </Button>
                 )}
               </div>
             </article>
