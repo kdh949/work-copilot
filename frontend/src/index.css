@@ -252,23 +252,6 @@ main {
   line-height: var(--line-height-normal);
 }
 
-.signup-small {
-  padding: 14px;
-}
-
-.signup-small h2 {
-  font-size: 16px;
-}
-
-.signup-small label {
-  margin-top: 10px;
-  font-size: 14px;
-}
-
-.signup-small button {
-  margin-top: 12px;
-}
-
 .wiki-layout {
   display: grid;
   grid-template-columns: minmax(var(--space-0), var(--workspace-rail-left)) minmax(var(--space-0), 1fr);
@@ -306,6 +289,7 @@ main {
 
 .tree-department,
 .tree-post {
+  justify-content: flex-start;
   width: 100%;
   text-align: left;
   background: var(--color-transparent);
@@ -653,6 +637,22 @@ main {
 
 .note-save {
   margin-top: var(--space-4-5);
+}
+
+.notes-login-hint {
+  margin-top: var(--space-3);
+}
+
+.notes-empty-state {
+  display: grid;
+  align-content: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-12) * 4);
+}
+
+.notes-empty-state h2,
+.notes-empty-state p {
+  margin: var(--space-0);
 }
 
 .chat-widget-area {

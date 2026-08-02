@@ -1097,7 +1097,7 @@ function App() {
 
     return (
       <div className="filters">
-        <input
+        <TextInput
           type="text"
           placeholder="제목/내용 검색"
           value={keyword}
@@ -1105,7 +1105,7 @@ function App() {
         />
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="부서"
             value={departmentFilter}
@@ -1114,20 +1114,22 @@ function App() {
           {departmentSuggestions.length > 0 && (
             <div className="suggestion-list">
               {departmentSuggestions.map((department) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={department}
                   onClick={() => setDepartmentFilter(department)}
                 >
                   {department}
-                </button>
+                </Button>
               ))}
             </div>
           )}
         </div>
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="태그"
             value={tagFilter}
@@ -1136,13 +1138,15 @@ function App() {
           {tagSuggestions.length > 0 && (
             <div className="suggestion-list">
               {tagSuggestions.map((tag) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={tag}
                   onClick={() => setTagFilter(tag)}
                 >
                   {tag}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -1537,10 +1541,14 @@ function App() {
         )}
 
         {menu === "notes" && (
-          <section className="wiki-layout">
-            <aside className="wiki-sidebar">
-              <h2>내 노트</h2>
-              {!user && <p>로그인하면 내 노트를 볼 수 있습니다.</p>}
+          <section className="wiki-layout wiki-layout--notes" aria-labelledby="notes-title">
+            <aside className="wiki-sidebar ds-card">
+              <h2 id="notes-title">내 노트</h2>
+              {!user && (
+                <Alert tone="info" className="notes-login-hint">
+                  로그인하면 내 노트를 볼 수 있습니다.
+                </Alert>
+              )}
 
               {user && (
                 <>
@@ -1549,8 +1557,10 @@ function App() {
                   <div className="tree">
                     {getDepartments(notes).map((department) => (
                       <div className="tree-group" key={department}>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           className="tree-department"
                           onClick={() => toggleNoteDepartment(department)}
                         >
@@ -1558,7 +1568,7 @@ function App() {
                             ? "▾"
                             : "▸"}{" "}
                           {department}
-                        </button>
+                        </Button>
 
                         {openedNoteDepartments.includes(department) &&
                           notes
@@ -1566,8 +1576,10 @@ function App() {
                               (note) => getPostDepartment(note) === department,
                             )
                             .map((note) => (
-                              <button
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="sm"
                                 className={
                                   selectedNotePost()?.id === note.id
                                     ? "tree-post active"
@@ -1577,7 +1589,7 @@ function App() {
                                 onClick={() => setSelectedNoteViewId(note.id)}
                               >
                                 {note.title}
-                              </button>
+                              </Button>
                             ))}
                       </div>
                     ))}
@@ -1587,14 +1599,18 @@ function App() {
             </aside>
 
             <section className="wiki-main">
-              <section className="panel">
+              <section className="panel ds-card">
                 <h2>{editingNoteId ? "내 노트 수정" : "내 노트 작성"}</h2>
-                {!user && <p>로그인하면 내 노트를 작성할 수 있습니다.</p>}
+                {!user && (
+                  <Alert tone="info" className="notes-login-hint">
+                    로그인하면 내 노트를 작성할 수 있습니다.
+                  </Alert>
+                )}
 
                 {user && (
                   <form onSubmit={handleNoteSubmit}>
                     <label htmlFor="note-title">제목</label>
-                    <input
+                    <TextInput
                       id="note-title"
                       type="text"
                       value={noteTitle}
@@ -1602,7 +1618,7 @@ function App() {
                     />
 
                     <label htmlFor="note-department">관련 부서</label>
-                    <input
+                    <TextInput
                       id="note-department"
                       type="text"
                       value={noteDepartment}
@@ -1612,7 +1628,7 @@ function App() {
                     />
 
                     <label htmlFor="note-tags">태그</label>
-                    <input
+                    <TextInput
                       id="note-tags"
                       type="text"
                       placeholder="급여, 온보딩, 휴가"
@@ -1621,24 +1637,24 @@ function App() {
                     />
 
                     <label htmlFor="note-content">내용</label>
-                    <textarea
+                    <TextArea
                       id="note-content"
                       value={noteContent}
                       onChange={(event) => setNoteContent(event.target.value)}
                     />
 
                     <div className="button-row">
-                      <button type="submit">
+                      <Button type="submit">
                         {editingNoteId ? "수정하기" : "작성하기"}
-                      </button>
+                      </Button>
                       {editingNoteId && (
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
                           onClick={resetNoteForm}
                         >
                           취소
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </form>
@@ -1646,7 +1662,7 @@ function App() {
               </section>
 
               {user && selectedNotePost() ? (
-                <article className="document">
+                <article className="document ds-card">
                   <div className="post-head">
                     <div>
                       <h2>{selectedNotePost()?.title}</h2>
@@ -1657,22 +1673,24 @@ function App() {
                     </div>
 
                     <div className="button-row">
-                      <button
+                      <Button
                         type="button"
-                        className="secondary"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => handleNoteEditClick(selectedNotePost()!)}
                       >
                         수정
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="danger"
+                        variant="danger"
+                        size="sm"
                         onClick={() =>
                           handleDeleteClick(selectedNotePost()!.id)
                         }
                       >
                         삭제
-                      </button>
+                      </Button>
                     </div>
                   </div>
 
@@ -1685,7 +1703,7 @@ function App() {
                   </div>
                 </article>
               ) : (
-                <section className="panel">
+                <section className="panel ds-card notes-empty-state" role="status">
                   <h2>아직 저장한 노트가 없습니다.</h2>
                   <p>
                     AI 챗봇 답변을 저장하거나 직접 노트를 작성하면 여기에
