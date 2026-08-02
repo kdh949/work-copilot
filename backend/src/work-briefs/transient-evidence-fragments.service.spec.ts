@@ -16,6 +16,7 @@ describe('TransientEvidenceFragmentsService', () => {
   const repository = {
     upsert: jest.fn<Promise<void>, [StoredFragment, string[]]>(),
     find: jest.fn<Promise<StoredFragment[]>, [FindOptions]>(),
+    update: jest.fn<Promise<void>, [unknown, unknown]>(),
     delete: jest.fn<Promise<void>, [unknown]>(),
   };
   const configService = {
@@ -37,6 +38,7 @@ describe('TransientEvidenceFragmentsService', () => {
       encryptionKeyVersion: 1,
     })),
     decrypt: jest.fn(() => 'decrypted only in memory'),
+    needsReencryption: jest.fn(() => false),
   };
   const contentGuard = { assertSafeFragment: jest.fn() };
 
@@ -98,6 +100,40 @@ describe('TransientEvidenceFragmentsService', () => {
 
     expect(repository.find.mock.calls[0]?.[0].where.expiresAt).toBeDefined();
     expect(repository.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-encrypts an active fragment after a configured key rotation', async () => {
+    repository.find.mockResolvedValue([
+      {
+        draftId: 'draft-id',
+        evidenceId: 'jira:DEMO-1',
+        ciphertext: 'old-ciphertext',
+        iv: 'old-iv',
+        authenticationTag: 'old-tag',
+        encryptionKeyVersion: 1,
+        expiresAt: new Date(),
+      },
+    ]);
+    cryptoService.needsReencryption.mockReturnValue(true);
+    cryptoService.encrypt.mockReturnValue({
+      ciphertext: 'current-ciphertext',
+      iv: 'current-iv',
+      authenticationTag: 'current-tag',
+      encryptionKeyVersion: 2,
+    });
+
+    await createService().readActive('draft-id');
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        ciphertext: 'current-ciphertext',
+        encryptionKeyVersion: 2,
+      }),
+    );
+    expect(JSON.stringify(repository.update.mock.calls)).not.toContain(
+      'decrypted only in memory',
+    );
   });
 
   it('reports encrypted-evidence cleanup health without retaining any cleanup error', async () => {

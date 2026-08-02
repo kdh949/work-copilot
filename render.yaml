@@ -22,6 +22,8 @@ services:
         sync: false
       - key: OPENAI_MODEL
         value: gpt-4o-mini
+      - key: OPENAI_STORE
+        value: "false"
       - key: OPENAI_EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: AI_SERVICE_API_KEY
@@ -95,6 +97,10 @@ services:
         sync: false
       - key: INTEGRATION_ENCRYPTION_KEY_VERSION
         value: "1"
+      - key: INTEGRATION_ENCRYPTION_PREVIOUS_KEY
+        sync: false
+      - key: INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION
+        sync: false
       - key: INTEGRATION_CALLBACK_BASE_URL
         sync: false
       - key: INTEGRATION_BASE_URL_HOST_ALLOWLIST
@@ -104,6 +110,12 @@ services:
       - key: INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST
         value: "READ"
       - key: TRANSIENT_CONTENT_ENCRYPTION_KEY
+        sync: false
+      - key: TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION
+        value: "1"
+      - key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY
+        sync: false
+      - key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION
         sync: false
       - key: AI_SERVICE_URL
         fromService:
@@ -137,7 +149,7 @@ services:
         - render.yaml
     envVars:
       - key: VITE_API_URL
-        value: https://week15-board-api.onrender.com
+        value: https://work-copilot-api.onrender.com
     routes:
       - type: rewrite
         source: /*

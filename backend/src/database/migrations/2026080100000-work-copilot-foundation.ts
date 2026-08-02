@@ -310,6 +310,18 @@ export class WorkCopilotFoundation1785510000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // A Keycloak-only account has no legacy password that a rollback can
+    // reconstruct. Fail before dropping any copilot tables instead of exposing
+    // operators to a late PostgreSQL NOT NULL error or silently fabricating a
+    // credential.
+    await queryRunner.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM "users" WHERE "password" IS NULL) THEN
+          RAISE EXCEPTION 'WORK_COPILOT_LEGACY_PASSWORD_ROLLBACK_BLOCKED';
+        END IF;
+      END $$;
+    `);
     await queryRunner.query('DROP TABLE "security_audit_events"');
     await queryRunner.query('DROP TABLE "publication_steps"');
     await queryRunner.query('DROP TABLE "brief_publications"');

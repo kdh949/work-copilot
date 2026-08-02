@@ -85,10 +85,20 @@ export class TransientEvidenceFragmentsService
       },
     });
 
-    return fragments.map((fragment) => ({
-      evidenceId: fragment.evidenceId,
-      content: this.cryptoService.decrypt(fragment),
-    }));
+    return Promise.all(
+      fragments.map(async (fragment) => {
+        const content = this.cryptoService.decrypt(fragment);
+
+        if (
+          this.cryptoService.needsReencryption(fragment.encryptionKeyVersion)
+        ) {
+          const encrypted = this.cryptoService.encrypt(content);
+          await this.fragmentsRepository.update({ id: fragment.id }, encrypted);
+        }
+
+        return { evidenceId: fragment.evidenceId, content };
+      }),
+    );
   }
 
   async purgeExpired(): Promise<void> {

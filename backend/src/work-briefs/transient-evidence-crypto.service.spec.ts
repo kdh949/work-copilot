@@ -33,4 +33,37 @@ describe('TransientEvidenceCryptoService', () => {
       InternalServerErrorException,
     );
   });
+
+  it('decrypts the configured previous transient key and requests re-encryption', () => {
+    const oldKey = Buffer.alloc(32, 3).toString('base64');
+    const currentKey = Buffer.alloc(32, 4).toString('base64');
+    const legacy = new TransientEvidenceCryptoService({
+      get: jest.fn((name: string) => {
+        if (name === 'TRANSIENT_CONTENT_ENCRYPTION_KEY') {
+          return oldKey;
+        }
+        if (name === 'TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION') {
+          return '1';
+        }
+        return undefined;
+      }),
+    } as never).encrypt('legacy transient evidence');
+    const rotating = new TransientEvidenceCryptoService({
+      get: jest.fn((name: string) => {
+        const values: Record<string, string> = {
+          TRANSIENT_CONTENT_ENCRYPTION_KEY: currentKey,
+          TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION: '2',
+          TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY: oldKey,
+          TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION: '1',
+        };
+        return values[name];
+      }),
+    } as never);
+
+    expect(rotating.decrypt(legacy)).toBe('legacy transient evidence');
+    expect(rotating.needsReencryption(legacy.encryptionKeyVersion)).toBe(true);
+    expect(
+      rotating.encrypt(rotating.decrypt(legacy)).encryptionKeyVersion,
+    ).toBe(2);
+  });
 });

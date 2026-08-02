@@ -33,7 +33,7 @@ export class TransientEvidenceCryptoService {
     try {
       const decipher = createDecipheriv(
         'aes-256-gcm',
-        this.getKey(),
+        this.getKeyForVersion(value.encryptionKeyVersion),
         Buffer.from(value.iv, 'base64'),
       );
       decipher.setAuthTag(Buffer.from(value.authenticationTag, 'base64'));
@@ -46,6 +46,14 @@ export class TransientEvidenceCryptoService {
         'Transient evidence cannot be decrypted.',
       );
     }
+  }
+
+  currentKeyVersion(): number {
+    return this.getKeyVersion();
+  }
+
+  needsReencryption(keyVersion: number): boolean {
+    return keyVersion !== this.getKeyVersion();
   }
 
   private getKey(): Buffer {
@@ -61,6 +69,53 @@ export class TransientEvidenceCryptoService {
     }
 
     return key;
+  }
+
+  private getKeyForVersion(keyVersion: number): Buffer {
+    if (keyVersion === this.getKeyVersion()) {
+      return this.getKey();
+    }
+
+    const previousVersion = this.previousKeyVersion();
+    if (previousVersion === keyVersion) {
+      return this.previousKey();
+    }
+
+    throw new InternalServerErrorException(
+      'Transient evidence encryption key is unavailable.',
+    );
+  }
+
+  private previousKey(): Buffer {
+    const value = this.configService.get<string>(
+      'TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY',
+    );
+    const key = value ? Buffer.from(value, 'base64') : Buffer.alloc(0);
+
+    if (key.length !== 32) {
+      throw new InternalServerErrorException(
+        'Transient evidence encryption key is unavailable.',
+      );
+    }
+
+    return key;
+  }
+
+  private previousKeyVersion(): number | null {
+    const value = this.configService.get<string>(
+      'TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION',
+    );
+    if (!value) {
+      return null;
+    }
+
+    const version = Number(value);
+    return Number.isInteger(version) &&
+      version >= 1 &&
+      version <= 2_147_483_647 &&
+      version !== this.getKeyVersion()
+      ? version
+      : null;
   }
 
   private getKeyVersion(): number {

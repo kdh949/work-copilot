@@ -307,6 +307,43 @@ describe('WorkBriefsService', () => {
     expect(repository.update).toHaveBeenCalled();
   });
 
+  it('clears a webhook-only re-review state when every source is still current', async () => {
+    const current = createDraft({
+      status: 'review_required',
+      freshnessStatus: 'review_required',
+    });
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: current.evidence[0],
+          content: 're-read transient evidence',
+        },
+      ],
+    });
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const refreshed = await createService().refreshDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1 },
+      'correlation-id',
+    );
+
+    expect(refreshed.status).toBe('draft');
+    expect(refreshed.freshnessStatus).toBe('current');
+    expect(refreshed.blockers).toEqual([]);
+    expect(refreshed.optimisticVersion).toBe(2);
+  });
+
   it('marks a draft for re-review when selected Confluence metadata changes', async () => {
     const confluenceEvidence = {
       id: 'confluence:200',

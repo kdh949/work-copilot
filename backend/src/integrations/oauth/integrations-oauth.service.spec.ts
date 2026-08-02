@@ -29,6 +29,9 @@ function makeHarness() {
     confluenceClientSecretCiphertext: secretCiphertext,
     confluenceClientSecretIv: 'iv',
     confluenceClientSecretTag: 'tag',
+    webhookRouteSecretCiphertext: secretCiphertext,
+    webhookRouteSecretIv: 'iv',
+    webhookRouteSecretTag: 'tag',
     encryptionKeyVersion: 1,
     allowedProjectKeys: ['ENG'],
     allowedSpaceKeys: ['ENG'],
@@ -43,6 +46,12 @@ function makeHarness() {
   const auditEvents: SecurityAuditEvent[] = [];
   let id = 0;
 
+  const profileUpdate = jest.fn(
+    (_criteria: unknown, values: Partial<IntegrationProfile>) => {
+      Object.assign(profile, values);
+      return Promise.resolve({ affected: 1 });
+    },
+  );
   const profileRepository = {
     createQueryBuilder: jest.fn(() => {
       let requestedProfileId: string | undefined;
@@ -62,6 +71,7 @@ function makeHarness() {
       };
       return query;
     }),
+    update: profileUpdate,
   } as unknown as Repository<IntegrationProfile>;
 
   const attemptsRepository = {
@@ -124,32 +134,33 @@ function makeHarness() {
     return query;
   };
 
+  const save = jest.fn((value: unknown) => {
+    if (isAuditEvent(value)) {
+      auditEvents.push(value);
+      return Promise.resolve(value);
+    }
+
+    if (isAuthorizationAttempt(value)) {
+      value.id ||= `attempt-${++id}`;
+      if (!attempts.includes(value)) {
+        attempts.push(value);
+      }
+      return Promise.resolve(value);
+    }
+
+    if (isConnection(value)) {
+      value.id ||= `connection-${++id}`;
+      if (!connections.includes(value)) {
+        connections.push(value);
+      }
+      return Promise.resolve(value);
+    }
+
+    return Promise.resolve(value);
+  });
   const manager = {
     create: jest.fn(<T>(_entity: unknown, value: T): T => value),
-    save: jest.fn((value: unknown) => {
-      if (isAuditEvent(value)) {
-        auditEvents.push(value);
-        return Promise.resolve(value);
-      }
-
-      if (isAuthorizationAttempt(value)) {
-        value.id ||= `attempt-${++id}`;
-        if (!attempts.includes(value)) {
-          attempts.push(value);
-        }
-        return Promise.resolve(value);
-      }
-
-      if (isConnection(value)) {
-        value.id ||= `connection-${++id}`;
-        if (!connections.includes(value)) {
-          connections.push(value);
-        }
-        return Promise.resolve(value);
-      }
-
-      return Promise.resolve(value);
-    }),
+    save,
     remove: jest.fn((value: AtlassianOAuthConnection) => {
       const index = connections.indexOf(value);
       if (index >= 0) {
@@ -181,6 +192,11 @@ function makeHarness() {
     ),
   } as unknown as DataSource;
 
+  const currentKeyVersion = jest.fn(() => 1);
+  const needsReencryption = jest.fn((keyVersion: number) => keyVersion !== 1);
+  const decrypt = jest.fn((value: { ciphertext: string }) =>
+    Buffer.from(value.ciphertext, 'base64').toString(),
+  );
   const crypto = {
     encrypt: jest.fn((value: string) => ({
       ciphertext: Buffer.from(value).toString('base64'),
@@ -188,9 +204,9 @@ function makeHarness() {
       authenticationTag: 'tag',
       keyVersion: 1,
     })),
-    decrypt: jest.fn((value: { ciphertext: string }) =>
-      Buffer.from(value.ciphertext, 'base64').toString(),
-    ),
+    decrypt,
+    currentKeyVersion,
+    needsReencryption,
   } as unknown as IntegrationProfileCryptoService;
   const createAuthorizationUrl = jest.fn(
     (_configuration: unknown, state: string, verifier: string) =>
@@ -241,6 +257,12 @@ function makeHarness() {
     refresh,
     revoke,
     crypto,
+    profile,
+    profileUpdate,
+    currentKeyVersion,
+    decrypt,
+    needsReencryption,
+    save,
     manager,
   };
 }
@@ -332,6 +354,49 @@ describe('IntegrationsOAuthService', () => {
     expect(exchangeAuthorizationCode).toHaveBeenCalledTimes(1);
   });
 
+  it('re-encrypts all profile secrets when a legacy profile is read for OAuth', async () => {
+    const { service, profile, profileUpdate, decrypt } = harness;
+    profile.encryptionKeyVersion = 0;
+    profile.jiraClientSecretCiphertext = Buffer.from(
+      'legacy-jira-client-secret',
+    ).toString('base64');
+    profile.confluenceClientSecretCiphertext = Buffer.from(
+      'legacy-confluence-client-secret',
+    ).toString('base64');
+    profile.webhookRouteSecretCiphertext = Buffer.from(
+      'legacy-webhook-route-secret',
+    ).toString('base64');
+
+    const result = await service.createAuthorizationUrl(
+      'jira',
+      101,
+      'corr-profile-rotation',
+    );
+
+    expect(typeof result.authorizationUrl).toBe('string');
+
+    expect(profileUpdate).toHaveBeenCalledWith(
+      { id: profileId, encryptionKeyVersion: 0 },
+      expect.objectContaining({ encryptionKeyVersion: 1 }),
+    );
+    expect(profile.encryptionKeyVersion).toBe(1);
+    expect(decrypt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ciphertext: Buffer.from('legacy-jira-client-secret').toString('base64'),
+        keyVersion: 0,
+      }),
+    );
+    expect(JSON.stringify(profileUpdate.mock.calls)).not.toContain(
+      'legacy-jira-client-secret',
+    );
+    expect(JSON.stringify(profileUpdate.mock.calls)).not.toContain(
+      'legacy-confluence-client-secret',
+    );
+    expect(JSON.stringify(profileUpdate.mock.calls)).not.toContain(
+      'legacy-webhook-route-secret',
+    );
+  });
+
   it('rejects a callback state from a different signed-in user before token exchange', async () => {
     const { service, exchangeAuthorizationCode } = harness;
     const started = await service.createAuthorizationUrl('jira', 101, 'corr-a');
@@ -401,6 +466,46 @@ describe('IntegrationsOAuthService', () => {
         refreshToken: 'new-refresh',
       }),
     );
+  });
+
+  it('re-encrypts a still-valid legacy token pair when it is read', async () => {
+    const { service, connections, crypto, needsReencryption, save } = harness;
+    const encrypted = crypto.encrypt(
+      JSON.stringify({
+        accessToken: 'legacy-access',
+        refreshToken: 'legacy-refresh',
+      }),
+    );
+    connections.push({
+      id: 'connection-legacy',
+      userId: 101,
+      profileId,
+      provider: 'jira',
+      tokensCiphertext: encrypted.ciphertext,
+      tokensIv: encrypted.iv,
+      tokensTag: encrypted.authenticationTag,
+      encryptionKeyVersion: 0,
+      tokenExpiresAt: new Date(Date.now() + 60_000),
+      tokenVersion: 1,
+      status: 'connected',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      service.getAccessToken(101, 'jira', 'corr-legacy'),
+    ).resolves.toBe('legacy-access');
+
+    expect(needsReencryption).toHaveBeenCalledWith(0);
+    expect(connections[0]).toEqual(
+      expect.objectContaining({
+        encryptionKeyVersion: 1,
+        tokenVersion: 1,
+      }),
+    );
+    expect(connections[0]?.tokenExpiresAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(save.mock.calls)).not.toContain('legacy-access');
+    expect(JSON.stringify(save.mock.calls)).not.toContain('legacy-refresh');
   });
 
   it('revokes when possible and always removes only the current user connection', async () => {
