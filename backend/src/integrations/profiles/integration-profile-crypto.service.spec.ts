@@ -21,4 +21,38 @@ describe('IntegrationProfileCryptoService', () => {
     expect(encrypted.keyVersion).toBe(7);
     expect(service.decrypt(encrypted)).toBe('jira-client-secret-plaintext');
   });
+
+  it('reads one configured previous key version and marks it for re-encryption', () => {
+    const oldKey = Buffer.alloc(32, 11).toString('base64');
+    const currentKey = Buffer.alloc(32, 22).toString('base64');
+    const oldService = new IntegrationProfileCryptoService({
+      get: jest.fn((key: string) => {
+        if (key === 'INTEGRATION_ENCRYPTION_KEY') {
+          return oldKey;
+        }
+        if (key === 'INTEGRATION_ENCRYPTION_KEY_VERSION') {
+          return '1';
+        }
+        return undefined;
+      }),
+    } as unknown as ConfigService);
+    const legacy = oldService.encrypt('legacy-client-secret');
+    const rotatingService = new IntegrationProfileCryptoService({
+      get: jest.fn((key: string) => {
+        const values: Record<string, string> = {
+          INTEGRATION_ENCRYPTION_KEY: currentKey,
+          INTEGRATION_ENCRYPTION_KEY_VERSION: '2',
+          INTEGRATION_ENCRYPTION_PREVIOUS_KEY: oldKey,
+          INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION: '1',
+        };
+        return values[key];
+      }),
+    } as unknown as ConfigService);
+
+    expect(rotatingService.decrypt(legacy)).toBe('legacy-client-secret');
+    expect(rotatingService.needsReencryption(legacy.keyVersion)).toBe(true);
+    expect(rotatingService.encrypt(rotatingService.decrypt(legacy))).toEqual(
+      expect.objectContaining({ keyVersion: 2 }),
+    );
+  });
 });

@@ -191,6 +191,7 @@ function makeHarness() {
     decrypt: jest.fn((value: { ciphertext: string }) =>
       Buffer.from(value.ciphertext, 'base64').toString(),
     ),
+    needsReencryption: jest.fn((keyVersion: number) => keyVersion !== 1),
   } as unknown as IntegrationProfileCryptoService;
   const createAuthorizationUrl = jest.fn(
     (_configuration: unknown, state: string, verifier: string) =>
@@ -401,6 +402,46 @@ describe('IntegrationsOAuthService', () => {
         refreshToken: 'new-refresh',
       }),
     );
+  });
+
+  it('re-encrypts a still-valid legacy token pair when it is read', async () => {
+    const { service, connections, crypto, manager } = harness;
+    const encrypted = crypto.encrypt(
+      JSON.stringify({
+        accessToken: 'legacy-access',
+        refreshToken: 'legacy-refresh',
+      }),
+    );
+    connections.push({
+      id: 'connection-legacy',
+      userId: 101,
+      profileId,
+      provider: 'jira',
+      tokensCiphertext: encrypted.ciphertext,
+      tokensIv: encrypted.iv,
+      tokensTag: encrypted.authenticationTag,
+      encryptionKeyVersion: 0,
+      tokenExpiresAt: new Date(Date.now() + 60_000),
+      tokenVersion: 1,
+      status: 'connected',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(service.getAccessToken(101, 'jira', 'corr-legacy')).resolves.toBe(
+      'legacy-access',
+    );
+
+    expect(crypto.needsReencryption).toHaveBeenCalledWith(0);
+    expect(connections[0]).toEqual(
+      expect.objectContaining({
+        encryptionKeyVersion: 1,
+        tokenExpiresAt: expect.any(Date),
+        tokenVersion: 1,
+      }),
+    );
+    expect(JSON.stringify(manager.save.mock.calls)).not.toContain('legacy-access');
+    expect(JSON.stringify(manager.save.mock.calls)).not.toContain('legacy-refresh');
   });
 
   it('revokes when possible and always removes only the current user connection', async () => {

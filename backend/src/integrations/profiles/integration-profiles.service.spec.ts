@@ -224,8 +224,14 @@ describe('IntegrationProfilesService', () => {
       jiraClientId: 'jira-client',
       confluenceClientId: 'confluence-client',
       jiraClientSecretCiphertext: 'jira-ciphertext',
+      jiraClientSecretIv: 'jira-iv',
+      jiraClientSecretTag: 'jira-tag',
       confluenceClientSecretCiphertext: 'confluence-ciphertext',
+      confluenceClientSecretIv: 'confluence-iv',
+      confluenceClientSecretTag: 'confluence-tag',
       webhookRouteSecretCiphertext: null,
+      webhookRouteSecretIv: null,
+      webhookRouteSecretTag: null,
       encryptionKeyVersion: 1,
       allowedProjectKeys: ['ENG'],
       allowedSpaceKeys: ['ENG'],
@@ -268,11 +274,13 @@ describe('IntegrationProfilesService', () => {
       dataSource,
       {} as ConfigService,
       {
-        encrypt: jest.fn(() => ({
-          ciphertext: 'webhook-ciphertext',
+        currentKeyVersion: jest.fn(() => 2),
+        decrypt: jest.fn((value) => `plain-${value.ciphertext}`),
+        encrypt: jest.fn((value: string) => ({
+          ciphertext: `${value}-ciphertext`,
           iv: 'iv',
           authenticationTag: 'tag',
-          keyVersion: 1,
+          keyVersion: 2,
         })),
       } as unknown as IntegrationProfileCryptoService,
       {} as IntegrationProfileUrlPolicy,
@@ -288,6 +296,13 @@ describe('IntegrationProfilesService', () => {
 
     expect(response.webhookRouteSecretConfigured).toBe(true);
     expect(response).not.toHaveProperty('webhookRouteSecret');
+    expect(profile.encryptionKeyVersion).toBe(2);
+    expect(profile.jiraClientSecretCiphertext).toBe(
+      'plain-jira-ciphertext-ciphertext',
+    );
+    expect(profile.confluenceClientSecretCiphertext).toBe(
+      'plain-confluence-ciphertext-ciphertext',
+    );
     expect(JSON.stringify(auditEvents)).not.toContain(routeSecret);
     expect(auditEvents).toEqual(
       expect.arrayContaining([

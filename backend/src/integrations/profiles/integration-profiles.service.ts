@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -120,7 +121,7 @@ export class IntegrationProfilesService {
   ): Promise<IntegrationProfileResponse> {
     return this.dataSource.transaction(async (manager) => {
       const existing = await this.findProfile(manager, id);
-      const input = this.normalizeUpdate(dto, existing);
+      const input = await this.normalizeUpdate(dto, existing);
       const profile = Object.assign(existing, input);
       const savedProfile = await manager.save(profile);
 
@@ -212,15 +213,17 @@ export class IntegrationProfilesService {
     actorUserId: number,
     correlationId: string,
   ): Promise<IntegrationProfileResponse> {
-    const secret = this.cryptoService.encrypt(
-      this.normalizeSecret(dto.webhookRouteSecret),
-    );
-
     return this.dataSource.transaction(async (manager) => {
       const profile = await this.findProfile(manager, id);
-      Object.assign(profile, this.webhookSecretColumns(secret), {
-        encryptionKeyVersion: secret.keyVersion,
-      });
+      const secret = this.cryptoService.encrypt(
+        this.normalizeSecret(dto.webhookRouteSecret),
+      );
+      Object.assign(
+        profile,
+        this.reencryptProfileSecretsIfNeeded(profile),
+        this.webhookSecretColumns(secret),
+        { encryptionKeyVersion: secret.keyVersion },
+      );
       const savedProfile = await manager.save(profile);
 
       await this.writeAudit(
@@ -346,11 +349,13 @@ export class IntegrationProfilesService {
     };
   }
 
-  private normalizeUpdate(
+  private async normalizeUpdate(
     dto: UpdateIntegrationProfileDto,
     existing: IntegrationProfile,
-  ): Partial<IntegrationProfile> {
-    const update: Partial<IntegrationProfile> = {};
+  ): Promise<Partial<IntegrationProfile>> {
+    const update: Partial<IntegrationProfile> = {
+      ...this.reencryptProfileSecretsIfNeeded(existing),
+    };
 
     if (dto.jiraBaseUrl !== undefined) {
       update.jiraBaseUrl = this.urlPolicy.normalizeBaseUrl(dto.jiraBaseUrl);
@@ -446,6 +451,87 @@ export class IntegrationProfilesService {
       update.encryptionKeyVersion = keyVersion;
     }
 
+    return update;
+  }
+
+  private reencryptProfileSecretsIfNeeded(
+    profile: IntegrationProfile,
+  ): Partial<IntegrationProfile> {
+    if (
+      profile.encryptionKeyVersion === this.cryptoService.currentKeyVersion()
+    ) {
+      return {};
+    }
+
+    const update: Partial<IntegrationProfile> = {};
+    const reencrypt = (
+      encrypted: {
+        ciphertext: string | null;
+        iv: string | null;
+        authenticationTag: string | null;
+      },
+      apply: (value: EncryptedProfileSecret) => void,
+    ): void => {
+      if (
+        !encrypted.ciphertext &&
+        !encrypted.iv &&
+        !encrypted.authenticationTag
+      ) {
+        return;
+      }
+
+      if (
+        !encrypted.ciphertext ||
+        !encrypted.iv ||
+        !encrypted.authenticationTag
+      ) {
+        throw new InternalServerErrorException(
+          'Integration secret cannot be rotated.',
+        );
+      }
+
+      const ciphertext = encrypted.ciphertext;
+      const iv = encrypted.iv;
+      const authenticationTag = encrypted.authenticationTag;
+      apply(
+        this.cryptoService.encrypt(
+          this.cryptoService.decrypt({
+            ciphertext,
+            iv,
+            authenticationTag,
+            keyVersion: profile.encryptionKeyVersion,
+          }),
+        ),
+      );
+    };
+
+    reencrypt(
+      {
+        ciphertext: profile.jiraClientSecretCiphertext,
+        iv: profile.jiraClientSecretIv,
+        authenticationTag: profile.jiraClientSecretTag,
+      },
+      (secret) => Object.assign(update, this.secretColumns('jira', secret)),
+    );
+    reencrypt(
+      {
+        ciphertext: profile.confluenceClientSecretCiphertext,
+        iv: profile.confluenceClientSecretIv,
+        authenticationTag: profile.confluenceClientSecretTag,
+      },
+      (secret) =>
+        Object.assign(update, this.secretColumns('confluence', secret)),
+    );
+    reencrypt(
+      {
+        ciphertext: profile.webhookRouteSecretCiphertext,
+        iv: profile.webhookRouteSecretIv,
+        authenticationTag: profile.webhookRouteSecretTag,
+      },
+      (secret) => Object.assign(update, this.webhookSecretColumns(secret)),
+    );
+
+    update.encryptionKeyVersion = this.cryptoService.currentKeyVersion();
     return update;
   }
 

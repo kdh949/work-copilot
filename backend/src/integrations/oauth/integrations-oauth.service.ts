@@ -234,6 +234,9 @@ export class IntegrationsOAuthService {
           connection.tokenExpiresAt.getTime() >
             Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS
         ) {
+          if (this.reencryptTokenPairIfNeeded(connection, tokens)) {
+            await manager.save(connection);
+          }
           return tokens.accessToken;
         }
 
@@ -583,6 +586,22 @@ export class IntegrationsOAuthService {
     connection.tokensTag = encrypted.authenticationTag;
     connection.encryptionKeyVersion = encrypted.keyVersion;
     connection.tokenExpiresAt = tokenPair.expiresAt;
+  }
+
+  private reencryptTokenPairIfNeeded(
+    connection: AtlassianOAuthConnection,
+    tokens: StoredTokenPair,
+  ): boolean {
+    if (!this.cryptoService.needsReencryption(connection.encryptionKeyVersion)) {
+      return false;
+    }
+
+    const encrypted = this.cryptoService.encrypt(JSON.stringify(tokens));
+    connection.tokensCiphertext = encrypted.ciphertext;
+    connection.tokensIv = encrypted.iv;
+    connection.tokensTag = encrypted.authenticationTag;
+    connection.encryptionKeyVersion = encrypted.keyVersion;
+    return true;
   }
 
   private tokensFromConnection(

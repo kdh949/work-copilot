@@ -18,5 +18,17 @@ describe('Render deployment configuration', () => {
     expect(renderConfig).toMatch(
       /- key: TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION\s+value: "1"/,
     );
+    expect(renderConfig).toMatch(
+      /- key: INTEGRATION_ENCRYPTION_PREVIOUS_KEY\s+sync: false/,
+    );
+    expect(renderConfig).toMatch(
+      /- key: INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION\s+sync: false/,
+    );
+    expect(renderConfig).toMatch(
+      /- key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY\s+sync: false/,
+    );
+    expect(renderConfig).toMatch(
+      /- key: TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION\s+sync: false/,
+    );
   });
 });
