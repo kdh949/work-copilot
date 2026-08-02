@@ -92,12 +92,28 @@ describe('UsersService.mapVerifiedKeycloakIdentity', () => {
     });
   });
 
-  it('rejects a verified identity without a pre-provisioned pilot account', async () => {
+  it('provisions a Keycloak-only account for a verified identity without a pilot account', async () => {
+    const createdUser = makeLegacyUser({
+      id: 8,
+      email: 'pilot@example.test',
+      nickname: 'pilot',
+      password: null,
+      department: null,
+      employeeNumber: null,
+      role: 'employee',
+      keycloakSubject: 'keycloak-subject',
+      identityProvider: 'keycloak',
+      legacyMigratedAt: null,
+    });
+    const create = jest.fn(() => createdUser);
+    const save = jest.fn().mockResolvedValue(createdUser);
     const manager = {
       createQueryBuilder: jest
         .fn()
         .mockReturnValueOnce(selectBuilder(null))
         .mockReturnValueOnce(selectBuilder(null)),
+      create,
+      save,
     };
     const transaction = jest.fn(
       (callback: (entityManager: EntityManager) => Promise<User>) =>
@@ -115,8 +131,25 @@ describe('UsersService.mapVerifiedKeycloakIdentity', () => {
         subject: 'keycloak-subject',
         email: 'pilot@example.test',
       }),
-    ).rejects.toMatchObject<Partial<AccountMappingRejectedException>>({
-      diagnosticCode: 'AUTH_PILOT_ACCOUNT_NOT_FOUND',
+    ).resolves.toMatchObject({
+      id: 8,
+      email: 'pilot@example.test',
+      keycloakSubject: 'keycloak-subject',
     });
+    expect(create).toHaveBeenCalledWith(
+      User,
+      expect.objectContaining({
+        email: 'pilot@example.test',
+        nickname: 'pilot',
+        password: null,
+        department: null,
+        employeeNumber: null,
+        role: 'employee',
+        keycloakSubject: 'keycloak-subject',
+        identityProvider: 'keycloak',
+        legacyMigratedAt: null,
+      }),
+    );
+    expect(save).toHaveBeenCalledWith(createdUser);
   });
 });
