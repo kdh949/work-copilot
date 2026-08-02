@@ -74,7 +74,7 @@ describe('SafeHttpExceptionFilter', () => {
       }),
     } as unknown as ArgumentsHost;
     const exception = Object.assign(new UnauthorizedException(), {
-      diagnosticCode: 'AUTH_PILOT_ACCOUNT_NOT_FOUND',
+      diagnosticCode: 'AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY',
     });
 
     new SafeHttpExceptionFilter().catch(exception, host);

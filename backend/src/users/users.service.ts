@@ -70,7 +70,7 @@ export class UsersService {
       .getOne();
 
     if (!legacyUser) {
-      this.reject('AUTH_PILOT_ACCOUNT_NOT_FOUND');
+      return this.provisionKeycloakUser(manager, identity);
     }
 
     if (
@@ -114,6 +114,27 @@ export class UsersService {
     }
 
     this.reject('AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY');
+  }
+
+  private async provisionKeycloakUser(
+    manager: EntityManager,
+    identity: KeycloakUserIdentity,
+  ): Promise<User> {
+    const nickname = identity.email.slice(0, identity.email.lastIndexOf('@'));
+
+    return manager.save(
+      manager.create(User, {
+        email: identity.email,
+        password: null,
+        nickname,
+        department: null,
+        employeeNumber: null,
+        role: 'employee',
+        keycloakSubject: identity.subject,
+        identityProvider: 'keycloak',
+        legacyMigratedAt: null,
+      }),
+    );
   }
 
   private reject(
