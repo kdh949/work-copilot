@@ -172,9 +172,9 @@ python -m unittest discover -s tests -p 'test_*.py'
 
 ## 배포
 
-Render는 루트의 `render.yaml`을 사용해 API, AI 서비스, 정적 웹 앱을 각각 배포합니다. `main` 브랜치 변경은 자동 배포되며, 운영 PostgreSQL은 Supabase Shared Pooler session endpoint와 TLS 연결을 사용합니다.
+프런트엔드는 루트의 `vercel.json`으로 Vercel에, API와 AI 서비스는 `render.yaml`으로 Render에 배포합니다. 현재 배포 브랜치 변경은 자동 배포되며, 운영 PostgreSQL은 Supabase Shared Pooler session endpoint와 TLS 연결을 사용합니다.
 
-- Web: <https://work-copilot-web.onrender.com>
+- Web: Vercel 배포 URL
 - API: <https://work-copilot-api.onrender.com>
 - AI: <https://work-copilot-ai.onrender.com>
 
