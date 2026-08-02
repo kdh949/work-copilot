@@ -1,8 +1,21 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type FormEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
-import { Alert, Button, Card } from "./design-system/components";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  TextArea,
+  TextInput,
+} from "./design-system/components";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
@@ -959,15 +972,17 @@ function App() {
         <div className="tree-group" key={pathKey}>
           <div
             className="tree-category-row"
-            style={{ paddingLeft: `${branch.depth * 14}px` }}
+            style={{ "--tree-depth": branch.depth } as CSSProperties}
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               className="tree-toggle"
               onClick={() => toggleWikiPath(branch.path)}
             >
               {hasChildren ? (isOpen ? "▾" : "▸") : "•"}
-            </button>
+            </Button>
             <button
               type="button"
               className={isSelected ? "tree-category active" : "tree-category"}
@@ -1141,7 +1156,7 @@ function App() {
 
     return (
       <div className="filters">
-        <input
+        <TextInput
           type="text"
           placeholder="제목/내용 검색"
           value={keyword}
@@ -1149,7 +1164,7 @@ function App() {
         />
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="태그"
             value={tagFilter}
@@ -1158,13 +1173,15 @@ function App() {
           {tagSuggestions.length > 0 && (
             <div className="suggestion-list">
               {tagSuggestions.map((tag) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={tag}
                   onClick={() => handleTagClick(tag)}
                 >
                   {tag}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -1217,8 +1234,8 @@ function App() {
         )}
 
         {menu === "posts" && (
-          <section className="wiki-layout">
-            <aside className="wiki-sidebar">
+          <section className="wiki-layout wiki-layout--company">
+            <aside className="wiki-sidebar ds-card">
               <h2>분류</h2>
               {renderWikiFilters()}
 
@@ -1229,11 +1246,11 @@ function App() {
 
             <section className="wiki-main">
               {canManageWiki() && (
-                <section className="panel">
+                <section className="panel ds-card">
                   <h2>{editingPostId ? "회사 위키 수정" : "회사 위키 작성"}</h2>
                   <form onSubmit={handlePostSubmit}>
                     <label htmlFor="post-title">제목</label>
-                    <input
+                    <TextInput
                       id="post-title"
                       type="text"
                       value={postTitle}
@@ -1241,7 +1258,7 @@ function App() {
                     />
 
                     <label htmlFor="post-department">부서</label>
-                    <input
+                    <TextInput
                       id="post-department"
                       type="text"
                       value={postDepartment}
@@ -1251,7 +1268,7 @@ function App() {
                     />
 
                     <label htmlFor="post-tags">태그</label>
-                    <input
+                    <TextInput
                       id="post-tags"
                       type="text"
                       placeholder="급여, 온보딩, 개발"
@@ -1260,24 +1277,24 @@ function App() {
                     />
 
                     <label htmlFor="post-content">내용</label>
-                    <textarea
+                    <TextArea
                       id="post-content"
                       value={postContent}
                       onChange={(event) => setPostContent(event.target.value)}
                     />
 
                     <div className="button-row">
-                      <button type="submit">
+                      <Button type="submit">
                         {editingPostId ? "수정하기" : "작성하기"}
-                      </button>
+                      </Button>
                       {editingPostId && (
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
                           onClick={resetPostForm}
                         >
                           취소
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </form>
@@ -1298,16 +1315,17 @@ function App() {
                   </div>
 
                   {tagFilter && (
-                    <button
+                    <Button
                       type="button"
-                      className="secondary"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         setTagFilter("");
                         setWikiPage(1);
                       }}
                     >
                       태그 필터 해제: {tagFilter}
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -1317,8 +1335,8 @@ function App() {
                       key={post.id}
                       className={
                         selectedWikiId === post.id
-                          ? "wiki-card active"
-                          : "wiki-card"
+                          ? "wiki-card ds-card active"
+                          : "wiki-card ds-card"
                       }
                     >
                       <button
@@ -1328,7 +1346,7 @@ function App() {
                       >
                         <div className="wiki-card-title-row">
                           <h3>{post.title}</h3>
-                          {post.docType && <span>{post.docType}</span>}
+                          {post.docType && <Badge tone="info">{post.docType}</Badge>}
                         </div>
                         <p>{makeExcerpt(post)}</p>
                         <small>
@@ -1339,51 +1357,53 @@ function App() {
 
                       <div className="wiki-card-tags">
                         {(post.tags || []).slice(0, 5).map((tag) => (
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="sm"
                             key={tag}
                             onClick={() => handleTagClick(tag)}
                           >
                             {tag}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </article>
                   ))
                 ) : (
-                  <section className="panel">
+                  <section className="panel ds-card wiki-empty-state" role="status">
                     <h2>문서가 없습니다.</h2>
                     <p>다른 분류를 선택하거나 검색 조건을 변경해주세요.</p>
                   </section>
                 )}
 
                 <div className="pagination">
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="secondary"
                     disabled={wikiPage <= 1}
                     onClick={() => setWikiPage((page) => Math.max(1, page - 1))}
                   >
                     이전
-                  </button>
+                  </Button>
                   <span>
                     {wikiPage} / {wikiTotalPages}
                   </span>
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="secondary"
                     disabled={wikiPage >= wikiTotalPages}
                     onClick={() =>
                       setWikiPage((page) => Math.min(wikiTotalPages, page + 1))
                     }
                   >
                     다음
-                  </button>
+                  </Button>
                 </div>
               </section>
 
               {selectedWikiPost() && (
-                <article className="document">
+                <article className="document ds-card">
                   <div className="post-head">
                     <div>
                       <h2>{selectedWikiPost()?.title}</h2>
@@ -1397,22 +1417,24 @@ function App() {
 
                     {selectedWikiPost() && canEdit(selectedWikiPost()!) && (
                       <div className="button-row">
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleEditClick(selectedWikiPost()!)}
                         >
                           수정
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="danger"
+                          variant="danger"
+                          size="sm"
                           onClick={() =>
                             handleDeleteClick(selectedWikiPost()!.id)
                           }
                         >
                           삭제
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1424,13 +1446,15 @@ function App() {
 
                   <div className="tags">
                     {(selectedWikiPost()?.tags || []).map((tag) => (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         key={tag}
                         onClick={() => handleTagClick(tag)}
                       >
                         {tag}
-                      </button>
+                      </Button>
                     ))}
                   </div>
 
@@ -1448,9 +1472,11 @@ function App() {
                           </small>
                           {(user?.id === comment.author?.id ||
                             canManageWiki()) && (
-                            <button
+                            <Button
                               type="button"
-                              className="text-button"
+                              variant="ghost"
+                              size="sm"
+                              className="comment-delete"
                               onClick={() =>
                                 handleCommentDelete(
                                   selectedWikiPost()!.id,
@@ -1459,7 +1485,7 @@ function App() {
                               }
                             >
                               삭제
-                            </button>
+                            </Button>
                           )}
                         </div>
                       ))}
@@ -1471,7 +1497,7 @@ function App() {
                             handleCommentSubmit(event, selectedWikiPost()!.id)
                           }
                         >
-                          <input
+                          <TextInput
                             type="text"
                             placeholder="댓글 입력"
                             value={commentText[selectedWikiPost()!.id] || ""}
@@ -1482,7 +1508,7 @@ function App() {
                               })
                             }
                           />
-                          <button type="submit">등록</button>
+                          <Button type="submit">등록</Button>
                         </form>
                       )}
                     </div>

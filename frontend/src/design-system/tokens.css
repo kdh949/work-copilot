@@ -126,6 +126,7 @@
   --status-indicator-size: 0.5rem;
   --content-max-width: 73.75rem;
   --content-narrow-width: 27.5rem;
+  --content-side-column-min-width: 11.25rem;
   --layout-rail-medium: 20rem;
   --workspace-rail-left: 18.25rem;
   --workspace-rail-right: 21.5rem;
