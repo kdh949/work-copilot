@@ -9,6 +9,7 @@ type IntegrationProfileListProps = {
   isTestingProfileId: string | null;
   onEdit: (profile: IntegrationProfile) => void;
   onActivate: (profile: IntegrationProfile) => void;
+  onDeactivate: (profile: IntegrationProfile) => void;
   onTest: (profile: IntegrationProfile) => void;
   onDelete: (profile: IntegrationProfile) => void;
 };
@@ -49,6 +50,7 @@ export function IntegrationProfileList({
   isTestingProfileId,
   onEdit,
   onActivate,
+  onDeactivate,
   onTest,
   onDelete,
 }: IntegrationProfileListProps) {
@@ -110,7 +112,9 @@ export function IntegrationProfileList({
             Jira secret{" "}
             {profile.jiraClientSecretConfigured ? "설정됨" : "미설정"} ·
             Confluence secret{" "}
-            {profile.confluenceClientSecretConfigured ? "설정됨" : "미설정"}
+            {profile.confluenceClientSecretConfigured ? "설정됨" : "미설정"} ·
+            Webhook route secret{" "}
+            {profile.webhookRouteSecretConfigured ? "설정됨" : "미설정"}
           </p>
 
           <div className="button-row">
@@ -132,6 +136,15 @@ export function IntegrationProfileList({
             {!profile.isActive && (
               <button type="button" onClick={() => onActivate(profile)}>
                 이 프로필 활성화
+              </button>
+            )}
+            {profile.isActive && (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => onDeactivate(profile)}
+              >
+                이 프로필 비활성화
               </button>
             )}
             {!profile.isActive && (

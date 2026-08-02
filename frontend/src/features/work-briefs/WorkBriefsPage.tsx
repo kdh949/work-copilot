@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
+  BriefPublication,
   BriefContent,
   BriefDraft,
   ChildTask,
@@ -45,6 +46,10 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
   const [conflict, setConflict] = useState(false);
   const [readiness, setReadiness] = useState<ReadinessAssessment | null>(null);
   const [isAssessingReadiness, setIsAssessingReadiness] = useState(false);
+  const [publication, setPublication] = useState<BriefPublication | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishApproved, setPublishApproved] = useState(false);
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const selectedEvidence = useMemo(
     () => evidence.filter((item) => selectedEvidenceIds.includes(item.id)),
@@ -56,6 +61,10 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     setEditingContent(nextDraft.content);
     setConflict(false);
     setReadiness(null);
+    setPublication(null);
+    setPublishApproved(false);
+    idempotencyKeyRef.current = null;
+    void loadPublication(nextDraft.id);
   }
 
   async function collectEvidence() {
@@ -212,6 +221,90 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     }
   }
 
+  async function loadPublication(draftId: string) {
+    try {
+      setPublication(
+        await request<BriefPublication>(`/brief-drafts/${draftId}/publication`),
+      );
+    } catch {
+      setPublication(null);
+    }
+  }
+
+  async function publishDraft() {
+    if (!draft || !readiness?.publishAllowed) {
+      setMessage("준비성 점검을 통과한 초안만 게시할 수 있습니다.");
+      return;
+    }
+    if (!publishApproved) {
+      setMessage("초안 버전을 검토한 뒤 게시 승인을 확인하세요.");
+      return;
+    }
+
+    try {
+      setIsPublishing(true);
+      setMessage("");
+      const idempotencyKey =
+        idempotencyKeyRef.current ?? createIdempotencyKey();
+      idempotencyKeyRef.current = idempotencyKey;
+      setPublication(
+        await request<BriefPublication>(`/brief-drafts/${draft.id}/publish`, {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify({
+            draftVersion: draft.optimisticVersion,
+            approved: true,
+          }),
+        }),
+      );
+      setMessage("mock 게시 saga를 기록했습니다. 외부 Jira·Confluence에는 쓰지 않았습니다.");
+    } catch (error) {
+      if ((error as HttpError).status === 409) {
+        setConflict(true);
+        setMessage("초안 버전 또는 준비성 상태가 바뀌었습니다. 최신 초안을 다시 검토하세요.");
+      } else {
+        setMessage("mock 게시 saga를 시작하지 못했습니다.");
+      }
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
+  async function retryPublication() {
+    if (!draft || !publication) return;
+    if (!publishApproved) {
+      setMessage("재시도할 현재 초안 버전을 다시 승인하세요.");
+      return;
+    }
+
+    try {
+      setIsPublishing(true);
+      setMessage("");
+      setPublication(
+        await request<BriefPublication>(
+          `/brief-drafts/${draft.id}/publication/${publication.id}/retry`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              draftVersion: draft.optimisticVersion,
+              approved: true,
+            }),
+          },
+        ),
+      );
+      setMessage("미완료 mock 단계만 다시 실행했습니다.");
+    } catch (error) {
+      if ((error as HttpError).status === 409) {
+        setConflict(true);
+        setMessage("재시도 전에 최신 초안과 준비성 결과를 다시 검토하세요.");
+      } else {
+        setMessage("mock 게시 복구를 완료하지 못했습니다.");
+      }
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
   function updateContent(updater: (current: BriefContent) => BriefContent) {
     setEditingContent((current) => (current ? updater(current) : current));
   }
@@ -325,6 +418,19 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
 
           {readiness && <ReadinessPanel assessment={readiness} />}
 
+          {readiness && (
+            <PublicationPanel
+              draft={draft}
+              readiness={readiness}
+              publication={publication}
+              approved={publishApproved}
+              isPublishing={isPublishing}
+              onApprovalChange={setPublishApproved}
+              onPublish={publishDraft}
+              onRetry={retryPublication}
+            />
+          )}
+
           {editingContent ? (
             <>
               <EvidenceList evidence={editingEvidence} readonly />
@@ -411,6 +517,13 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
   );
 }
 
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const readinessStatusLabel: Record<ReadinessAssessment["status"], string> = {
   READY: "게시 준비 완료",
   NEEDS_ATTENTION: "검토 필요",
@@ -494,6 +607,107 @@ function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
           )}
         </ul>
       )}
+    </section>
+  );
+}
+
+const publicationStatusLabel: Record<BriefPublication["status"], string> = {
+  PENDING: "게시 대기",
+  PUBLISHING: "게시 처리 중",
+  PUBLISHED: "mock 게시 완료",
+  PARTIALLY_PUBLISHED: "일부 단계 복구 필요",
+  NEEDS_REVIEW: "충돌 검토 필요",
+};
+
+const publicationStepLabel = (key: string): string => {
+  if (key === "confluence_page") return "Confluence 브리프";
+  if (key === "jira_remote_link") return "Jira remote link";
+  if (key === "jira_summary_comment") return "Jira 요약 댓글";
+  return "선택한 Jira 하위 작업";
+};
+
+function PublicationPanel({
+  draft,
+  readiness,
+  publication,
+  approved,
+  isPublishing,
+  onApprovalChange,
+  onPublish,
+  onRetry,
+}: {
+  draft: BriefDraft;
+  readiness: ReadinessAssessment;
+  publication: BriefPublication | null;
+  approved: boolean;
+  isPublishing: boolean;
+  onApprovalChange: (approved: boolean) => void;
+  onPublish: () => void;
+  onRetry: () => void;
+}) {
+  const publicationAllowed = readiness.publishAllowed && draft.freshnessStatus === "current";
+
+  return (
+    <section className="work-brief-publication" aria-label="브리프 게시">
+      <header>
+        <div>
+          <p className="eyebrow">명시적 승인 · mock 검증</p>
+          <h3>{publication ? publicationStatusLabel[publication.status] : "게시 전 확인"}</h3>
+        </div>
+        <span>외부 write 없음</span>
+      </header>
+      <p>
+        현재 단계는 mock saga만 실행합니다. 실제 Jira·Confluence에 페이지, 링크,
+        댓글 또는 하위 작업을 만들지 않습니다.
+      </p>
+      {publicationAllowed ? (
+        <label className="work-brief-publish-approval">
+          <input
+            type="checkbox"
+            checked={approved}
+            onChange={(event) => onApprovalChange(event.target.checked)}
+          />
+          초안 v{draft.optimisticVersion}과 근거·준비성 결과를 검토하고 mock 게시를 승인합니다.
+        </label>
+      ) : (
+        <p className="work-brief-blocker">
+          준비성 점검과 freshness가 통과하기 전에는 게시 saga를 시작할 수 없습니다.
+        </p>
+      )}
+      {publication?.steps.length ? (
+        <ul className="work-brief-publication-steps">
+          {publication.steps.map((step) => (
+            <li key={step.key}>
+              <strong>{publicationStepLabel(step.key)}</strong>
+              <span>{step.status} · 시도 {step.attempts}회</span>
+              {step.errorCode && <code>{step.errorCode}</code>}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="button-row">
+        {!publication ? (
+          <button
+            type="button"
+            onClick={onPublish}
+            disabled={!publicationAllowed || !approved || isPublishing}
+          >
+            {isPublishing ? "mock 게시 중" : "mock 게시 승인"}
+          </button>
+        ) : publication.canRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={!publicationAllowed || !approved || isPublishing}
+          >
+            {isPublishing
+              ? "복구 중"
+              : publication.requiresReview
+                ? "충돌 검토 후 mock 재시도"
+                : "미완료 mock 단계 재시도"}
+          </button>
+        ) : null}
+      </div>
     </section>
   );
 }

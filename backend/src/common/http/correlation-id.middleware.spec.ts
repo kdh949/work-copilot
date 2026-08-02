@@ -34,4 +34,21 @@ describe('CorrelationIdMiddleware', () => {
 
     expect(request.correlationId).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it('replaces an API-key-looking correlation ID before it can enter logs', () => {
+    const setHeader = jest.fn();
+    const request = {
+      header: jest.fn().mockReturnValue('sk-proj-abcdefghijklmnopqrstuv'),
+    } as unknown as CorrelatedRequest;
+    const response = { setHeader } as unknown as Response;
+    const next = jest.fn() as NextFunction;
+
+    middleware.use(request, response, next);
+
+    expect(request.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(setHeader).not.toHaveBeenCalledWith(
+      'x-correlation-id',
+      'sk-proj-abcdefghijklmnopqrstuv',
+    );
+  });
 });

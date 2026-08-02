@@ -56,6 +56,15 @@ export class IntegrationProfile {
   @Column({ type: 'varchar', length: 64, nullable: true, select: false })
   confluenceClientSecretTag: string | null;
 
+  @Column({ type: 'text', nullable: true, select: false })
+  webhookRouteSecretCiphertext: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, select: false })
+  webhookRouteSecretIv: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, select: false })
+  webhookRouteSecretTag: string | null;
+
   @Column({ type: 'int', default: 1 })
   encryptionKeyVersion: number;
 

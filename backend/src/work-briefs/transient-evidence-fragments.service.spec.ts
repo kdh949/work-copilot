@@ -99,4 +99,31 @@ describe('TransientEvidenceFragmentsService', () => {
     expect(repository.find.mock.calls[0]?.[0].where.expiresAt).toBeDefined();
     expect(repository.delete).toHaveBeenCalledTimes(1);
   });
+
+  it('reports encrypted-evidence cleanup health without retaining any cleanup error', async () => {
+    const cleanupHealth = {
+      recordSuccess: jest.fn(),
+      recordFailure: jest.fn(),
+    };
+    repository.delete.mockResolvedValueOnce({ affected: 3 } as never);
+    const service = new TransientEvidenceFragmentsService(
+      repository as never,
+      configService as never,
+      cryptoService as never,
+      contentGuard as never,
+      cleanupHealth as never,
+    );
+
+    await service.purgeExpired();
+    repository.delete.mockRejectedValueOnce(new Error('database error'));
+    await service.purgeExpired();
+
+    expect(cleanupHealth.recordSuccess).toHaveBeenCalledWith(
+      'transient_evidence',
+      3,
+    );
+    expect(cleanupHealth.recordFailure).toHaveBeenCalledWith(
+      'transient_evidence',
+    );
+  });
 });
