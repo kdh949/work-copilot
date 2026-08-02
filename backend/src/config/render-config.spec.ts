@@ -32,14 +32,14 @@ describe('production deployment configuration', () => {
     );
     expect(vercelConfig).toContain('"outputDirectory": "frontend/dist"');
     expect(vercelConfig).toContain(
-      '"VITE_API_URL": "https://work-copilot-api.onrender.com"',
+      '"VITE_API_URL": "https://api.work-copilot.dhkim.cloud"',
     );
     expect(vercelConfig).toContain('"destination": "/index.html"');
     expect(renderConfig).toContain(
-      'value: https://work-copilot-web.vercel.app',
+      'value: https://work-copilot.dhkim.cloud,https://work-copilot-web.vercel.app',
     );
     expect(renderConfig).toContain(
-      'value: https://work-copilot-api.onrender.com/auth/oidc/callback',
+      'value: https://api.work-copilot.dhkim.cloud/auth/oidc/callback',
     );
     expect(renderConfig).toContain(
       'value: https://work-copilot-ai.onrender.com',
