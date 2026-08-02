@@ -2,7 +2,6 @@ import { UnauthorizedException } from '@nestjs/common';
 
 export const ACCOUNT_MAPPING_REJECTION_CODES = [
   'AUTH_MAPPED_IDENTITY_EMAIL_MISMATCH',
-  'AUTH_PILOT_ACCOUNT_NOT_FOUND',
   'AUTH_ACCOUNT_MAPPED_TO_OTHER_IDENTITY',
 ] as const;
 
