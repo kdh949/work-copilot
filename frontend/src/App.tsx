@@ -1175,7 +1175,7 @@ function App() {
   return (
     <>
       <Header
-        title="DH Company Wiki"
+        title="Jira–Confluence Work Copilot"
         menu={menu}
         user={user}
         onMenuClick={setMenu}

@@ -1,4 +1,4 @@
-# DH Company Wiki Frontend
+# Jira–Confluence Work Copilot Frontend
 
 React + Vite 프론트엔드입니다.
 

@@ -9,7 +9,7 @@ describe('createDatabaseOptions', () => {
       DB_PORT: '5432',
       DB_USERNAME: 'postgres',
       DB_PASSWORD: 'postgres',
-      DB_DATABASE: 'dh_board',
+      DB_DATABASE: 'work_copilot',
       DB_SSL: 'false',
     });
 

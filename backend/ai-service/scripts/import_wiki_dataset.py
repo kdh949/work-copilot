@@ -24,7 +24,7 @@ EXPECTED_SCHEMA_VERSION = "company-wiki-jsonl-v1"
 EXPECTED_DOCUMENT_COUNT = 1000
 DEFAULT_BATCH_SIZE = 50
 SYNTHETIC_AUTHOR = {
-    "email": "wiki-seed@dh-board.local",
+    "email": "wiki-seed@work-copilot.local",
     "password": "imported-wiki-dataset",
     "nickname": "위키 데이터",
     "employeeNumber": "wiki-seed",

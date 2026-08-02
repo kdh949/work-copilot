@@ -1,8 +1,8 @@
 services:
   - type: web
-    name: week15-board-ai
+    name: work-copilot-ai
     runtime: python
-    repo: https://github.com/kdh949/dh-company-wiki
+    repo: https://github.com/kdh949/jira-confluence-work-copilot
     plan: free
     region: oregon
     branch: main
@@ -42,9 +42,9 @@ services:
         value: https://date.nager.at/api/v3/PublicHolidays
 
   - type: web
-    name: week15-board-api
+    name: work-copilot-api
     runtime: node
-    repo: https://github.com/kdh949/dh-company-wiki
+    repo: https://github.com/kdh949/jira-confluence-work-copilot
     plan: free
     region: oregon
     branch: main
@@ -108,7 +108,7 @@ services:
       - key: AI_SERVICE_URL
         fromService:
           type: web
-          name: week15-board-ai
+          name: work-copilot-ai
           property: host
       - key: AI_SERVICE_API_KEY
         sync: false
@@ -122,9 +122,9 @@ services:
         sync: false
 
   - type: web
-    name: week15-board-web
+    name: work-copilot-web
     runtime: static
-    repo: https://github.com/kdh949/dh-company-wiki
+    repo: https://github.com/kdh949/jira-confluence-work-copilot
     branch: main
     autoDeploy: true
     buildCommand: npm ci && npm run build --workspace=frontend

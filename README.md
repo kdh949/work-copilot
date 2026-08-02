@@ -1,6 +1,6 @@
-# DH Company Wiki
+# Jira–Confluence Work Copilot
 
-회사 위키, AI 온보딩 챗봇, 개인 노트를 제공하는 모노리포입니다.
+Jira와 Confluence를 연결해 회사 지식, AI 온보딩 챗봇, 개인 노트를 제공하는 모노리포입니다.
 
 ## 구성
 
@@ -89,9 +89,9 @@ python -m unittest discover -s tests -p 'test_*.py'
 
 ## 배포
 
-- API: `https://week15-board-api.onrender.com`
-- AI: `https://week15-board-ai.onrender.com`
-- 프론트엔드: `https://week15-board-web.onrender.com`
+- API: `https://work-copilot-api.onrender.com`
+- AI: `https://work-copilot-ai.onrender.com`
+- 프론트엔드: `https://work-copilot-web.onrender.com`
 
 Render는 루트 `render.yaml`을 사용하며 `main` 브랜치 변경을 자동 배포합니다.
 운영 데이터베이스는 Supabase PostgreSQL의 Shared Pooler session endpoint를 사용합니다.
