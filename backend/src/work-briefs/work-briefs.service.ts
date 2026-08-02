@@ -243,7 +243,21 @@ export class WorkBriefsService {
       );
 
     if (!changed) {
-      return this.present(draft);
+      if (
+        draft.status === 'draft' &&
+        draft.freshnessStatus === 'current'
+      ) {
+        return this.present(draft);
+      }
+
+      // A webhook is only a change signal. Once the draft owner re-reads every
+      // selected source with their own OAuth token and the versions still
+      // match, clear the signal so it cannot permanently block publication.
+      return this.applyRefresh(draft, dto.optimisticVersion, {
+        evidence: refreshedEvidence,
+        freshnessStatus: 'current',
+        status: 'draft',
+      });
     }
 
     return this.applyRefresh(draft, dto.optimisticVersion, {
