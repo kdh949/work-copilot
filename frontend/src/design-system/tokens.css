@@ -128,6 +128,13 @@
   --content-intro-width: 47.5rem;
   --content-narrow-width: 27.5rem;
   --content-side-column-min-width: 11.25rem;
+  --chat-signal-max-width: 18.75rem;
+  --chat-widget-width: 22.5rem;
+  --chat-messages-max-height: 14.375rem;
+  --chat-input-max-height: 5.625rem;
+  --chat-viewport-offset: 7rem;
+  --chat-viewport-offset-mobile: 6rem;
+  --chat-bubble-max-width: 88%;
   --layout-rail-medium: 20rem;
   --layout-panel-min-width: 20rem;
   --layout-panel-wide-min-width: 22.5rem;

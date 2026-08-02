@@ -13,6 +13,7 @@ import {
   Badge,
   Button,
   Card,
+  Select,
   TextArea,
   TextInput,
 } from "./design-system/components";
@@ -1719,19 +1720,21 @@ function App() {
       {user && !IS_WORK_BRIEF_PREVIEW && (
         <div className="chat-widget-area">
           {isChatOpen && (
-            <section className="chat-widget">
+            <section className="chat-widget ds-card" id="ai-chatbot" aria-labelledby="ai-chatbot-title">
               <div className="chat-widget-head">
                 <div>
-                  <h2>AI 챗봇</h2>
+                  <h2 id="ai-chatbot-title">AI 챗봇</h2>
                   <p>회사 위키 기반 답변</p>
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="text-button"
+                  variant="ghost"
+                  size="sm"
+                  className="chat-close-button"
                   onClick={closeChatModal}
                 >
                   닫기
-                </button>
+                </Button>
               </div>
 
               <div className="chat-greeting">
@@ -1745,18 +1748,21 @@ function App() {
               {user && (
                 <div className="chat-suggestions">
                   {CHAT_SUGGESTIONS.map((question) => (
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="chat-suggestion"
                       key={question}
                       onClick={() => handleChatSuggestionClick(question)}
                     >
                       {question}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}
 
-              <div className="chat-messages">
+              <div className="chat-messages" aria-live="polite">
                 {!user && (
                   <div className="chat-bubble ai-bubble">
                     로그인하면 회사 위키를 바탕으로 질문할 수 있습니다.
@@ -1785,7 +1791,9 @@ function App() {
                 )}
 
                 {chatError && (
-                  <div className="chat-bubble error-bubble">{chatError}</div>
+                  <Alert tone="danger" className="chat-bubble error-bubble">
+                    {chatError}
+                  </Alert>
                 )}
 
                 {chatAnswer && (
@@ -1801,15 +1809,18 @@ function App() {
                   <div className="chat-sources">
                     <strong>참고 문서</strong>
                     {chatSources.map((source) => (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="chat-source"
                         key={source.sourceId}
                         disabled={!source.postId}
                         onClick={() => handleChatSourceClick(source)}
                       >
                         <span>{source.title}</span>
                         <small>{source.department}</small>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -1818,15 +1829,16 @@ function App() {
               {user && (
                 <form className="chat-input-form" onSubmit={handleChatSubmit}>
                   <div className="chat-input-row">
-                    <textarea
+                    <TextArea
                       id="chat-question"
+                      aria-label="AI 챗봇 질문"
                       placeholder="메시지를 입력하세요"
                       value={chatQuestion}
                       onChange={(event) => setChatQuestion(event.target.value)}
                     />
-                    <button type="submit" disabled={isChatLoading}>
+                    <Button type="submit" disabled={isChatLoading}>
                       전송
-                    </button>
+                    </Button>
                   </div>
                 </form>
               )}
@@ -1834,7 +1846,7 @@ function App() {
               {user && chatAnswer && (
                 <div className="chat-note-save">
                   <label htmlFor="chat-note-title">새 노트 제목</label>
-                  <input
+                  <TextInput
                     id="chat-note-title"
                     type="text"
                     value={chatNoteTitle}
@@ -1842,13 +1854,13 @@ function App() {
                   />
 
                   <div className="chat-note-actions">
-                    <button type="button" onClick={handleSaveChatAsNewNote}>
+                    <Button type="button" onClick={handleSaveChatAsNewNote}>
                       새 노트로 저장
-                    </button>
+                    </Button>
                   </div>
 
                   <label htmlFor="target-note">기존 노트 선택</label>
-                  <select
+                  <Select
                     id="target-note"
                     value={selectedNoteId}
                     onChange={(event) => setSelectedNoteId(event.target.value)}
@@ -1859,16 +1871,16 @@ function App() {
                         {note.title}
                       </option>
                     ))}
-                  </select>
+                  </Select>
 
                   <div className="chat-note-actions">
-                    <button
+                    <Button
                       type="button"
-                      className="secondary"
+                      variant="secondary"
                       onClick={handleAppendChatToNote}
                     >
                       기존 노트에 추가
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1876,18 +1888,21 @@ function App() {
           )}
 
           {isChatSignalVisible && !isChatOpen && (
-            <div className="chat-signal">
+            <div className="chat-signal ds-card" role="status">
               <span>궁금한 점은 AI에게 물어보세요.</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                className="chat-signal-close"
                 onClick={() => setIsChatSignalVisible(false)}
               >
                 닫기
-              </button>
+              </Button>
             </div>
           )}
 
-          <button
+          <Button
             type="button"
             className={
               isChatOpen
@@ -1895,9 +1910,11 @@ function App() {
                 : "chat-floating-button"
             }
             onClick={toggleChatWidget}
+            aria-controls="ai-chatbot"
+            aria-expanded={isChatOpen}
           >
             AI
-          </button>
+          </Button>
         </div>
       )}
     </>
