@@ -492,10 +492,115 @@ export class IntegrationsOAuthService {
         'profile.confluenceClientSecretCiphertext',
         'profile.confluenceClientSecretIv',
         'profile.confluenceClientSecretTag',
+        'profile.webhookRouteSecretCiphertext',
+        'profile.webhookRouteSecretIv',
+        'profile.webhookRouteSecretTag',
       ]);
     }
 
-    return query.getOne();
+    const profile = await query.getOne();
+
+    if (profile && includeClientSecrets) {
+      await this.reencryptProfileSecretsIfNeeded(profile);
+    }
+
+    return profile;
+  }
+
+  private async reencryptProfileSecretsIfNeeded(
+    profile: IntegrationProfile,
+  ): Promise<void> {
+    if (!this.cryptoService.needsReencryption(profile.encryptionKeyVersion)) {
+      return;
+    }
+
+    const previousKeyVersion = profile.encryptionKeyVersion;
+    const update: Partial<IntegrationProfile> = {
+      encryptionKeyVersion: this.cryptoService.currentKeyVersion(),
+    };
+    const jiraSecret = this.reencryptProfileSecret(
+      {
+        ciphertext: profile.jiraClientSecretCiphertext,
+        iv: profile.jiraClientSecretIv,
+        authenticationTag: profile.jiraClientSecretTag,
+      },
+      previousKeyVersion,
+    );
+    const confluenceSecret = this.reencryptProfileSecret(
+      {
+        ciphertext: profile.confluenceClientSecretCiphertext,
+        iv: profile.confluenceClientSecretIv,
+        authenticationTag: profile.confluenceClientSecretTag,
+      },
+      previousKeyVersion,
+    );
+    const webhookSecret = this.reencryptProfileSecret(
+      {
+        ciphertext: profile.webhookRouteSecretCiphertext,
+        iv: profile.webhookRouteSecretIv,
+        authenticationTag: profile.webhookRouteSecretTag,
+      },
+      previousKeyVersion,
+    );
+
+    if (jiraSecret) {
+      Object.assign(update, {
+        jiraClientSecretCiphertext: jiraSecret.ciphertext,
+        jiraClientSecretIv: jiraSecret.iv,
+        jiraClientSecretTag: jiraSecret.authenticationTag,
+      });
+    }
+    if (confluenceSecret) {
+      Object.assign(update, {
+        confluenceClientSecretCiphertext: confluenceSecret.ciphertext,
+        confluenceClientSecretIv: confluenceSecret.iv,
+        confluenceClientSecretTag: confluenceSecret.authenticationTag,
+      });
+    }
+    if (webhookSecret) {
+      Object.assign(update, {
+        webhookRouteSecretCiphertext: webhookSecret.ciphertext,
+        webhookRouteSecretIv: webhookSecret.iv,
+        webhookRouteSecretTag: webhookSecret.authenticationTag,
+      });
+    }
+
+    const result = await this.profilesRepository.update(
+      { id: profile.id, encryptionKeyVersion: previousKeyVersion },
+      update,
+    );
+
+    if (result.affected === 1) {
+      Object.assign(profile, update);
+    }
+  }
+
+  private reencryptProfileSecret(
+    value: {
+      ciphertext: string | null;
+      iv: string | null;
+      authenticationTag: string | null;
+    },
+    keyVersion: number,
+  ): EncryptedProfileSecret | null {
+    if (!value.ciphertext && !value.iv && !value.authenticationTag) {
+      return null;
+    }
+
+    if (!value.ciphertext || !value.iv || !value.authenticationTag) {
+      throw new ServiceUnavailableException(
+        'Integration profile encryption is unavailable.',
+      );
+    }
+
+    return this.cryptoService.encrypt(
+      this.cryptoService.decrypt({
+        ciphertext: value.ciphertext,
+        iv: value.iv,
+        authenticationTag: value.authenticationTag,
+        keyVersion,
+      }),
+    );
   }
 
   private configuration(
