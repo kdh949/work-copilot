@@ -2,7 +2,7 @@ services:
   - type: web
     name: work-copilot-ai
     runtime: python
-    repo: https://github.com/kdh949/jira-confluence-work-copilot
+    repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
     branch: main
@@ -46,7 +46,7 @@ services:
   - type: web
     name: work-copilot-api
     runtime: node
-    repo: https://github.com/kdh949/jira-confluence-work-copilot
+    repo: https://github.com/kdh949/work-copilot
     plan: free
     region: oregon
     branch: main
@@ -136,7 +136,7 @@ services:
   - type: web
     name: work-copilot-web
     runtime: static
-    repo: https://github.com/kdh949/jira-confluence-work-copilot
+    repo: https://github.com/kdh949/work-copilot
     branch: main
     autoDeploy: true
     buildCommand: npm ci && npm run build --workspace=frontend
