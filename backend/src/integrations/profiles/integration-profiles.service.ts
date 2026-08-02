@@ -10,6 +10,8 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreateIntegrationProfileDto } from './dto/create-integration-profile.dto';
 import { UpdateIntegrationProfileDto } from './dto/update-integration-profile.dto';
 import {
+  ChildTaskTemplate,
+  ChildTaskTemplateFieldValue,
   IntegrationProfile,
   OAuthScopePolicy,
 } from './entities/integration-profile.entity';
@@ -22,6 +24,16 @@ import {
 import { IntegrationProfileUrlPolicy } from './integration-profile-url.policy';
 
 type Provider = 'jira' | 'confluence';
+
+const CHILD_TASK_TEMPLATE_SECRET_PATTERNS = [
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b/i,
+  /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/,
+  /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----/,
+  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s'"`]+/i,
+  /(?:^|[\r\n])\s*[A-Z][A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|DATABASE_URL|DB_URI)\s*=/m,
+  /\b(?:api[_-]?key|secret|password|access[_-]?token)\s*[:=]\s*['"]?[A-Za-z0-9_./+=-]{8,}/i,
+  /(?:^|[/:])\.env(?:[./:]|$)/i,
+];
 
 export type IntegrationProfileResponse = {
   id: string;
@@ -36,6 +48,8 @@ export type IntegrationProfileResponse = {
   allowedProjectKeys: string[];
   allowedSpaceKeys: string[];
   briefParentPageId: string | null;
+  childTaskIssueTypeId: string | null;
+  childTaskTemplateFields: Record<string, ChildTaskTemplateFieldValue>;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -260,6 +274,10 @@ export class IntegrationProfilesService {
       policy: this.policy(
         this.validateScopes('jira', dto.jiraScopes),
         this.validateScopes('confluence', dto.confluenceScopes),
+        this.normalizeChildTaskTemplate(
+          dto.childTaskIssueTypeId,
+          dto.childTaskTemplateFields,
+        ),
       ),
       isActive: false,
     };
@@ -315,7 +333,21 @@ export class IntegrationProfilesService {
         ? currentScopes.confluence
         : this.validateScopes('confluence', dto.confluenceScopes);
 
-    update.policy = this.policy(jiraScopes, confluenceScopes);
+    const currentChildTaskTemplate = this.childTaskTemplateFrom(
+      existing.policy,
+    );
+    update.policy = this.policy(
+      jiraScopes,
+      confluenceScopes,
+      this.normalizeChildTaskTemplate(
+        dto.childTaskIssueTypeId === undefined
+          ? currentChildTaskTemplate?.issueTypeId
+          : dto.childTaskIssueTypeId,
+        dto.childTaskTemplateFields === undefined
+          ? currentChildTaskTemplate?.fields
+          : dto.childTaskTemplateFields,
+      ),
+    );
 
     const encryptedSecrets: Array<[Provider, EncryptedProfileSecret]> = [];
 
@@ -463,8 +495,94 @@ export class IntegrationProfilesService {
   private policy(
     jiraScopes: string[],
     confluenceScopes: string[],
+    childTaskTemplate?: ChildTaskTemplate,
   ): OAuthScopePolicy {
-    return { oauthScopes: { jira: jiraScopes, confluence: confluenceScopes } };
+    return {
+      oauthScopes: { jira: jiraScopes, confluence: confluenceScopes },
+      ...(childTaskTemplate ? { childTaskTemplate } : {}),
+    };
+  }
+
+  private normalizeChildTaskTemplate(
+    issueTypeId: string | undefined,
+    values: Record<string, unknown> | undefined,
+  ): ChildTaskTemplate | undefined {
+    const normalizedIssueTypeId = issueTypeId?.trim() ?? '';
+    const fields = values ?? {};
+
+    if (!normalizedIssueTypeId) {
+      if (Object.keys(fields).length > 0) {
+        throw new BadRequestException('Child task issue type is required.');
+      }
+      return undefined;
+    }
+
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(normalizedIssueTypeId)) {
+      throw new BadRequestException('Child task issue type is invalid.');
+    }
+
+    const entries = Object.entries(fields);
+    if (entries.length > 50) {
+      throw new BadRequestException('Child task template is invalid.');
+    }
+
+    const normalizedFields: Record<string, ChildTaskTemplateFieldValue> = {};
+    for (const [fieldId, value] of entries) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(fieldId)) {
+        throw new BadRequestException('Child task template field is invalid.');
+      }
+      normalizedFields[fieldId] = this.normalizeChildTaskTemplateValue(value);
+    }
+
+    return { issueTypeId: normalizedIssueTypeId, fields: normalizedFields };
+  }
+
+  private normalizeChildTaskTemplateValue(
+    value: unknown,
+  ): ChildTaskTemplateFieldValue {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.length <= 512) {
+      this.assertSafeChildTaskTemplateValue(value);
+      return value;
+    }
+    if (
+      Array.isArray(value) &&
+      value.length <= 20 &&
+      value.every((item) => typeof item === 'string' && item.length <= 512)
+    ) {
+      const normalized: string[] = [];
+      for (const item of value) {
+        if (typeof item !== 'string') {
+          throw new BadRequestException(
+            'Child task template value is invalid.',
+          );
+        }
+        this.assertSafeChildTaskTemplateValue(item);
+        normalized.push(item);
+      }
+      return normalized;
+    }
+
+    throw new BadRequestException('Child task template value is invalid.');
+  }
+
+  private assertSafeChildTaskTemplateValue(value: string): void {
+    if (
+      CHILD_TASK_TEMPLATE_SECRET_PATTERNS.some((pattern) => pattern.test(value))
+    ) {
+      throw new BadRequestException('Child task template value is invalid.');
+    }
+  }
+
+  private childTaskTemplateFrom(
+    policy: OAuthScopePolicy,
+  ): ChildTaskTemplate | undefined {
+    return policy.childTaskTemplate;
   }
 
   private scopesFrom(policy: OAuthScopePolicy): {
@@ -520,6 +638,7 @@ export class IntegrationProfilesService {
 
   private toResponse(profile: IntegrationProfile): IntegrationProfileResponse {
     const scopes = this.scopesFrom(profile.policy);
+    const childTaskTemplate = this.childTaskTemplateFrom(profile.policy);
 
     return {
       id: profile.id,
@@ -536,6 +655,8 @@ export class IntegrationProfilesService {
       allowedProjectKeys: profile.allowedProjectKeys,
       allowedSpaceKeys: profile.allowedSpaceKeys,
       briefParentPageId: profile.briefParentPageId,
+      childTaskIssueTypeId: childTaskTemplate?.issueTypeId ?? null,
+      childTaskTemplateFields: childTaskTemplate?.fields ?? {},
       isActive: profile.isActive,
       createdAt: profile.createdAt.toISOString(),
       updatedAt: profile.updatedAt.toISOString(),

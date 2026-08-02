@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field
 from work_brief.service import (
     WorkBriefError,
     WorkBriefGenerateRequest,
+    WorkBriefSanitizeRequest,
     generate_work_brief as generate_work_brief_response,
+    sanitize_work_brief_values,
 )
 
 try:
@@ -163,6 +165,16 @@ def generate_work_brief(request: WorkBriefGenerateRequest) -> dict[str, Any]:
     except WorkBriefError as error:
         # The service deliberately discards provider/DLP detail before it reaches
         # this boundary, so response payloads and framework logs stay safe.
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/work-brief/sanitize", dependencies=[Depends(require_internal_api_key)])
+def sanitize_work_brief(request: WorkBriefSanitizeRequest) -> dict[str, list[str]]:
+    """Mask user-edited brief text before Nest persists it as a draft."""
+
+    try:
+        return sanitize_work_brief_values(request)
+    except WorkBriefError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 

@@ -11,6 +11,7 @@ const profile = {
   confluenceBaseUrl: 'https://confluence.example.test/',
   allowedProjectKeys: ['ENG'],
   allowedSpaceKeys: ['ENG'],
+  policy: {},
 } as IntegrationProfile;
 
 const rootIssue = {
@@ -195,6 +196,228 @@ describe('JiraWorkItemService', () => {
     expect(result.evidence).toHaveLength(12);
     expect(result.evidence.map((item) => item.id)).toEqual(
       expect.arrayContaining(['jira:100', 'jira:2', 'jira:12']),
+    );
+  });
+
+  it('returns no title, body, or key when a one-hop blocker is inaccessible', async () => {
+    const readinessRoot = {
+      id: '100',
+      key: 'ENG-1',
+      fields: {
+        project: { key: 'ENG' },
+        updated: '2026-08-02T00:00:00.000+0000',
+        resolution: null,
+        issuelinks: [
+          {
+            type: {
+              name: 'Blocks',
+              inward: 'is blocked by',
+              outward: 'blocks',
+            },
+            inwardIssue: { key: 'ENG-2' },
+          },
+        ],
+      },
+    };
+    const profileWithTemplate = {
+      ...profile,
+      policy: {
+        childTaskTemplate: { issueTypeId: '10001', fields: {} },
+      },
+    } as IntegrationProfile;
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profileWithTemplate)),
+      assertAllowedProject: jest.fn((_profile, projectKey: string) => {
+        if (projectKey !== 'ENG') throw new ForbiddenException();
+        return projectKey;
+      }),
+      providerBaseUrl: jest.fn(() => profile.jiraBaseUrl),
+      providerUrl: jest.fn(
+        (_profile, _provider: 'jira', path: string) =>
+          new URL(path, profile.jiraBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      if (url.pathname.endsWith('/ENG-1')) {
+        return Promise.resolve({ status: 'ok' as const, body: readinessRoot });
+      }
+      return Promise.resolve({ status: 'access_limited' as const });
+    });
+    const service = new JiraWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('user-token')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.collectReadinessContext(
+      7,
+      'ENG-1',
+      'corr-readiness',
+      false,
+    );
+
+    expect(result.dependencies).toEqual([{ kind: 'access_limited' }]);
+    expect(JSON.stringify(result)).not.toContain('ENG-2');
+    expect(JSON.stringify(result)).not.toContain('private linked description');
+    expect(getJson.mock.calls[0][0].search).toContain(
+      'fields=project%2Cupdated%2Cstatus%2Cresolution%2Cissuelinks',
+    );
+  });
+
+  it('shows a one-hop blocker key only after the current user can read it', async () => {
+    const readinessRoot = {
+      id: '100',
+      key: 'ENG-1',
+      fields: {
+        project: { key: 'ENG' },
+        updated: '2026-08-02T00:00:00.000+0000',
+        resolution: null,
+        issuelinks: [
+          {
+            type: {
+              name: 'Blocks',
+              inward: 'is blocked by',
+              outward: 'blocks',
+            },
+            inwardIssue: { key: 'ENG-2' },
+          },
+        ],
+      },
+    };
+    const visibleBlocker = {
+      id: '101',
+      key: 'ENG-2',
+      fields: {
+        project: { key: 'ENG' },
+        updated: '2026-08-02T00:01:00.000+0000',
+        resolution: null,
+        status: { statusCategory: { key: 'indeterminate' } },
+        summary: '이 값은 readiness 결과에 포함되지 않습니다',
+        description: 'private linked description',
+        issuelinks: [],
+      },
+    };
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedProject: jest.fn(() => 'ENG'),
+      providerBaseUrl: jest.fn(() => profile.jiraBaseUrl),
+      providerUrl: jest.fn(
+        (_profile, _provider: 'jira', path: string) =>
+          new URL(path, profile.jiraBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      if (url.pathname.endsWith('/ENG-1')) {
+        return Promise.resolve({ status: 'ok' as const, body: readinessRoot });
+      }
+      return Promise.resolve({ status: 'ok' as const, body: visibleBlocker });
+    });
+    const service = new JiraWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('user-token')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.collectReadinessContext(
+      7,
+      'ENG-1',
+      'corr-readiness',
+      false,
+    );
+
+    expect(result.dependencies).toEqual([
+      {
+        kind: 'visible_blocker',
+        issueKey: 'ENG-2',
+        url: 'https://jira.example.test/browse/ENG-2',
+        crossProject: false,
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('private linked description');
+    expect(JSON.stringify(result)).not.toContain(
+      '이 값은 readiness 결과에 포함되지 않습니다',
+    );
+  });
+
+  it('reads only required Jira createmeta field IDs for the configured child task type', async () => {
+    const readinessRoot = {
+      id: '100',
+      key: 'ENG-1',
+      fields: {
+        project: { key: 'ENG' },
+        updated: '2026-08-02T00:00:00.000+0000',
+        resolution: null,
+        issuelinks: [],
+      },
+    };
+    const profileWithTemplate = {
+      ...profile,
+      policy: {
+        childTaskTemplate: { issueTypeId: '10001', fields: {} },
+      },
+    } as IntegrationProfile;
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profileWithTemplate)),
+      assertAllowedProject: jest.fn(() => 'ENG'),
+      providerBaseUrl: jest.fn(() => profile.jiraBaseUrl),
+      providerUrl: jest.fn(
+        (_profile, _provider: 'jira', path: string) =>
+          new URL(path, profile.jiraBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      if (url.pathname.endsWith('/ENG-1')) {
+        return Promise.resolve({ status: 'ok' as const, body: readinessRoot });
+      }
+      if (url.pathname.endsWith('/createmeta')) {
+        return Promise.resolve({
+          status: 'ok' as const,
+          body: {
+            projects: [
+              {
+                key: 'ENG',
+                issuetypes: [
+                  {
+                    id: '10001',
+                    fields: {
+                      summary: { required: true },
+                      customfield_10100: { required: true },
+                      labels: { required: false },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const service = new JiraWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('user-token')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.collectReadinessContext(
+      7,
+      'ENG-1',
+      'corr-readiness',
+      true,
+    );
+
+    expect(result.createMetadata).toEqual({
+      status: 'available',
+      requiredFieldIds: ['customfield_10100', 'summary'],
+    });
+    expect(getJson.mock.calls[1][0].search).toContain(
+      'expand=projects.issuetypes.fields',
     );
   });
 });

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type {
+  ChildTaskTemplateFieldValue,
   IntegrationProfile,
   IntegrationProfileInput,
 } from "./integration-profile.types";
@@ -23,6 +24,8 @@ type FormState = {
   allowedProjectKeys: string;
   allowedSpaceKeys: string;
   briefParentPageId: string;
+  childTaskIssueTypeId: string;
+  childTaskTemplateFields: string;
 };
 
 const toCommaList = (values: string[]): string => values.join(", ");
@@ -45,6 +48,12 @@ const initialState = (profile: IntegrationProfile | null): FormState => ({
   allowedProjectKeys: toCommaList(profile?.allowedProjectKeys ?? []),
   allowedSpaceKeys: toCommaList(profile?.allowedSpaceKeys ?? []),
   briefParentPageId: profile?.briefParentPageId ?? "",
+  childTaskIssueTypeId: profile?.childTaskIssueTypeId ?? "",
+  childTaskTemplateFields: JSON.stringify(
+    profile?.childTaskTemplateFields ?? {},
+    null,
+    2,
+  ),
 });
 
 export function IntegrationProfileForm({
@@ -54,6 +63,7 @@ export function IntegrationProfileForm({
   onCancelEdit,
 }: IntegrationProfileFormProps) {
   const [form, setForm] = useState(() => initialState(profile));
+  const [formError, setFormError] = useState("");
   const isEditing = profile !== null;
 
   const updateField = (field: keyof FormState, value: string) => {
@@ -62,6 +72,23 @@ export function IntegrationProfileForm({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    let childTaskTemplateFields: Record<string, ChildTaskTemplateFieldValue>;
+
+    try {
+      const parsed = JSON.parse(form.childTaskTemplateFields || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("invalid child task template");
+      }
+      childTaskTemplateFields = parsed as Record<
+        string,
+        ChildTaskTemplateFieldValue
+      >;
+    } catch {
+      setFormError("하위 작업 템플릿 값은 JSON 객체여야 합니다.");
+      return;
+    }
+
+    setFormError("");
     const input: IntegrationProfileInput = {
       jiraBaseUrl: form.jiraBaseUrl,
       confluenceBaseUrl: form.confluenceBaseUrl,
@@ -72,6 +99,8 @@ export function IntegrationProfileForm({
       allowedProjectKeys: parseCommaList(form.allowedProjectKeys),
       allowedSpaceKeys: parseCommaList(form.allowedSpaceKeys),
       briefParentPageId: form.briefParentPageId.trim(),
+      childTaskIssueTypeId: form.childTaskIssueTypeId.trim(),
+      childTaskTemplateFields,
     };
 
     if (form.jiraClientSecret) {
@@ -154,6 +183,27 @@ export function IntegrationProfileForm({
               updateField("allowedProjectKeys", event.target.value)
             }
           />
+          <label htmlFor="child-task-issue-type">하위 작업 issue type ID</label>
+          <input
+            id="child-task-issue-type"
+            placeholder="예: 10001"
+            value={form.childTaskIssueTypeId}
+            onChange={(event) =>
+              updateField("childTaskIssueTypeId", event.target.value)
+            }
+          />
+          <label htmlFor="child-task-template-fields">
+            하위 작업 필수 field 템플릿(JSON)
+          </label>
+          <textarea
+            id="child-task-template-fields"
+            rows={5}
+            placeholder={'{\n  "customfield_10100": "value"\n}'}
+            value={form.childTaskTemplateFields}
+            onChange={(event) =>
+              updateField("childTaskTemplateFields", event.target.value)
+            }
+          />
         </fieldset>
 
         <fieldset>
@@ -227,6 +277,11 @@ export function IntegrationProfileForm({
         입력한 client secret은 즉시 암호화되어 저장되며 화면이나 API 응답으로
         다시 제공되지 않습니다.
       </p>
+      {formError && (
+        <p className="message" role="alert">
+          {formError}
+        </p>
+      )}
       <div className="button-row">
         <button type="submit" disabled={isSaving}>
           {isSaving ? "저장 중" : isEditing ? "변경 저장" : "프로필 저장"}

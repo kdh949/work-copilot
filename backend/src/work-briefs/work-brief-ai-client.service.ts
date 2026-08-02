@@ -69,6 +69,42 @@ export class WorkBriefAiClientService {
     }
   }
 
+  async sanitize(values: readonly string[]): Promise<string[]> {
+    this.contentGuard.assertSafeModelOutput(values);
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.getAiUrl()}/work-brief/sanitize`, {
+        method: 'POST',
+        headers: this.getAiHeaders(),
+        body: JSON.stringify({ values }),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Work brief DLP service is unavailable.',
+      );
+    }
+
+    if (!response.ok) {
+      throw new ServiceUnavailableException(
+        'Work brief DLP service is unavailable.',
+      );
+    }
+
+    try {
+      const payload: unknown = await response.json();
+      if (!this.isSanitizedValues(payload, values.length)) {
+        throw new Error('invalid work brief DLP response');
+      }
+      this.contentGuard.assertSafeModelOutput(payload.values);
+      return payload.values;
+    } catch {
+      throw new ServiceUnavailableException(
+        'Work brief DLP service is unavailable.',
+      );
+    }
+  }
+
   private getAiUrl(): string {
     const configured =
       this.configService.get<string>('AI_SERVICE_URL') ||
@@ -109,6 +145,19 @@ export class WorkBriefAiClientService {
   private isStringArray(value: unknown): value is string[] {
     return (
       Array.isArray(value) && value.every((item) => typeof item === 'string')
+    );
+  }
+
+  private isSanitizedValues(
+    value: unknown,
+    expectedLength: number,
+  ): value is { values: string[] } {
+    return (
+      !!value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      this.isStringArray((value as Record<string, unknown>).values) &&
+      (value as { values: string[] }).values.length === expectedLength
     );
   }
 
