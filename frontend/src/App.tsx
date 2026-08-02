@@ -1,10 +1,31 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type FormEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Select,
+  TextArea,
+  TextInput,
+} from "./design-system/components";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
+import {
+  previewWorkBriefRequest,
+  WORK_BRIEF_PREVIEW_EVIDENCE,
+  WORK_BRIEF_PREVIEW_ISSUE,
+  WORK_BRIEF_PREVIEW_USER,
+} from "./features/work-briefs/work-briefs.preview";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const CHAT_SUGGESTIONS = [
@@ -15,6 +36,7 @@ const CHAT_SUGGESTIONS = [
 ];
 const WIKI_PAGE_SIZE = 12;
 let csrfToken = "";
+const IS_WORK_BRIEF_PREVIEW = import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "work-brief";
 
 type User = {
   id: number;
@@ -101,8 +123,8 @@ function getAncestorPathKeys(path: string[]) {
 }
 
 function App() {
-  const [menu, setMenu] = useState<MenuName>("login");
-  const [user, setUser] = useState<User | null>(null);
+  const [menu, setMenu] = useState<MenuName>(IS_WORK_BRIEF_PREVIEW ? "workBriefs" : "login");
+  const [user, setUser] = useState<User | null>(IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_USER : null);
   const [message, setMessage] = useState("");
 
   const [wikiPosts, setWikiPosts] = useState<BoardPost[]>([]);
@@ -503,6 +525,7 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (IS_WORK_BRIEF_PREVIEW) return;
     let isCurrent = true;
     void request<User>("/auth/me")
       .then(async (me) => {
@@ -950,15 +973,17 @@ function App() {
         <div className="tree-group" key={pathKey}>
           <div
             className="tree-category-row"
-            style={{ paddingLeft: `${branch.depth * 14}px` }}
+            style={{ "--tree-depth": branch.depth } as CSSProperties}
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               className="tree-toggle"
               onClick={() => toggleWikiPath(branch.path)}
             >
               {hasChildren ? (isOpen ? "▾" : "▸") : "•"}
-            </button>
+            </Button>
             <button
               type="button"
               className={isSelected ? "tree-category active" : "tree-category"}
@@ -1073,7 +1098,7 @@ function App() {
 
     return (
       <div className="filters">
-        <input
+        <TextInput
           type="text"
           placeholder="제목/내용 검색"
           value={keyword}
@@ -1081,7 +1106,7 @@ function App() {
         />
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="부서"
             value={departmentFilter}
@@ -1090,20 +1115,22 @@ function App() {
           {departmentSuggestions.length > 0 && (
             <div className="suggestion-list">
               {departmentSuggestions.map((department) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={department}
                   onClick={() => setDepartmentFilter(department)}
                 >
                   {department}
-                </button>
+                </Button>
               ))}
             </div>
           )}
         </div>
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="태그"
             value={tagFilter}
@@ -1112,13 +1139,15 @@ function App() {
           {tagSuggestions.length > 0 && (
             <div className="suggestion-list">
               {tagSuggestions.map((tag) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={tag}
                   onClick={() => setTagFilter(tag)}
                 >
                   {tag}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -1132,7 +1161,7 @@ function App() {
 
     return (
       <div className="filters">
-        <input
+        <TextInput
           type="text"
           placeholder="제목/내용 검색"
           value={keyword}
@@ -1140,7 +1169,7 @@ function App() {
         />
 
         <div className="suggestion-field">
-          <input
+          <TextInput
             type="text"
             placeholder="태그"
             value={tagFilter}
@@ -1149,13 +1178,15 @@ function App() {
           {tagSuggestions.length > 0 && (
             <div className="suggestion-list">
               {tagSuggestions.map((tag) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   key={tag}
                   onClick={() => handleTagClick(tag)}
                 >
                   {tag}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -1182,26 +1213,34 @@ function App() {
         onLogout={handleLogout}
       />
 
-      <main>
-        {message && <p className="message">{message}</p>}
+      <main className={menu === "workBriefs" ? "app-main--workspace" : undefined}>
+        {message && (
+          <Alert tone="warning" className="app-message">
+            {message}
+          </Alert>
+        )}
 
         {menu === "login" && (
-          <section className="auth-layout">
-            <section className="panel auth-card">
-              <h2>회사 계정 로그인</h2>
+          <section className="auth-layout" aria-labelledby="login-title">
+            <Card className="auth-card">
+              <p className="auth-eyebrow">회사 계정 인증</p>
+              <h2 id="login-title">회사 계정 로그인</h2>
               <p className="auth-subtitle">
                 Keycloak 회사 계정으로만 로그인할 수 있습니다.
               </p>
-              <button type="button" onClick={startKeycloakLogin}>
+              <Button type="button" onClick={startKeycloakLogin}>
                 회사 계정으로 계속
-              </button>
-            </section>
+              </Button>
+              <p className="auth-security-note">
+                인증은 회사 계정 페이지에서 안전하게 진행됩니다.
+              </p>
+            </Card>
           </section>
         )}
 
         {menu === "posts" && (
-          <section className="wiki-layout">
-            <aside className="wiki-sidebar">
+          <section className="wiki-layout wiki-layout--company">
+            <aside className="wiki-sidebar ds-card">
               <h2>분류</h2>
               {renderWikiFilters()}
 
@@ -1212,11 +1251,11 @@ function App() {
 
             <section className="wiki-main">
               {canManageWiki() && (
-                <section className="panel">
+                <section className="panel ds-card">
                   <h2>{editingPostId ? "회사 위키 수정" : "회사 위키 작성"}</h2>
                   <form onSubmit={handlePostSubmit}>
                     <label htmlFor="post-title">제목</label>
-                    <input
+                    <TextInput
                       id="post-title"
                       type="text"
                       value={postTitle}
@@ -1224,7 +1263,7 @@ function App() {
                     />
 
                     <label htmlFor="post-department">부서</label>
-                    <input
+                    <TextInput
                       id="post-department"
                       type="text"
                       value={postDepartment}
@@ -1234,7 +1273,7 @@ function App() {
                     />
 
                     <label htmlFor="post-tags">태그</label>
-                    <input
+                    <TextInput
                       id="post-tags"
                       type="text"
                       placeholder="급여, 온보딩, 개발"
@@ -1243,24 +1282,24 @@ function App() {
                     />
 
                     <label htmlFor="post-content">내용</label>
-                    <textarea
+                    <TextArea
                       id="post-content"
                       value={postContent}
                       onChange={(event) => setPostContent(event.target.value)}
                     />
 
                     <div className="button-row">
-                      <button type="submit">
+                      <Button type="submit">
                         {editingPostId ? "수정하기" : "작성하기"}
-                      </button>
+                      </Button>
                       {editingPostId && (
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
                           onClick={resetPostForm}
                         >
                           취소
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </form>
@@ -1281,16 +1320,17 @@ function App() {
                   </div>
 
                   {tagFilter && (
-                    <button
+                    <Button
                       type="button"
-                      className="secondary"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         setTagFilter("");
                         setWikiPage(1);
                       }}
                     >
                       태그 필터 해제: {tagFilter}
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -1300,8 +1340,8 @@ function App() {
                       key={post.id}
                       className={
                         selectedWikiId === post.id
-                          ? "wiki-card active"
-                          : "wiki-card"
+                          ? "wiki-card ds-card active"
+                          : "wiki-card ds-card"
                       }
                     >
                       <button
@@ -1311,7 +1351,7 @@ function App() {
                       >
                         <div className="wiki-card-title-row">
                           <h3>{post.title}</h3>
-                          {post.docType && <span>{post.docType}</span>}
+                          {post.docType && <Badge tone="info">{post.docType}</Badge>}
                         </div>
                         <p>{makeExcerpt(post)}</p>
                         <small>
@@ -1322,51 +1362,53 @@ function App() {
 
                       <div className="wiki-card-tags">
                         {(post.tags || []).slice(0, 5).map((tag) => (
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="sm"
                             key={tag}
                             onClick={() => handleTagClick(tag)}
                           >
                             {tag}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </article>
                   ))
                 ) : (
-                  <section className="panel">
+                  <section className="panel ds-card wiki-empty-state" role="status">
                     <h2>문서가 없습니다.</h2>
                     <p>다른 분류를 선택하거나 검색 조건을 변경해주세요.</p>
                   </section>
                 )}
 
                 <div className="pagination">
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="secondary"
                     disabled={wikiPage <= 1}
                     onClick={() => setWikiPage((page) => Math.max(1, page - 1))}
                   >
                     이전
-                  </button>
+                  </Button>
                   <span>
                     {wikiPage} / {wikiTotalPages}
                   </span>
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="secondary"
                     disabled={wikiPage >= wikiTotalPages}
                     onClick={() =>
                       setWikiPage((page) => Math.min(wikiTotalPages, page + 1))
                     }
                   >
                     다음
-                  </button>
+                  </Button>
                 </div>
               </section>
 
               {selectedWikiPost() && (
-                <article className="document">
+                <article className="document ds-card">
                   <div className="post-head">
                     <div>
                       <h2>{selectedWikiPost()?.title}</h2>
@@ -1380,22 +1422,24 @@ function App() {
 
                     {selectedWikiPost() && canEdit(selectedWikiPost()!) && (
                       <div className="button-row">
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleEditClick(selectedWikiPost()!)}
                         >
                           수정
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="danger"
+                          variant="danger"
+                          size="sm"
                           onClick={() =>
                             handleDeleteClick(selectedWikiPost()!.id)
                           }
                         >
                           삭제
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1407,13 +1451,15 @@ function App() {
 
                   <div className="tags">
                     {(selectedWikiPost()?.tags || []).map((tag) => (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         key={tag}
                         onClick={() => handleTagClick(tag)}
                       >
                         {tag}
-                      </button>
+                      </Button>
                     ))}
                   </div>
 
@@ -1431,9 +1477,11 @@ function App() {
                           </small>
                           {(user?.id === comment.author?.id ||
                             canManageWiki()) && (
-                            <button
+                            <Button
                               type="button"
-                              className="text-button"
+                              variant="ghost"
+                              size="sm"
+                              className="comment-delete"
                               onClick={() =>
                                 handleCommentDelete(
                                   selectedWikiPost()!.id,
@@ -1442,7 +1490,7 @@ function App() {
                               }
                             >
                               삭제
-                            </button>
+                            </Button>
                           )}
                         </div>
                       ))}
@@ -1454,7 +1502,7 @@ function App() {
                             handleCommentSubmit(event, selectedWikiPost()!.id)
                           }
                         >
-                          <input
+                          <TextInput
                             type="text"
                             placeholder="댓글 입력"
                             value={commentText[selectedWikiPost()!.id] || ""}
@@ -1465,7 +1513,7 @@ function App() {
                               })
                             }
                           />
-                          <button type="submit">등록</button>
+                          <Button type="submit">등록</Button>
                         </form>
                       )}
                     </div>
@@ -1480,17 +1528,28 @@ function App() {
           <IntegrationProfilesPage request={request} />
         )}
 
-        {menu === "workBriefs" && user && <WorkBriefsPage request={request} />}
+        {menu === "workBriefs" && user && (
+          <WorkBriefsPage
+            request={IS_WORK_BRIEF_PREVIEW ? previewWorkBriefRequest : request}
+            onOpenIntegrations={() => setMenu("integrations")}
+            initialIssueKey={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_ISSUE : undefined}
+            initialEvidence={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_EVIDENCE : undefined}
+          />
+        )}
 
         {menu === "integrations" && user && (
           <IntegrationConnectionsPage request={request} />
         )}
 
         {menu === "notes" && (
-          <section className="wiki-layout">
-            <aside className="wiki-sidebar">
-              <h2>내 노트</h2>
-              {!user && <p>로그인하면 내 노트를 볼 수 있습니다.</p>}
+          <section className="wiki-layout wiki-layout--notes" aria-labelledby="notes-title">
+            <aside className="wiki-sidebar ds-card">
+              <h2 id="notes-title">내 노트</h2>
+              {!user && (
+                <Alert tone="info" className="notes-login-hint">
+                  로그인하면 내 노트를 볼 수 있습니다.
+                </Alert>
+              )}
 
               {user && (
                 <>
@@ -1499,8 +1558,10 @@ function App() {
                   <div className="tree">
                     {getDepartments(notes).map((department) => (
                       <div className="tree-group" key={department}>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           className="tree-department"
                           onClick={() => toggleNoteDepartment(department)}
                         >
@@ -1508,7 +1569,7 @@ function App() {
                             ? "▾"
                             : "▸"}{" "}
                           {department}
-                        </button>
+                        </Button>
 
                         {openedNoteDepartments.includes(department) &&
                           notes
@@ -1516,8 +1577,10 @@ function App() {
                               (note) => getPostDepartment(note) === department,
                             )
                             .map((note) => (
-                              <button
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="sm"
                                 className={
                                   selectedNotePost()?.id === note.id
                                     ? "tree-post active"
@@ -1527,7 +1590,7 @@ function App() {
                                 onClick={() => setSelectedNoteViewId(note.id)}
                               >
                                 {note.title}
-                              </button>
+                              </Button>
                             ))}
                       </div>
                     ))}
@@ -1537,14 +1600,18 @@ function App() {
             </aside>
 
             <section className="wiki-main">
-              <section className="panel">
+              <section className="panel ds-card">
                 <h2>{editingNoteId ? "내 노트 수정" : "내 노트 작성"}</h2>
-                {!user && <p>로그인하면 내 노트를 작성할 수 있습니다.</p>}
+                {!user && (
+                  <Alert tone="info" className="notes-login-hint">
+                    로그인하면 내 노트를 작성할 수 있습니다.
+                  </Alert>
+                )}
 
                 {user && (
                   <form onSubmit={handleNoteSubmit}>
                     <label htmlFor="note-title">제목</label>
-                    <input
+                    <TextInput
                       id="note-title"
                       type="text"
                       value={noteTitle}
@@ -1552,7 +1619,7 @@ function App() {
                     />
 
                     <label htmlFor="note-department">관련 부서</label>
-                    <input
+                    <TextInput
                       id="note-department"
                       type="text"
                       value={noteDepartment}
@@ -1562,7 +1629,7 @@ function App() {
                     />
 
                     <label htmlFor="note-tags">태그</label>
-                    <input
+                    <TextInput
                       id="note-tags"
                       type="text"
                       placeholder="급여, 온보딩, 휴가"
@@ -1571,24 +1638,24 @@ function App() {
                     />
 
                     <label htmlFor="note-content">내용</label>
-                    <textarea
+                    <TextArea
                       id="note-content"
                       value={noteContent}
                       onChange={(event) => setNoteContent(event.target.value)}
                     />
 
                     <div className="button-row">
-                      <button type="submit">
+                      <Button type="submit">
                         {editingNoteId ? "수정하기" : "작성하기"}
-                      </button>
+                      </Button>
                       {editingNoteId && (
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="secondary"
                           onClick={resetNoteForm}
                         >
                           취소
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </form>
@@ -1596,7 +1663,7 @@ function App() {
               </section>
 
               {user && selectedNotePost() ? (
-                <article className="document">
+                <article className="document ds-card">
                   <div className="post-head">
                     <div>
                       <h2>{selectedNotePost()?.title}</h2>
@@ -1607,22 +1674,24 @@ function App() {
                     </div>
 
                     <div className="button-row">
-                      <button
+                      <Button
                         type="button"
-                        className="secondary"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => handleNoteEditClick(selectedNotePost()!)}
                       >
                         수정
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="danger"
+                        variant="danger"
+                        size="sm"
                         onClick={() =>
                           handleDeleteClick(selectedNotePost()!.id)
                         }
                       >
                         삭제
-                      </button>
+                      </Button>
                     </div>
                   </div>
 
@@ -1635,7 +1704,7 @@ function App() {
                   </div>
                 </article>
               ) : (
-                <section className="panel">
+                <section className="panel ds-card notes-empty-state" role="status">
                   <h2>아직 저장한 노트가 없습니다.</h2>
                   <p>
                     AI 챗봇 답변을 저장하거나 직접 노트를 작성하면 여기에
@@ -1648,22 +1717,24 @@ function App() {
         )}
       </main>
 
-      {user && (
+      {user && !IS_WORK_BRIEF_PREVIEW && (
         <div className="chat-widget-area">
           {isChatOpen && (
-            <section className="chat-widget">
+            <section className="chat-widget ds-card" id="ai-chatbot" aria-labelledby="ai-chatbot-title">
               <div className="chat-widget-head">
                 <div>
-                  <h2>AI 챗봇</h2>
+                  <h2 id="ai-chatbot-title">AI 챗봇</h2>
                   <p>회사 위키 기반 답변</p>
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="text-button"
+                  variant="ghost"
+                  size="sm"
+                  className="chat-close-button"
                   onClick={closeChatModal}
                 >
                   닫기
-                </button>
+                </Button>
               </div>
 
               <div className="chat-greeting">
@@ -1677,18 +1748,21 @@ function App() {
               {user && (
                 <div className="chat-suggestions">
                   {CHAT_SUGGESTIONS.map((question) => (
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="chat-suggestion"
                       key={question}
                       onClick={() => handleChatSuggestionClick(question)}
                     >
                       {question}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}
 
-              <div className="chat-messages">
+              <div className="chat-messages" aria-live="polite">
                 {!user && (
                   <div className="chat-bubble ai-bubble">
                     로그인하면 회사 위키를 바탕으로 질문할 수 있습니다.
@@ -1717,7 +1791,9 @@ function App() {
                 )}
 
                 {chatError && (
-                  <div className="chat-bubble error-bubble">{chatError}</div>
+                  <Alert tone="danger" className="chat-bubble error-bubble">
+                    {chatError}
+                  </Alert>
                 )}
 
                 {chatAnswer && (
@@ -1733,15 +1809,18 @@ function App() {
                   <div className="chat-sources">
                     <strong>참고 문서</strong>
                     {chatSources.map((source) => (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="chat-source"
                         key={source.sourceId}
                         disabled={!source.postId}
                         onClick={() => handleChatSourceClick(source)}
                       >
                         <span>{source.title}</span>
                         <small>{source.department}</small>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -1750,15 +1829,16 @@ function App() {
               {user && (
                 <form className="chat-input-form" onSubmit={handleChatSubmit}>
                   <div className="chat-input-row">
-                    <textarea
+                    <TextArea
                       id="chat-question"
+                      aria-label="AI 챗봇 질문"
                       placeholder="메시지를 입력하세요"
                       value={chatQuestion}
                       onChange={(event) => setChatQuestion(event.target.value)}
                     />
-                    <button type="submit" disabled={isChatLoading}>
+                    <Button type="submit" disabled={isChatLoading}>
                       전송
-                    </button>
+                    </Button>
                   </div>
                 </form>
               )}
@@ -1766,7 +1846,7 @@ function App() {
               {user && chatAnswer && (
                 <div className="chat-note-save">
                   <label htmlFor="chat-note-title">새 노트 제목</label>
-                  <input
+                  <TextInput
                     id="chat-note-title"
                     type="text"
                     value={chatNoteTitle}
@@ -1774,13 +1854,13 @@ function App() {
                   />
 
                   <div className="chat-note-actions">
-                    <button type="button" onClick={handleSaveChatAsNewNote}>
+                    <Button type="button" onClick={handleSaveChatAsNewNote}>
                       새 노트로 저장
-                    </button>
+                    </Button>
                   </div>
 
                   <label htmlFor="target-note">기존 노트 선택</label>
-                  <select
+                  <Select
                     id="target-note"
                     value={selectedNoteId}
                     onChange={(event) => setSelectedNoteId(event.target.value)}
@@ -1791,16 +1871,16 @@ function App() {
                         {note.title}
                       </option>
                     ))}
-                  </select>
+                  </Select>
 
                   <div className="chat-note-actions">
-                    <button
+                    <Button
                       type="button"
-                      className="secondary"
+                      variant="secondary"
                       onClick={handleAppendChatToNote}
                     >
                       기존 노트에 추가
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1808,18 +1888,21 @@ function App() {
           )}
 
           {isChatSignalVisible && !isChatOpen && (
-            <div className="chat-signal">
+            <div className="chat-signal ds-card" role="status">
               <span>궁금한 점은 AI에게 물어보세요.</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                className="chat-signal-close"
                 onClick={() => setIsChatSignalVisible(false)}
               >
                 닫기
-              </button>
+              </Button>
             </div>
           )}
 
-          <button
+          <Button
             type="button"
             className={
               isChatOpen
@@ -1827,9 +1910,11 @@ function App() {
                 : "chat-floating-button"
             }
             onClick={toggleChatWidget}
+            aria-controls="ai-chatbot"
+            aria-expanded={isChatOpen}
           >
             AI
-          </button>
+          </Button>
         </div>
       )}
     </>

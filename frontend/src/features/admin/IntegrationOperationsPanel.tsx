@@ -1,4 +1,5 @@
 import type { WorkCopilotOperationsHealth } from "./integration-profile.types";
+import { Alert, Badge } from "../../design-system/components";
 
 type IntegrationOperationsPanelProps = {
   health: WorkCopilotOperationsHealth;
@@ -14,6 +15,11 @@ const timeLabel = (value: string | null): string =>
 
 const cleanupStatusLabel = (value: "pending" | "healthy" | "degraded") =>
   value === "healthy" ? "정상" : value === "pending" ? "대기" : "점검 필요";
+
+const cleanupStatusTone = (
+  value: "pending" | "healthy" | "degraded",
+): "neutral" | "success" | "warning" =>
+  value === "healthy" ? "success" : value === "pending" ? "neutral" : "warning";
 
 const metricCount = (
   health: WorkCopilotOperationsHealth,
@@ -33,7 +39,7 @@ export function IntegrationOperationsPanel({
 
   return (
     <section
-      className="integration-operations"
+      className="integration-operations ds-card"
       aria-labelledby="operations-title"
     >
       <div className="integration-operations-heading">
@@ -41,16 +47,16 @@ export function IntegrationOperationsPanel({
           <p className="eyebrow">파일럿 운영 상태</p>
           <h2 id="operations-title">Webhook · TTL 정리 상태</h2>
         </div>
-        <span className={`status ${shadowMode ? "active" : ""}`}>
+        <Badge tone={shadowMode ? "success" : "neutral"}>
           {shadowMode ? "Shadow mode" : "수동 새로 고침"}
-        </span>
+        </Badge>
       </div>
 
       {!shadowMode && (
-        <p className="operation-warning" role="status">
+        <Alert tone="warning" className="operation-warning">
           ingress 경계가 아직 검증되지 않아 webhook은 저장·전이하지 않습니다.
           사용자 새로 고침으로만 최신성을 확인하세요.
-        </p>
+        </Alert>
       )}
 
       <dl className="integration-operation-details">
@@ -80,7 +86,9 @@ export function IntegrationOperationsPanel({
                 ? "암호화 발췌 TTL"
                 : "변경 이벤트 TTL"}
             </strong>
-            <span>{cleanupStatusLabel(job.status)}</span>
+            <Badge tone={cleanupStatusTone(job.status)}>
+              {cleanupStatusLabel(job.status)}
+            </Badge>
             <small>
               마지막 성공: {timeLabel(job.lastSuccessAt)} · 최근 삭제:{" "}
               {job.lastDeletedCount}건

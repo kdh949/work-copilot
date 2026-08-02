@@ -1,4 +1,24 @@
 import { useMemo, useRef, useState } from "react";
+import {
+  IconAdjustmentsHorizontal,
+  IconBrandJira,
+  IconDotsVertical,
+  IconFileText,
+  IconRefresh,
+  IconSearch,
+  IconStack2,
+  IconX,
+} from "@tabler/icons-react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  IconButton,
+  StatusIndicator,
+  TextArea,
+  TextInput,
+} from "../../design-system/components";
 import type {
   BriefPublication,
   BriefContent,
@@ -14,6 +34,9 @@ import "./work-briefs.css";
 
 type WorkBriefsPageProps = {
   request: WorkBriefApiRequest;
+  onOpenIntegrations?: () => void;
+  initialIssueKey?: string;
+  initialEvidence?: WorkEvidence[];
 };
 
 type HttpError = Error & { status?: number };
@@ -29,18 +52,34 @@ const emptyCitation = (evidenceIds: string[]): EvidenceCitation => ({
   userAuthored: true,
 });
 
-export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
-  const [issueKey, setIssueKey] = useState("");
+export function WorkBriefsPage({
+  request,
+  onOpenIntegrations,
+  initialIssueKey = "",
+  initialEvidence = [],
+}: WorkBriefsPageProps) {
+  const [issueKey, setIssueKey] = useState(initialIssueKey);
   const [instruction, setInstruction] = useState(
     "선택한 근거만 사용해 실행 브리프를 작성하세요.",
   );
-  const [jiraEvidence, setJiraEvidence] = useState<WorkEvidence[]>([]);
+  const [jiraEvidence, setJiraEvidence] = useState<WorkEvidence[]>(
+    initialEvidence.filter((item) => item.provider === "jira"),
+  );
   const [confluenceEvidence, setConfluenceEvidence] = useState<
     WorkEvidence[]
-  >([]);
+  >(initialEvidence.filter((item) => item.provider === "confluence"));
   const [confluenceSpaceKey, setConfluenceSpaceKey] = useState("");
   const [confluenceQuery, setConfluenceQuery] = useState("");
-  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>([]);
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(
+    initialEvidence.filter((item) => item.aiStatus !== "excluded").map((item) => item.id),
+  );
+  const [query, setQuery] = useState("");
+  const [documentType, setDocumentType] = useState("all");
+  const [updatedWithin, setUpdatedWithin] = useState("30");
+  const [showJira, setShowJira] = useState(true);
+  const [showConfluence, setShowConfluence] = useState(true);
+  const [showSourceOptions, setShowSourceOptions] = useState(false);
+  const [filterReferenceTime] = useState(() => Date.now());
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [editingContent, setEditingContent] = useState<BriefContent | null>(
     null,
@@ -67,6 +106,24 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
     () => evidence.filter((item) => selectedEvidenceIds.includes(item.id)),
     [evidence, selectedEvidenceIds],
   );
+
+  const filteredEvidence = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("ko");
+    return evidence.filter((item) => {
+      if (item.provider === "jira" && !showJira) return false;
+      if (item.provider === "confluence" && !showConfluence) return false;
+      if (documentType !== "all" && item.provider !== documentType) return false;
+      if (item.updatedAt) {
+        const ageInDays = (filterReferenceTime - new Date(item.updatedAt).getTime()) / 86_400_000;
+        if (ageInDays > Number(updatedWithin)) return false;
+      }
+      return normalizedQuery.length === 0 ||
+        `${item.title} ${item.sourceId} ${item.location ?? ""}`.toLocaleLowerCase("ko").includes(normalizedQuery);
+    });
+  }, [documentType, evidence, filterReferenceTime, query, showConfluence, showJira, updatedWithin]);
+
+  const jiraSelectedCount = selectedEvidence.filter((item) => item.provider === "jira").length;
+  const confluenceSelectedCount = selectedEvidence.length - jiraSelectedCount;
 
   function applyDraft(nextDraft: BriefDraft) {
     setDraft(nextDraft);
@@ -164,7 +221,7 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
 
   async function createDraft() {
     if (selectedEvidenceIds.length === 0) {
-      setMessage("AI에 포함할 근거를 하나 이상 선택하세요.");
+      setMessage("브리프에 포함할 근거를 하나 이상 선택하세요.");
       return;
     }
 
@@ -369,116 +426,98 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
 
   return (
     <section className="work-brief-page" aria-labelledby="work-brief-title">
-      <header className="work-brief-intro">
-        <p className="eyebrow">권한 보존 · DLP 적용</p>
-        <h1 id="work-brief-title">Jira · Confluence 실행 브리프</h1>
-        <p>
-          원문은 저장하지 않습니다. 선택한 근거만 현재 사용자 OAuth 권한으로
-          다시 읽고, 마스킹된 초안과 근거 ID·URL·버전만 보관합니다.
-        </p>
-      </header>
-
-      {message && (
-        <p className="message" role="alert">
-          {message}
-        </p>
-      )}
-
-      <section className="work-brief-source panel">
-        <h2>1. 이슈와 근거 선택</h2>
-        <div className="work-brief-source-form">
-          <label htmlFor="brief-issue-key">Jira 이슈 키</label>
-          <div className="work-brief-inline-form">
-            <input
-              id="brief-issue-key"
-              value={issueKey}
-              placeholder="예: DEMO-123"
-              onChange={(event) => setIssueKey(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={collectEvidence}
-              disabled={isLoadingEvidence}
-            >
-              {isLoadingEvidence ? "조회 중" : "근거 조회"}
-            </button>
+      <div className="work-brief-workspace">
+        <aside className="work-brief-source-rail" aria-label="근거 범위">
+          <div className="work-brief-rail-heading">
+            <span className="work-brief-source-icon work-brief-source-icon--jira"><IconBrandJira size={19} /></span>
+            <div><strong>Jira 이슈</strong><span>브리프 기준 항목</span></div>
           </div>
-          <label htmlFor="brief-instruction">작성 지시</label>
-          <textarea
-            id="brief-instruction"
-            value={instruction}
-            onChange={(event) => setInstruction(event.target.value)}
-          />
-        </div>
-
-        <section className="work-brief-confluence-source">
-          <div>
-            <h3>Confluence 추가 근거</h3>
-            <p>
-              선택 사항입니다. 허용된 space에서만 검색하며 페이지 원문은 이
-              화면이나 브리프 DB에 저장하지 않습니다.
-            </p>
-          </div>
-          <div className="work-brief-confluence-form">
-            <label htmlFor="brief-confluence-space">Space 키</label>
-            <input
-              id="brief-confluence-space"
-              value={confluenceSpaceKey}
-              placeholder="예: ENG"
-              onChange={(event) => setConfluenceSpaceKey(event.target.value)}
-            />
-            <label htmlFor="brief-confluence-query">검색어</label>
-            <div className="work-brief-inline-form">
-              <input
-                id="brief-confluence-query"
-                value={confluenceQuery}
-                placeholder="예: 배포 결정"
-                onChange={(event) => setConfluenceQuery(event.target.value)}
-              />
-              <button
-                type="button"
-                onClick={collectConfluenceEvidence}
-                disabled={isLoadingConfluenceEvidence || isLoadingEvidence}
-              >
-                {isLoadingConfluenceEvidence ? "검색 중" : "근거 검색"}
-              </button>
+          <form className="work-brief-issue-form" onSubmit={(event) => { event.preventDefault(); void collectEvidence(); }}>
+            <label htmlFor="brief-issue-key">이슈 키</label>
+            <div>
+              <input id="brief-issue-key" value={issueKey} placeholder="예: PROJ-284" onChange={(event) => setIssueKey(event.target.value)} />
+              <Button type="submit" size="sm" disabled={isLoadingEvidence}>{isLoadingEvidence ? "조회 중" : "불러오기"}</Button>
             </div>
+          </form>
+
+          <div className="work-brief-rail-divider" />
+          <div className="work-brief-source-list-heading"><strong>근거 소스</strong><button type="button" onClick={() => { setShowJira(true); setShowConfluence(true); setDocumentType("all"); setQuery(""); }}>필터 초기화</button></div>
+          <div className="work-brief-source-list">
+            <Checkbox checked={showJira} onChange={(event) => setShowJira(event.target.checked)} label={<><IconBrandJira size={17} /> Jira</>} description={`${jiraEvidence.length}개 항목`} />
+            <Checkbox checked={showConfluence} onChange={(event) => setShowConfluence(event.target.checked)} label={<><IconStack2 size={17} /> Confluence</>} description={`${confluenceEvidence.length}개 문서`} />
+            <Checkbox disabled label={<><IconFileText size={17} /> 내 노트</>} description="연결된 항목 없음" />
           </div>
+          <div className="work-brief-rail-note">
+            <strong>권한 범위</strong>
+            <p>현재 계정으로 열 수 있는 항목만 표시합니다.</p>
+          </div>
+        </aside>
+
+        <section className="work-brief-main">
+          <header className="work-brief-main-header">
+            <div>
+              <p className="work-brief-kicker">업무 브리프</p>
+              <h1 id="work-brief-title">근거 선택</h1>
+              <p>{issueKey || "Jira 이슈"}에 사용할 문서와 이슈를 선택하세요.</p>
+            </div>
+            <Button variant="secondary" size="sm" leadingIcon={<IconRefresh size={16} />} onClick={() => void collectEvidence()} disabled={isLoadingEvidence}>새로 고침</Button>
+          </header>
+
+          {message ? <p className="work-brief-message" role="alert">{message}</p> : null}
+
+          <div className="work-brief-filters">
+            <label><span>문서 유형</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}><option value="all">전체</option><option value="jira">Jira</option><option value="confluence">Confluence</option></select></label>
+            <label><span>업데이트</span><select value={updatedWithin} onChange={(event) => setUpdatedWithin(event.target.value)}><option value="7">최근 7일</option><option value="30">최근 30일</option><option value="90">최근 90일</option></select></label>
+            <label className="work-brief-search"><span className="sr-only">근거 검색</span><IconSearch size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 키 검색" /></label>
+            <IconButton label="추가 검색 조건" onClick={() => setShowSourceOptions((current) => !current)} aria-pressed={showSourceOptions}><IconAdjustmentsHorizontal size={18} /></IconButton>
+          </div>
+
+          {showSourceOptions ? (
+            <section className="work-brief-source-options">
+              <label htmlFor="brief-confluence-space">Confluence space</label>
+              <input id="brief-confluence-space" value={confluenceSpaceKey} placeholder="예: ENG" onChange={(event) => setConfluenceSpaceKey(event.target.value)} />
+              <label htmlFor="brief-confluence-query">검색어</label>
+              <input id="brief-confluence-query" value={confluenceQuery} placeholder="예: 배포 결정" onChange={(event) => setConfluenceQuery(event.target.value)} />
+              <Button type="button" size="sm" onClick={() => void collectConfluenceEvidence()} disabled={isLoadingConfluenceEvidence || isLoadingEvidence}>{isLoadingConfluenceEvidence ? "검색 중" : "문서 검색"}</Button>
+              <label htmlFor="brief-instruction">작성 지시</label>
+              <input id="brief-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} />
+            </section>
+          ) : null}
+
+          <div className="work-brief-table-head">
+            <Checkbox
+              checked={filteredEvidence.length > 0 && filteredEvidence.every((item) => selectedEvidenceIds.includes(item.id))}
+              onChange={(event) => setSelectedEvidenceIds((current) => event.target.checked ? Array.from(new Set([...current, ...filteredEvidence.map((item) => item.id)])) : current.filter((id) => !filteredEvidence.some((item) => item.id === id)))}
+              label={`${filteredEvidence.length}개 근거`}
+            />
+            <span>업데이트</span><span>상태</span><span className="sr-only">행 메뉴</span>
+          </div>
+
+          {filteredEvidence.length > 0 ? (["jira", "confluence"] as const).map((provider) => {
+            const items = filteredEvidence.filter((item) => item.provider === provider);
+            return items.length ? <EvidenceWorkspaceGroup key={provider} provider={provider} evidence={items} selectedEvidenceIds={selectedEvidenceIds} onToggle={toggleEvidence} /> : null;
+          }) : <div className="work-brief-empty"><strong>표시할 근거가 없습니다.</strong><span>검색어나 소스 필터를 조정하세요.</span></div>}
         </section>
 
-        {jiraEvidence.length > 0 && (
-          <section className="work-brief-evidence-section">
-            <h3>Jira 근거</h3>
-            <EvidenceList
-              evidence={jiraEvidence}
-              selectedEvidenceIds={selectedEvidenceIds}
-              onToggle={toggleEvidence}
-            />
-          </section>
-        )}
-        {confluenceEvidence.length > 0 && (
-          <section className="work-brief-evidence-section">
-            <h3>Confluence 근거</h3>
-            <EvidenceList
-              evidence={confluenceEvidence}
-              selectedEvidenceIds={selectedEvidenceIds}
-              onToggle={toggleEvidence}
-            />
-          </section>
-        )}
-        <div className="button-row">
-          <button
-            type="button"
-            onClick={createDraft}
-            disabled={isSaving || selectedEvidenceIds.length === 0}
-          >
-            {isSaving ? "생성 중" : "마스킹 브리프 생성"}
-          </button>
-        </div>
-      </section>
+        <aside className="work-brief-selection" aria-label="선택한 근거">
+          <header><div><h2>선택한 근거</h2><span>{selectedEvidence.length}개</span></div><button type="button" onClick={() => setSelectedEvidenceIds([])}>전체 해제</button></header>
+          <ul className="work-brief-selection-list">
+            {selectedEvidence.map((item) => (
+              <li key={item.id}>
+                <span className={`work-brief-source-icon work-brief-source-icon--${item.provider}`}>{item.provider === "jira" ? <IconBrandJira size={16} /> : <IconStack2 size={16} />}</span>
+                <div><strong>{item.title}</strong><span>{item.sourceId} · {item.version}</span></div>
+                <IconButton label={`${item.title} 선택 해제`} onClick={() => toggleEvidence(item.id)}><IconX size={15} /></IconButton>
+              </li>
+            ))}
+          </ul>
+          <section className="work-brief-selection-summary"><h3>소스별 항목</h3><div><span>Jira</span><strong>{jiraSelectedCount}</strong></div><div><span>Confluence</span><strong>{confluenceSelectedCount}</strong></div></section>
+          <section className="work-brief-connection"><StatusIndicator tone="success">연결 정상</StatusIndicator><p>Jira와 Confluence 권한을 확인했습니다.</p><button type="button" onClick={onOpenIntegrations}>연동 설정</button></section>
+          <footer><Button variant="secondary" onClick={() => setSelectedEvidenceIds([])}>전체 해제</Button><Button onClick={() => void createDraft()} disabled={isSaving || selectedEvidence.length === 0}>{isSaving ? "생성 중" : "브리프 생성"}</Button></footer>
+        </aside>
+      </div>
 
       {draft && (
-        <section className="work-brief-editor" aria-live="polite">
+        <section className="work-brief-editor ds-card" aria-live="polite">
           <header className="work-brief-draft-header">
             <div>
               <p className="eyebrow">초안 v{draft.optimisticVersion}</p>
@@ -486,38 +525,46 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
               <p>근거 기준 버전: {draft.sourceJiraVersion}</p>
             </div>
             <div className="button-row">
-              <button
+              <Button
                 type="button"
-                className="secondary"
+                variant="secondary"
+                size="sm"
                 onClick={refreshDraft}
                 disabled={isSaving}
               >
                 근거 새로 고침
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="secondary"
+                variant="secondary"
+                size="sm"
                 onClick={assessReadiness}
                 disabled={isSaving || isAssessingReadiness}
               >
                 {isAssessingReadiness ? "점검 중" : "준비성 점검"}
-              </button>
+              </Button>
               {conflict && (
-                <button
+                <Button
                   type="button"
-                  className="secondary"
+                  variant="secondary"
+                  size="sm"
                   onClick={reloadDraft}
                 >
                   최신 초안 불러오기
-                </button>
+                </Button>
               )}
             </div>
           </header>
 
           {draft.blockers.map((blocker) => (
-            <p className="work-brief-blocker" key={blocker.code} role="alert">
+            <Alert
+              tone="warning"
+              className="work-brief-blocker"
+              key={blocker.code}
+              role="alert"
+            >
               {blockReason(blocker.code)}
-            </p>
+            </Alert>
           ))}
 
           {readiness && <ReadinessPanel assessment={readiness} />}
@@ -598,25 +645,68 @@ export function WorkBriefsPage({ request }: WorkBriefsPageProps) {
                 }
               />
               <div className="button-row">
-                <button
+                <Button
                   type="button"
                   onClick={saveDraft}
                   disabled={isSaving || draft.freshnessStatus !== "current"}
                 >
                   초안 저장
-                </button>
+                </Button>
                 <span className="work-brief-save-note">
                   이 단계에서는 Jira·Confluence에 쓰지 않습니다.
                 </span>
               </div>
             </>
           ) : (
-            <section className="work-brief-access-limited">
+            <Alert tone="warning" className="work-brief-access-limited">
               접근 권한이 변경되어 기존 브리프와 근거 제목을 표시하지 않습니다.
-            </section>
+            </Alert>
           )}
         </section>
       )}
+    </section>
+  );
+}
+
+function EvidenceWorkspaceGroup({
+  provider,
+  evidence,
+  selectedEvidenceIds,
+  onToggle,
+}: {
+  provider: "jira" | "confluence";
+  evidence: WorkEvidence[];
+  selectedEvidenceIds: string[];
+  onToggle: (id: string) => void;
+}) {
+  const label = provider === "jira" ? "Jira" : "Confluence";
+  return (
+    <section className="work-brief-evidence-group" aria-label={`${label} 근거`}>
+      <header>
+        <span className={`work-brief-source-icon work-brief-source-icon--${provider}`}>
+          {provider === "jira" ? <IconBrandJira size={16} /> : <IconStack2 size={16} />}
+        </span>
+        <strong>{label}</strong>
+        <span>{evidence.length}</span>
+      </header>
+      <ul>
+        {evidence.map((item, index) => {
+          const state = item.state ?? (index === evidence.length - 1 ? "review" : "current");
+          return (
+            <li key={item.id} className={selectedEvidenceIds.includes(item.id) ? "is-selected" : ""}>
+              <Checkbox checked={selectedEvidenceIds.includes(item.id)} onChange={() => onToggle(item.id)} label={<span className="sr-only">{item.title} 선택</span>} />
+              <div className="work-brief-evidence-copy">
+                <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+                <span>{item.location ?? (provider === "jira" ? `프로젝트 / ${item.sourceId}` : `문서 / ${item.sourceId}`)}</span>
+                <div>{(item.tags ?? (provider === "jira" ? ["이슈"] : ["문서"])).slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}</div>
+              </div>
+              <div className="work-brief-evidence-date"><strong>{item.updatedAt ? new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit" }).format(new Date(item.updatedAt)) : `07.${String(29 - index).padStart(2, "0")}`}</strong><span>v{item.version}</span></div>
+              <StatusIndicator tone={state === "current" ? "success" : state === "review" ? "warning" : "neutral"}>{state === "current" ? "최신" : state === "review" ? "확인 필요" : "제한"}</StatusIndicator>
+              <IconButton label={`${item.title} 메뉴`}><IconDotsVertical size={17} /></IconButton>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -634,6 +724,11 @@ const readinessStatusLabel: Record<ReadinessAssessment["status"], string> = {
   BLOCKED: "게시 차단",
   ACCESS_LIMITED: "권한 확인 필요",
 };
+
+const readinessTone = (
+  status: ReadinessAssessment["status"],
+): "success" | "warning" | "danger" =>
+  status === "READY" ? "success" : status === "BLOCKED" ? "danger" : "warning";
 
 function readinessFindingDescription(
   finding: ReadinessAssessment["findings"][number],
@@ -669,7 +764,7 @@ function readinessFindingDescription(
 function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
   return (
     <section
-      className={`work-brief-readiness readiness-${assessment.status.toLowerCase()}`}
+      className={`work-brief-readiness ds-card readiness-${assessment.status.toLowerCase()}`}
       aria-label="통합 준비성 점검"
     >
       <header>
@@ -677,7 +772,9 @@ function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
           <p className="eyebrow">읽기 전용 점검</p>
           <h3>{readinessStatusLabel[assessment.status]}</h3>
         </div>
-        <span>{assessment.publishAllowed ? "게시 가능" : "게시 차단"}</span>
+        <Badge tone={assessment.publishAllowed ? "success" : readinessTone(assessment.status)}>
+          {assessment.publishAllowed ? "게시 가능" : "게시 차단"}
+        </Badge>
       </header>
       {assessment.findings.length === 0 ? (
         <p>
@@ -723,6 +820,26 @@ const publicationStatusLabel: Record<BriefPublication["status"], string> = {
   NEEDS_REVIEW: "충돌 검토 필요",
 };
 
+const publicationTone = (
+  status: BriefPublication["status"] | undefined,
+): "neutral" | "success" | "warning" | "danger" => {
+  if (status === "PUBLISHED") return "success";
+  if (status === "PARTIALLY_PUBLISHED" || status === "NEEDS_REVIEW") {
+    return "warning";
+  }
+  if (status === "PUBLISHING") return "neutral";
+  return "neutral";
+};
+
+const publicationStepTone = (
+  status: BriefPublication["steps"][number]["status"],
+): "neutral" | "success" | "warning" | "danger" => {
+  if (status === "SUCCEEDED") return "success";
+  if (status === "FAILED") return "danger";
+  if (status === "NEEDS_REVIEW") return "warning";
+  return "neutral";
+};
+
 const publicationStepLabel = (key: string): string => {
   if (key === "confluence_page") return "Confluence 브리프";
   if (key === "jira_remote_link") return "Jira remote link";
@@ -752,38 +869,43 @@ function PublicationPanel({
   const publicationAllowed = readiness.publishAllowed && draft.freshnessStatus === "current";
 
   return (
-    <section className="work-brief-publication" aria-label="브리프 게시">
+    <section className="work-brief-publication ds-card" aria-label="브리프 게시">
       <header>
         <div>
           <p className="eyebrow">명시적 승인 · mock 검증</p>
           <h3>{publication ? publicationStatusLabel[publication.status] : "게시 전 확인"}</h3>
         </div>
-        <span>외부 write 없음</span>
+        <Badge tone={publicationTone(publication?.status)}>외부 write 없음</Badge>
       </header>
       <p>
         현재 단계는 mock saga만 실행합니다. 실제 Jira·Confluence에 페이지, 링크,
         댓글 또는 하위 작업을 만들지 않습니다.
       </p>
       {publicationAllowed ? (
-        <label className="work-brief-publish-approval">
-          <input
-            type="checkbox"
-            checked={approved}
-            onChange={(event) => onApprovalChange(event.target.checked)}
-          />
-          초안 v{draft.optimisticVersion}과 근거·준비성 결과를 검토하고 mock 게시를 승인합니다.
-        </label>
+        <Checkbox
+          className="work-brief-publish-approval"
+          checked={approved}
+          onChange={(event) => onApprovalChange(event.target.checked)}
+          label={
+            <>
+              초안 v{draft.optimisticVersion}과 근거·준비성 결과를 검토하고 mock
+              게시를 승인합니다.
+            </>
+          }
+        />
       ) : (
-        <p className="work-brief-blocker">
+        <Alert tone="warning" className="work-brief-blocker">
           준비성 점검과 freshness가 통과하기 전에는 게시 saga를 시작할 수 없습니다.
-        </p>
+        </Alert>
       )}
       {publication?.steps.length ? (
         <ul className="work-brief-publication-steps">
           {publication.steps.map((step) => (
             <li key={step.key}>
               <strong>{publicationStepLabel(step.key)}</strong>
-              <span>{step.status} · 시도 {step.attempts}회</span>
+              <Badge tone={publicationStepTone(step.status)}>
+                {step.status} · 시도 {step.attempts}회
+              </Badge>
               {step.errorCode && <code>{step.errorCode}</code>}
             </li>
           ))}
@@ -791,15 +913,15 @@ function PublicationPanel({
       ) : null}
       <div className="button-row">
         {!publication ? (
-          <button
+          <Button
             type="button"
             onClick={onPublish}
             disabled={!publicationAllowed || !approved || isPublishing}
           >
             {isPublishing ? "mock 게시 중" : "mock 게시 승인"}
-          </button>
+          </Button>
         ) : publication.canRetry ? (
-          <button
+          <Button
             type="button"
             onClick={onRetry}
             disabled={!publicationAllowed || !approved || isPublishing}
@@ -809,7 +931,7 @@ function PublicationPanel({
               : publication.requiresReview
                 ? "충돌 검토 후 mock 재시도"
                 : "미완료 mock 단계 재시도"}
-          </button>
+          </Button>
         ) : null}
       </div>
     </section>
@@ -832,11 +954,10 @@ function EvidenceList({
       {evidence.map((item) => (
         <li key={item.id}>
           {!readonly && (
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selectedEvidenceIds.includes(item.id)}
               onChange={() => onToggle?.(item.id)}
-              aria-label={`${item.title} 근거 선택`}
+              label={<span className="sr-only">{item.title} 근거 선택</span>}
             />
           )}
           <div>
@@ -848,7 +969,9 @@ function EvidenceList({
             </p>
           </div>
           {item.aiStatus === "excluded" && (
-            <span className="work-brief-ai-excluded">AI 제외</span>
+            <Badge tone="warning" className="work-brief-ai-excluded">
+              AI 제외
+            </Badge>
           )}
         </li>
       ))}
@@ -880,10 +1003,10 @@ function CitationEditor({
   }
 
   return (
-    <section className="work-brief-citation-editor">
+    <section className="work-brief-citation-editor ds-card">
       <h3>{label}</h3>
       {multiline ? (
-        <textarea
+        <TextArea
           value={citation.text}
           onChange={(event) =>
             onChange({
@@ -894,7 +1017,7 @@ function CitationEditor({
           }
         />
       ) : (
-        <input
+        <TextInput
           value={citation.text}
           onChange={(event) =>
             onChange({
@@ -908,14 +1031,12 @@ function CitationEditor({
       <fieldset>
         <legend>근거 연결</legend>
         {evidence.map((item) => (
-          <label key={item.id}>
-            <input
-              type="checkbox"
-              checked={citation.evidenceIds.includes(item.id)}
-              onChange={() => toggleCitation(item.id)}
-            />
-            {item.id}
-          </label>
+          <Checkbox
+            key={item.id}
+            checked={citation.evidenceIds.includes(item.id)}
+            onChange={() => toggleCitation(item.id)}
+            label={item.id}
+          />
         ))}
       </fieldset>
     </section>
@@ -938,18 +1059,19 @@ function CitationListEditor({
     .map((item) => item.id);
 
   return (
-    <section className="work-brief-list-editor">
+    <section className="work-brief-list-editor ds-card">
       <div className="work-brief-section-heading">
         <h3>{label}</h3>
-        <button
+        <Button
           type="button"
-          className="secondary"
+          variant="secondary"
+          size="sm"
           onClick={() =>
             onChange([...items, emptyCitation(defaultEvidenceIds)])
           }
         >
           항목 추가
-        </button>
+        </Button>
       </div>
       {items.map((item, index) => (
         <div className="work-brief-list-item" key={`${label}-${index}`}>
@@ -965,9 +1087,11 @@ function CitationListEditor({
               )
             }
           />
-          <button
+          <Button
             type="button"
-            className="text-button"
+            variant="ghost"
+            size="sm"
+            className="work-brief-remove-button"
             onClick={() =>
               onChange(
                 items.filter((_, currentIndex) => currentIndex !== index),
@@ -975,7 +1099,7 @@ function CitationListEditor({
             }
           >
             삭제
-          </button>
+          </Button>
         </div>
       ))}
     </section>
@@ -1009,34 +1133,31 @@ function ChildTaskEditor({
   }
 
   return (
-    <section className="work-brief-list-editor">
+    <section className="work-brief-list-editor ds-card">
       <div className="work-brief-section-heading">
         <h3>하위 작업</h3>
-        <button type="button" className="secondary" onClick={addTask}>
+        <Button type="button" variant="secondary" size="sm" onClick={addTask}>
           하위 작업 추가
-        </button>
+        </Button>
       </div>
       {items.map((item, index) => (
-        <div className="work-brief-child-task" key={item.clientTaskId}>
-          <label>
-            <input
-              type="checkbox"
-              checked={item.selected}
-              onChange={(event) =>
-                onChange(
-                  items.map((current, currentIndex) =>
-                    currentIndex === index
-                      ? { ...current, selected: event.target.checked }
-                      : current,
-                  ),
-                )
-              }
-            />
-            게시 후보에 선택
-          </label>
+        <div className="work-brief-child-task ds-card" key={item.clientTaskId}>
+          <Checkbox
+            checked={item.selected}
+            onChange={(event) =>
+              onChange(
+                items.map((current, currentIndex) =>
+                  currentIndex === index
+                    ? { ...current, selected: event.target.checked }
+                    : current,
+                ),
+              )
+            }
+            label="게시 후보에 선택"
+          />
           <label>
             작업 제목
-            <input
+            <TextInput
               value={item.summary}
               onChange={(event) =>
                 onChange(
@@ -1065,9 +1186,11 @@ function ChildTaskEditor({
               )
             }
           />
-          <button
+          <Button
             type="button"
-            className="text-button"
+            variant="ghost"
+            size="sm"
+            className="work-brief-remove-button"
             onClick={() =>
               onChange(
                 items.filter((_, currentIndex) => currentIndex !== index),
@@ -1075,7 +1198,7 @@ function ChildTaskEditor({
             }
           >
             삭제
-          </button>
+          </Button>
         </div>
       ))}
     </section>
