@@ -7,6 +7,7 @@ import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { OidcAuthorizationAttempt } from '../entities/oidc-authorization-attempt.entity';
 import { OidcAttemptCryptoService } from './oidc-attempt-crypto.service';
+import { OidcCallbackRejectedException } from './oidc-callback-rejected.exception';
 import { KeycloakOidcService } from './keycloak-oidc.service';
 
 const ISSUER = 'https://keycloak.example.test/realms/work';
@@ -228,6 +229,17 @@ describe('KeycloakOidcService', () => {
       service.completeAuthorization('authorization-code', 'state-1'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(global.fetch).toBe(originalFetch);
+  });
+
+  it('assigns a safe diagnostic code when an email domain is not allowed', async () => {
+    const { service } = makeService();
+    mockCallbackFetch(signedIdToken({ email: 'pilot@untrusted.test' }));
+
+    await expect(
+      service.completeAuthorization('authorization-code', 'state-1'),
+    ).rejects.toMatchObject<Partial<OidcCallbackRejectedException>>({
+      diagnosticCode: 'OIDC_EMAIL_DOMAIN_NOT_ALLOWED',
+    });
   });
 
   it('fails closed when Keycloak discovery does not match the configured issuer', async () => {
