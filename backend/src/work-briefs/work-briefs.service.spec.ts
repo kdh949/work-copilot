@@ -62,6 +62,10 @@ describe('WorkBriefsService', () => {
   const jiraWorkItemService = {
     collectIssueDraftContext: jest.fn(),
   };
+  const confluenceWorkItemService = {
+    collectDraftEvidence: jest.fn(),
+    collectEvidenceMetadata: jest.fn(),
+  };
   const aiClient = {
     generate: jest.fn(),
     sanitize: jest.fn(),
@@ -71,6 +75,7 @@ describe('WorkBriefsService', () => {
     return new WorkBriefsService(
       repository as never,
       jiraWorkItemService as never,
+      confluenceWorkItemService as never,
       aiClient as never,
       new BriefCitationValidatorService(),
     );
@@ -127,6 +132,86 @@ describe('WorkBriefsService', () => {
     ]);
     expect(JSON.stringify(createdInput)).not.toContain(
       'Jira original evidence must remain transient only.',
+    );
+  });
+
+  it('re-reads selected Confluence evidence in memory before DLP/AI and never persists its raw text', async () => {
+    const confluenceEvidence = {
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+      title: '배포 결정',
+      version: '7',
+      excerptLength: 88,
+      accessStatus: 'accessible' as const,
+      dlpStatus: 'not_evaluated' as const,
+    };
+    const jiraEvidence = createDraft().evidence[0];
+    const stored = createDraft({
+      evidence: [jiraEvidence, { ...confluenceEvidence, aiStatus: 'included' }],
+    });
+    let createdInput: Partial<WorkBriefDraft> | undefined;
+    repository.create.mockImplementation((value) => {
+      createdInput = value;
+      return { ...stored, ...value };
+    });
+    repository.save.mockResolvedValue(stored);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: stored.profileId,
+      sourceJiraId: stored.sourceJiraId,
+      sourceJiraKey: stored.sourceJiraKey,
+      sourceJiraVersion: stored.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: jiraEvidence,
+          content: 'Jira evidence stays transient.',
+        },
+      ],
+    });
+    confluenceWorkItemService.collectDraftEvidence.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: stored.profileId,
+      evidence: [
+        {
+          evidence: confluenceEvidence,
+          content: 'Confluence original remains in memory only.',
+        },
+      ],
+    });
+    aiClient.generate.mockResolvedValue({
+      title: '배포 준비',
+      summary: '테스트를 진행합니다.',
+      keyPoints: ['회귀 테스트를 실행합니다.'],
+      risks: ['일정 지연'],
+      nextSteps: ['승인 요청'],
+      evidenceIds: ['jira:100', 'confluence:200'],
+    });
+
+    await createService().createDraft(
+      7,
+      {
+        sourceJiraKey: stored.sourceJiraKey,
+        selectedEvidenceIds: ['jira:100', 'confluence:200'],
+        instruction: '실행 브리프를 작성하세요.',
+      },
+      'correlation-id',
+    );
+
+    expect(confluenceWorkItemService.collectDraftEvidence).toHaveBeenCalledWith(
+      7,
+      ['confluence:200'],
+      'correlation-id',
+    );
+    expect(aiClient.generate).toHaveBeenCalledWith(
+      '실행 브리프를 작성하세요.',
+      expect.arrayContaining([
+        expect.objectContaining({ evidenceId: 'confluence:200' }),
+      ]),
+    );
+    expect(JSON.stringify(createdInput)).not.toContain(
+      'Confluence original remains in memory only.',
     );
   });
 
@@ -220,6 +305,61 @@ describe('WorkBriefsService', () => {
     expect(refreshed.freshnessStatus).toBe('review_required');
     expect(refreshed.blockers).toEqual([{ code: 'SOURCE_REVIEW_REQUIRED' }]);
     expect(repository.update).toHaveBeenCalled();
+  });
+
+  it('marks a draft for re-review when selected Confluence metadata changes', async () => {
+    const confluenceEvidence = {
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+      title: '배포 결정',
+      version: '7',
+      excerptLength: 88,
+      accessStatus: 'accessible' as const,
+      dlpStatus: 'not_evaluated' as const,
+      aiStatus: 'included' as const,
+    };
+    const current = createDraft({
+      evidence: [createDraft().evidence[0], confluenceEvidence],
+    });
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: current.evidence[0],
+          content: 'Jira evidence stays transient.',
+        },
+      ],
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      evidence: [{ ...confluenceEvidence, version: '8' }],
+    });
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const refreshed = await createService().refreshDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1 },
+      'correlation-id',
+    );
+
+    expect(refreshed.freshnessStatus).toBe('review_required');
+    expect(confluenceWorkItemService.collectEvidenceMetadata).toHaveBeenCalledWith(
+      7,
+      ['confluence:200'],
+      'correlation-id',
+    );
   });
 
   it('hides prior content when the user no longer has source access', async () => {

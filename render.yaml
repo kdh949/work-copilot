@@ -112,6 +112,14 @@ services:
           property: host
       - key: AI_SERVICE_API_KEY
         sync: false
+      - key: WORK_COPILOT_CLEANUP_MAX_AGE_SECONDS
+        value: "4200"
+      - key: WEBHOOK_SHADOW_MODE
+        value: "false"
+      - key: WEBHOOK_INGRESS_VERIFIED
+        value: "false"
+      - key: WEBHOOK_INGRESS_ALLOWED_CIDRS
+        sync: false
 
   - type: web
     name: week15-board-web

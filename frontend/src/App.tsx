@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Header, type MenuName } from "./components/Header";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
+import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
 import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -81,6 +82,24 @@ type WikiTreeBranch = WikiTreeNode & {
   children: WikiTreeBranch[];
 };
 
+function getPostDepartment(post: BoardPost) {
+  return post.department || "개인";
+}
+
+function getPathKey(path: string[]) {
+  return path.join(" / ");
+}
+
+function getAncestorPathKeys(path: string[]) {
+  const keys: string[] = [];
+
+  for (let index = 0; index < path.length; index += 1) {
+    keys.push(getPathKey(path.slice(0, index + 1)));
+  }
+
+  return keys;
+}
+
 function App() {
   const [menu, setMenu] = useState<MenuName>("login");
   const [user, setUser] = useState<User | null>(null);
@@ -133,28 +152,6 @@ function App() {
   const [selectedNoteId, setSelectedNoteId] = useState("");
   const [chatError, setChatError] = useState("");
 
-  useEffect(() => {
-    if (menu === "posts") {
-      loadWikiTree();
-    }
-  }, [menu]);
-
-  useEffect(() => {
-    if (menu === "posts") {
-      loadWikiPosts();
-    }
-  }, [menu, keyword, tagFilter, selectedWikiPath, wikiPage]);
-
-  useEffect(() => {
-    if (menu === "notes" || isChatOpen) {
-      loadNotes();
-    }
-  }, [menu, user?.id, keyword, departmentFilter, tagFilter, isChatOpen]);
-
-  useEffect(() => {
-    void loadMe();
-  }, []);
-
   async function request<T>(
     path: string,
     options: RequestInit = {},
@@ -197,20 +194,6 @@ function App() {
     return data as T;
   }
 
-  async function loadMe() {
-    try {
-      const me = await request<User>("/auth/me");
-      await refreshCsrfToken();
-      setUser(me);
-
-      if (menu === "login") {
-        setMenu("posts");
-      }
-    } catch {
-      clearClientSession();
-    }
-  }
-
   async function refreshCsrfToken() {
     const response = await fetch(`${API_BASE_URL}/auth/csrf`, {
       credentials: "include",
@@ -228,24 +211,40 @@ function App() {
     csrfToken = data.csrfToken;
   }
 
-  async function loadWikiTree() {
-    try {
-      const nodes = await request<WikiTreeNode[]>("/posts/wiki/tree");
-      setWikiTreeNodes(nodes);
+  function clearClientSession() {
+    csrfToken = "";
+    setUser(null);
+    setNotes([]);
+    setIsChatOpen(false);
+    setMenu("login");
+  }
 
-      if (nodes.length > 0 && selectedWikiPath.length === 0) {
-        const firstPath = nodes[0].path;
-        setSelectedWikiPath(firstPath);
-        setOpenedWikiPaths(getAncestorPathKeys(firstPath));
-      }
-    } catch (error) {
-      showError(error);
+  function showError(error: unknown) {
+    if (error instanceof Error) {
+      setMessage(error.message);
+      return;
     }
+
+    setMessage("오류가 발생했습니다.");
   }
 
   async function loadWikiPosts() {
     try {
-      const params = makeWikiSearchParams();
+      const params = new URLSearchParams();
+      params.set("page", String(wikiPage));
+      params.set("limit", String(WIKI_PAGE_SIZE));
+
+      for (const segment of selectedWikiPath) {
+        params.append("path", segment);
+      }
+
+      if (keyword) {
+        params.set("keyword", keyword);
+      }
+      if (tagFilter) {
+        params.set("tag", tagFilter);
+      }
+
       const data = await request<PostListResponse>(
         `/posts/wiki?${params.toString()}`,
       );
@@ -305,7 +304,20 @@ function App() {
     }
 
     try {
-      const params = makeSearchParams();
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("limit", "100");
+
+      if (keyword) {
+        params.set("keyword", keyword);
+      }
+      if (departmentFilter) {
+        params.set("department", departmentFilter);
+      }
+      if (tagFilter) {
+        params.set("tag", tagFilter);
+      }
+
       const data = await request<PostListResponse>(
         `/posts/notes/my?${params.toString()}`,
       );
@@ -343,28 +355,34 @@ function App() {
     }
   }
 
-  function makeSearchParams() {
+  useEffect(() => {
+    if (menu !== "posts") return;
+
+    let isCurrent = true;
+    void request<WikiTreeNode[]>("/posts/wiki/tree")
+      .then((nodes) => {
+        if (!isCurrent) return;
+        setWikiTreeNodes(nodes);
+
+        if (nodes.length > 0 && selectedWikiPath.length === 0) {
+          const firstPath = nodes[0].path;
+          setSelectedWikiPath(firstPath);
+          setOpenedWikiPaths(getAncestorPathKeys(firstPath));
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) showError(error);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [menu, selectedWikiPath.length]);
+
+  useEffect(() => {
+    if (menu !== "posts") return;
+
     const params = new URLSearchParams();
-
-    params.set("page", "1");
-    params.set("limit", "100");
-
-    if (keyword) {
-      params.set("keyword", keyword);
-    }
-    if (departmentFilter) {
-      params.set("department", departmentFilter);
-    }
-    if (tagFilter) {
-      params.set("tag", tagFilter);
-    }
-
-    return params;
-  }
-
-  function makeWikiSearchParams() {
-    const params = new URLSearchParams();
-
     params.set("page", String(wikiPage));
     params.set("limit", String(WIKI_PAGE_SIZE));
 
@@ -379,8 +397,135 @@ function App() {
       params.set("tag", tagFilter);
     }
 
-    return params;
-  }
+    let isCurrent = true;
+    void request<PostListResponse>(`/posts/wiki?${params.toString()}`)
+      .then((data) => {
+        if (!isCurrent) return;
+        setWikiPosts(data.items);
+        setWikiTotal(data.total);
+        setWikiTotalPages(data.totalPages || 1);
+
+        if (data.items.length > 0) {
+          setSelectedWikiId((currentId) => {
+            if (currentId && data.items.some((item) => item.id === currentId)) {
+              return currentId;
+            }
+
+            return null;
+          });
+        } else {
+          setSelectedWikiId(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) showError(error);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [menu, keyword, tagFilter, selectedWikiPath, wikiPage]);
+
+  useEffect(() => {
+    if (menu !== "notes" && !isChatOpen) return;
+
+    let isCurrent = true;
+    void Promise.resolve(user)
+      .then((currentUser) => {
+        if (!currentUser) {
+          if (isCurrent) setNotes([]);
+          return null;
+        }
+
+        const params = new URLSearchParams();
+        params.set("page", "1");
+        params.set("limit", "100");
+
+        if (keyword) {
+          params.set("keyword", keyword);
+        }
+        if (departmentFilter) {
+          params.set("department", departmentFilter);
+        }
+        if (tagFilter) {
+          params.set("tag", tagFilter);
+        }
+
+        return request<PostListResponse>(`/posts/notes/my?${params.toString()}`);
+      })
+      .then((data) => {
+        if (!isCurrent || !data) return;
+        setNotes(data.items);
+
+        if (data.items.length > 0) {
+          const firstPost = data.items[0];
+          const firstDepartment = getPostDepartment(firstPost);
+
+          setSelectedNoteViewId((currentId) => {
+            if (currentId && data.items.some((item) => item.id === currentId)) {
+              return currentId;
+            }
+
+            return firstPost.id;
+          });
+
+          setOpenedNoteDepartments((departments) => {
+            if (departments.includes(firstDepartment)) {
+              return departments;
+            }
+
+            return [...departments, firstDepartment];
+          });
+
+          if (!selectedNoteId) {
+            setSelectedNoteId(String(firstPost.id));
+          }
+        } else {
+          setSelectedNoteViewId(null);
+          setSelectedNoteId("");
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) showError(error);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [
+    departmentFilter,
+    isChatOpen,
+    keyword,
+    menu,
+    selectedNoteId,
+    tagFilter,
+    user,
+  ]);
+
+  useEffect(() => {
+    let isCurrent = true;
+    void request<User>("/auth/me")
+      .then(async (me) => {
+        await refreshCsrfToken();
+        if (!isCurrent) return;
+        setUser(me);
+        setMenu((currentMenu) =>
+          currentMenu === "login" ? "posts" : currentMenu,
+        );
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        csrfToken = "";
+        setUser(null);
+        setNotes([]);
+        setIsChatOpen(false);
+        setMenu("login");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   function startKeycloakLogin() {
     window.location.assign(`${API_BASE_URL}/auth/oidc/login`);
@@ -395,14 +540,6 @@ function App() {
 
     clearClientSession();
     setMessage("로그아웃되었습니다.");
-  }
-
-  function clearClientSession() {
-    csrfToken = "";
-    setUser(null);
-    setNotes([]);
-    setIsChatOpen(false);
-    setMenu("login");
   }
 
   async function handlePostSubmit(event: FormEvent<HTMLFormElement>) {
@@ -672,15 +809,6 @@ function App() {
       .filter((tag) => tag.length > 0);
   }
 
-  function showError(error: unknown) {
-    if (error instanceof Error) {
-      setMessage(error.message);
-      return;
-    }
-
-    setMessage("오류가 발생했습니다.");
-  }
-
   function handleKeywordChange(event: ChangeEvent<HTMLInputElement>) {
     setKeyword(event.target.value);
     setWikiPage(1);
@@ -769,10 +897,6 @@ function App() {
     return departments;
   }
 
-  function getPostDepartment(post: BoardPost) {
-    return post.department || "개인";
-  }
-
   function selectedWikiPost() {
     return (
       selectedWikiDetail ||
@@ -783,20 +907,6 @@ function App() {
 
   function selectedNotePost() {
     return notes.find((post) => post.id === selectedNoteViewId) || notes[0];
-  }
-
-  function getPathKey(path: string[]) {
-    return path.join(" / ");
-  }
-
-  function getAncestorPathKeys(path: string[]) {
-    const keys: string[] = [];
-
-    for (let index = 0; index < path.length; index += 1) {
-      keys.push(getPathKey(path.slice(0, index + 1)));
-    }
-
-    return keys;
   }
 
   function buildWikiTree(nodes: WikiTreeNode[]): WikiTreeBranch[] {
@@ -875,7 +985,7 @@ function App() {
   function makeExcerpt(post: BoardPost) {
     const source = post.summary || post.content || "";
     const text = source
-      .replace(/[#*_>`\-\[\]]/g, "")
+      .replace(/[#*_>`\-[\]]/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -1371,6 +1481,10 @@ function App() {
         )}
 
         {menu === "workBriefs" && user && <WorkBriefsPage request={request} />}
+
+        {menu === "integrations" && user && (
+          <IntegrationConnectionsPage request={request} />
+        )}
 
         {menu === "notes" && (
           <section className="wiki-layout">

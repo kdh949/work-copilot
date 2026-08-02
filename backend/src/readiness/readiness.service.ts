@@ -9,6 +9,10 @@ import {
   JiraWorkItemService,
   type JiraReadinessContext,
 } from '../work-items/jira/jira-work-item.service';
+import {
+  ConfluenceWorkItemService,
+  type ConfluenceEvidenceContext,
+} from '../work-items/confluence/confluence-work-item.service';
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { ReadinessCoverageEvaluatorService } from './readiness-coverage-evaluator.service';
 import { ReadinessAssessment } from './entities/readiness-assessment.entity';
@@ -26,6 +30,7 @@ export class ReadinessService {
     @InjectRepository(ReadinessAssessment)
     private readonly assessmentsRepository: Repository<ReadinessAssessment>,
     private readonly jiraWorkItemService: JiraWorkItemService,
+    private readonly confluenceWorkItemService: ConfluenceWorkItemService,
     private readonly coverageEvaluator: ReadinessCoverageEvaluatorService,
   ) {}
 
@@ -44,7 +49,23 @@ export class ReadinessService {
       correlationId,
       hasSelectedChildTasks,
     );
-    const findings = this.findingsFor(draft, context, hasSelectedChildTasks);
+    const confluenceEvidenceIds = draft.evidence
+      .filter((item) => item.provider === 'confluence')
+      .map((item) => item.id);
+    const confluenceContext =
+      context.accessStatus === 'accessible' && confluenceEvidenceIds.length > 0
+        ? await this.confluenceWorkItemService.collectEvidenceMetadata(
+            userId,
+            confluenceEvidenceIds,
+            correlationId,
+          )
+        : null;
+    const findings = this.findingsFor(
+      draft,
+      context,
+      confluenceContext,
+      hasSelectedChildTasks,
+    );
     const status = this.statusFor(findings);
     const assessment = await this.storeAssessment(draft, status, findings);
 
@@ -75,6 +96,7 @@ export class ReadinessService {
   private findingsFor(
     draft: WorkBriefDraft,
     context: JiraReadinessContext,
+    confluenceContext: ConfluenceEvidenceContext | null,
     hasSelectedChildTasks: boolean,
   ): ReadinessFinding[] {
     const findings = this.coverageEvaluator.evaluate(draft.maskedBrief);
@@ -105,7 +127,21 @@ export class ReadinessService {
       return this.uniqueFindings(findings);
     }
 
-    this.appendEvidenceFreshnessFindings(findings, draft, context);
+    if (
+      confluenceContext !== null &&
+      (confluenceContext.accessStatus !== 'accessible' ||
+        confluenceContext.profileId !== draft.profileId)
+    ) {
+      findings.push(this.finding('ACCESS_CHANGED'));
+      return this.uniqueFindings(findings);
+    }
+
+    this.appendEvidenceFreshnessFindings(
+      findings,
+      draft,
+      context,
+      confluenceContext,
+    );
     this.appendDependencyFindings(findings, context);
     if (hasSelectedChildTasks) {
       this.appendCreateMetadataFindings(findings, context);
@@ -118,23 +154,29 @@ export class ReadinessService {
     findings: ReadinessFinding[],
     draft: WorkBriefDraft,
     context: JiraReadinessContext,
+    confluenceContext: ConfluenceEvidenceContext | null,
   ): void {
     const currentVersions = new Map(
-      context.evidenceVersions.map((item) => [item.id, item.version]),
+      [
+        ...context.evidenceVersions,
+        ...(confluenceContext?.evidence.map((item) => ({
+          id: item.id,
+          version: item.version,
+        })) ?? []),
+      ].map((item) => [item.id, item.version]),
     );
-    const missingEvidence = draft.evidence.some((evidence) => {
-      if (evidence.provider !== 'jira') {
-        return true;
-      }
-      return !currentVersions.has(evidence.id);
-    });
+    const missingEvidence = draft.evidence.some(
+      (evidence) => !currentVersions.has(evidence.id),
+    );
     const changedEvidence = draft.evidence.some(
-      (evidence) =>
-        evidence.provider === 'jira' &&
-        currentVersions.get(evidence.id) !== evidence.version,
+      (evidence) => currentVersions.get(evidence.id) !== evidence.version,
     );
 
-    if (missingEvidence && context.hasAccessLimitedEvidence) {
+    if (
+      missingEvidence &&
+      (context.hasAccessLimitedEvidence ||
+        confluenceContext?.accessStatus === 'access_limited')
+    ) {
       findings.push(this.finding('ACCESS_CHANGED'));
     } else if (
       missingEvidence ||

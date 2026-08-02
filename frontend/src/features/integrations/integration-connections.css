@@ -1,0 +1,64 @@
+.integration-connections-page,
+.integration-connection-list {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.integration-connections-intro {
+  max-width: 760px;
+}
+
+.integration-connections-intro h1,
+.integration-connections-intro p,
+.integration-connection-card h2,
+.integration-connection-card p,
+.integration-connection-status p {
+  margin: 0;
+}
+
+.integration-connections-intro > p:last-child,
+.integration-connection-card > div > p:last-child,
+.integration-connection-status p {
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.integration-connections-warning {
+  margin: 0;
+  border-left: 3px solid #f97316;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 0.75rem;
+}
+
+.integration-connection-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.integration-connection-card {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 1.25rem;
+}
+
+.integration-connection-card h2 {
+  margin-bottom: 0.375rem;
+}
+
+.integration-connection-status {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.integration-connection-status .status {
+  justify-self: start;
+}
+
+@media (max-width: 700px) {
+  .integration-connection-list {
+    grid-template-columns: 1fr;
+  }
+}
