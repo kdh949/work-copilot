@@ -15,6 +15,10 @@ import {
 import { IsNull, MoreThan, Repository } from 'typeorm';
 import { OidcAuthorizationAttempt } from '../entities/oidc-authorization-attempt.entity';
 import { OidcAttemptCryptoService } from './oidc-attempt-crypto.service';
+import {
+  OidcCallbackRejectedException,
+  type OidcRejectionCode,
+} from './oidc-callback-rejected.exception';
 
 type OidcConfiguration = {
   issuer: string;
@@ -116,7 +120,7 @@ export class KeycloakOidcService {
     state: string,
   ): Promise<KeycloakIdentity> {
     if (!this.isBoundedValue(code) || !this.isBoundedValue(state)) {
-      throw new UnauthorizedException('OIDC callback is invalid.');
+      this.reject('OIDC_CALLBACK_INVALID');
     }
 
     const attempt = await this.consumeAttempt(state);
@@ -140,7 +144,7 @@ export class KeycloakOidcService {
     );
 
     if (!this.hashMatches(payload.nonce, attempt.nonceHash)) {
-      throw new UnauthorizedException('OIDC callback is invalid.');
+      this.reject('OIDC_CALLBACK_INVALID');
     }
 
     return this.toVerifiedIdentity(payload, configuration);
@@ -173,7 +177,7 @@ export class KeycloakOidcService {
       attempt.consumedAt ||
       attempt.expiresAt.getTime() <= Date.now()
     ) {
-      throw new UnauthorizedException('OIDC callback is invalid or expired.');
+      this.reject('OIDC_ATTEMPT_INVALID_OR_EXPIRED');
     }
 
     const consumed = await this.attemptsRepository.update(
@@ -186,7 +190,7 @@ export class KeycloakOidcService {
     );
 
     if (consumed.affected !== 1) {
-      throw new UnauthorizedException('OIDC callback is invalid or expired.');
+      this.reject('OIDC_ATTEMPT_INVALID_OR_EXPIRED');
     }
 
     return attempt;
@@ -217,7 +221,7 @@ export class KeycloakOidcService {
     });
 
     if (!this.isRecord(response) || typeof response.id_token !== 'string') {
-      throw new UnauthorizedException('OIDC token response is invalid.');
+      this.reject('OIDC_TOKEN_RESPONSE_INVALID');
     }
 
     return { id_token: response.id_token };
@@ -237,7 +241,7 @@ export class KeycloakOidcService {
       !encodedSignature ||
       extra.length > 0
     ) {
-      throw new UnauthorizedException('OIDC ID token is invalid.');
+      this.reject('OIDC_ID_TOKEN_INVALID');
     }
 
     const header = this.parseJwtSegment(encodedHeader);
@@ -249,7 +253,7 @@ export class KeycloakOidcService {
       typeof header.kid !== 'string' ||
       header.kid.length > 256
     ) {
-      throw new UnauthorizedException('OIDC ID token is invalid.');
+      this.reject('OIDC_ID_TOKEN_INVALID');
     }
 
     const jwks = await this.fetchJson<JwksDocument>(jwksUri);
@@ -265,7 +269,7 @@ export class KeycloakOidcService {
       : undefined;
 
     if (!matchingKey) {
-      throw new UnauthorizedException('OIDC ID token is invalid.');
+      this.reject('OIDC_ID_TOKEN_INVALID');
     }
 
     try {
@@ -283,14 +287,14 @@ export class KeycloakOidcService {
           'base64url',
         )
       ) {
-        throw new UnauthorizedException('OIDC ID token is invalid.');
+        this.reject('OIDC_ID_TOKEN_INVALID');
       }
     } catch (error) {
-      if (error instanceof UnauthorizedException) {
+      if (error instanceof OidcCallbackRejectedException) {
         throw error;
       }
 
-      throw new UnauthorizedException('OIDC ID token is invalid.');
+      this.reject('OIDC_ID_TOKEN_INVALID');
     }
 
     this.validateTokenClaims(payload, configuration);
@@ -313,7 +317,7 @@ export class KeycloakOidcService {
         (!this.isNumericDate(payload.nbf) || payload.nbf > now + 60)) ||
       (Array.isArray(payload.aud) && payload.azp !== configuration.clientId)
     ) {
-      throw new UnauthorizedException('OIDC ID token is invalid.');
+      this.reject('OIDC_ID_TOKEN_INVALID');
     }
   }
 
@@ -328,7 +332,7 @@ export class KeycloakOidcService {
       typeof payload.email !== 'string' ||
       payload.email_verified !== true
     ) {
-      throw new UnauthorizedException('Verified email is required.');
+      this.reject('OIDC_VERIFIED_EMAIL_REQUIRED');
     }
 
     const email = payload.email.trim().toLowerCase();
@@ -340,7 +344,7 @@ export class KeycloakOidcService {
       extraParts.length > 0 ||
       !configuration.allowedEmailDomains.includes(domain)
     ) {
-      throw new UnauthorizedException('Email domain is not allowed.');
+      this.reject('OIDC_EMAIL_DOMAIN_NOT_ALLOWED');
     }
 
     return {
@@ -549,5 +553,9 @@ export class KeycloakOidcService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private reject(code: OidcRejectionCode): never {
+    throw new OidcCallbackRejectedException(code);
   }
 }
