@@ -10,10 +10,14 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  Alert,
+  Badge,
   Button,
   Checkbox,
   IconButton,
   StatusIndicator,
+  TextArea,
+  TextInput,
 } from "../../design-system/components";
 import type {
   BriefPublication,
@@ -513,7 +517,7 @@ export function WorkBriefsPage({
       </div>
 
       {draft && (
-        <section className="work-brief-editor" aria-live="polite">
+        <section className="work-brief-editor ds-card" aria-live="polite">
           <header className="work-brief-draft-header">
             <div>
               <p className="eyebrow">초안 v{draft.optimisticVersion}</p>
@@ -521,38 +525,46 @@ export function WorkBriefsPage({
               <p>근거 기준 버전: {draft.sourceJiraVersion}</p>
             </div>
             <div className="button-row">
-              <button
+              <Button
                 type="button"
-                className="secondary"
+                variant="secondary"
+                size="sm"
                 onClick={refreshDraft}
                 disabled={isSaving}
               >
                 근거 새로 고침
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="secondary"
+                variant="secondary"
+                size="sm"
                 onClick={assessReadiness}
                 disabled={isSaving || isAssessingReadiness}
               >
                 {isAssessingReadiness ? "점검 중" : "준비성 점검"}
-              </button>
+              </Button>
               {conflict && (
-                <button
+                <Button
                   type="button"
-                  className="secondary"
+                  variant="secondary"
+                  size="sm"
                   onClick={reloadDraft}
                 >
                   최신 초안 불러오기
-                </button>
+                </Button>
               )}
             </div>
           </header>
 
           {draft.blockers.map((blocker) => (
-            <p className="work-brief-blocker" key={blocker.code} role="alert">
+            <Alert
+              tone="warning"
+              className="work-brief-blocker"
+              key={blocker.code}
+              role="alert"
+            >
               {blockReason(blocker.code)}
-            </p>
+            </Alert>
           ))}
 
           {readiness && <ReadinessPanel assessment={readiness} />}
@@ -633,22 +645,22 @@ export function WorkBriefsPage({
                 }
               />
               <div className="button-row">
-                <button
+                <Button
                   type="button"
                   onClick={saveDraft}
                   disabled={isSaving || draft.freshnessStatus !== "current"}
                 >
                   초안 저장
-                </button>
+                </Button>
                 <span className="work-brief-save-note">
                   이 단계에서는 Jira·Confluence에 쓰지 않습니다.
                 </span>
               </div>
             </>
           ) : (
-            <section className="work-brief-access-limited">
+            <Alert tone="warning" className="work-brief-access-limited">
               접근 권한이 변경되어 기존 브리프와 근거 제목을 표시하지 않습니다.
-            </section>
+            </Alert>
           )}
         </section>
       )}
@@ -713,6 +725,11 @@ const readinessStatusLabel: Record<ReadinessAssessment["status"], string> = {
   ACCESS_LIMITED: "권한 확인 필요",
 };
 
+const readinessTone = (
+  status: ReadinessAssessment["status"],
+): "success" | "warning" | "danger" =>
+  status === "READY" ? "success" : status === "BLOCKED" ? "danger" : "warning";
+
 function readinessFindingDescription(
   finding: ReadinessAssessment["findings"][number],
 ): string {
@@ -747,7 +764,7 @@ function readinessFindingDescription(
 function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
   return (
     <section
-      className={`work-brief-readiness readiness-${assessment.status.toLowerCase()}`}
+      className={`work-brief-readiness ds-card readiness-${assessment.status.toLowerCase()}`}
       aria-label="통합 준비성 점검"
     >
       <header>
@@ -755,7 +772,9 @@ function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
           <p className="eyebrow">읽기 전용 점검</p>
           <h3>{readinessStatusLabel[assessment.status]}</h3>
         </div>
-        <span>{assessment.publishAllowed ? "게시 가능" : "게시 차단"}</span>
+        <Badge tone={assessment.publishAllowed ? "success" : readinessTone(assessment.status)}>
+          {assessment.publishAllowed ? "게시 가능" : "게시 차단"}
+        </Badge>
       </header>
       {assessment.findings.length === 0 ? (
         <p>
@@ -801,6 +820,26 @@ const publicationStatusLabel: Record<BriefPublication["status"], string> = {
   NEEDS_REVIEW: "충돌 검토 필요",
 };
 
+const publicationTone = (
+  status: BriefPublication["status"] | undefined,
+): "neutral" | "success" | "warning" | "danger" => {
+  if (status === "PUBLISHED") return "success";
+  if (status === "PARTIALLY_PUBLISHED" || status === "NEEDS_REVIEW") {
+    return "warning";
+  }
+  if (status === "PUBLISHING") return "neutral";
+  return "neutral";
+};
+
+const publicationStepTone = (
+  status: BriefPublication["steps"][number]["status"],
+): "neutral" | "success" | "warning" | "danger" => {
+  if (status === "SUCCEEDED") return "success";
+  if (status === "FAILED") return "danger";
+  if (status === "NEEDS_REVIEW") return "warning";
+  return "neutral";
+};
+
 const publicationStepLabel = (key: string): string => {
   if (key === "confluence_page") return "Confluence 브리프";
   if (key === "jira_remote_link") return "Jira remote link";
@@ -830,38 +869,43 @@ function PublicationPanel({
   const publicationAllowed = readiness.publishAllowed && draft.freshnessStatus === "current";
 
   return (
-    <section className="work-brief-publication" aria-label="브리프 게시">
+    <section className="work-brief-publication ds-card" aria-label="브리프 게시">
       <header>
         <div>
           <p className="eyebrow">명시적 승인 · mock 검증</p>
           <h3>{publication ? publicationStatusLabel[publication.status] : "게시 전 확인"}</h3>
         </div>
-        <span>외부 write 없음</span>
+        <Badge tone={publicationTone(publication?.status)}>외부 write 없음</Badge>
       </header>
       <p>
         현재 단계는 mock saga만 실행합니다. 실제 Jira·Confluence에 페이지, 링크,
         댓글 또는 하위 작업을 만들지 않습니다.
       </p>
       {publicationAllowed ? (
-        <label className="work-brief-publish-approval">
-          <input
-            type="checkbox"
-            checked={approved}
-            onChange={(event) => onApprovalChange(event.target.checked)}
-          />
-          초안 v{draft.optimisticVersion}과 근거·준비성 결과를 검토하고 mock 게시를 승인합니다.
-        </label>
+        <Checkbox
+          className="work-brief-publish-approval"
+          checked={approved}
+          onChange={(event) => onApprovalChange(event.target.checked)}
+          label={
+            <>
+              초안 v{draft.optimisticVersion}과 근거·준비성 결과를 검토하고 mock
+              게시를 승인합니다.
+            </>
+          }
+        />
       ) : (
-        <p className="work-brief-blocker">
+        <Alert tone="warning" className="work-brief-blocker">
           준비성 점검과 freshness가 통과하기 전에는 게시 saga를 시작할 수 없습니다.
-        </p>
+        </Alert>
       )}
       {publication?.steps.length ? (
         <ul className="work-brief-publication-steps">
           {publication.steps.map((step) => (
             <li key={step.key}>
               <strong>{publicationStepLabel(step.key)}</strong>
-              <span>{step.status} · 시도 {step.attempts}회</span>
+              <Badge tone={publicationStepTone(step.status)}>
+                {step.status} · 시도 {step.attempts}회
+              </Badge>
               {step.errorCode && <code>{step.errorCode}</code>}
             </li>
           ))}
@@ -869,15 +913,15 @@ function PublicationPanel({
       ) : null}
       <div className="button-row">
         {!publication ? (
-          <button
+          <Button
             type="button"
             onClick={onPublish}
             disabled={!publicationAllowed || !approved || isPublishing}
           >
             {isPublishing ? "mock 게시 중" : "mock 게시 승인"}
-          </button>
+          </Button>
         ) : publication.canRetry ? (
-          <button
+          <Button
             type="button"
             onClick={onRetry}
             disabled={!publicationAllowed || !approved || isPublishing}
@@ -887,7 +931,7 @@ function PublicationPanel({
               : publication.requiresReview
                 ? "충돌 검토 후 mock 재시도"
                 : "미완료 mock 단계 재시도"}
-          </button>
+          </Button>
         ) : null}
       </div>
     </section>
@@ -910,11 +954,10 @@ function EvidenceList({
       {evidence.map((item) => (
         <li key={item.id}>
           {!readonly && (
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selectedEvidenceIds.includes(item.id)}
               onChange={() => onToggle?.(item.id)}
-              aria-label={`${item.title} 근거 선택`}
+              label={<span className="sr-only">{item.title} 근거 선택</span>}
             />
           )}
           <div>
@@ -926,7 +969,9 @@ function EvidenceList({
             </p>
           </div>
           {item.aiStatus === "excluded" && (
-            <span className="work-brief-ai-excluded">AI 제외</span>
+            <Badge tone="warning" className="work-brief-ai-excluded">
+              AI 제외
+            </Badge>
           )}
         </li>
       ))}
@@ -958,10 +1003,10 @@ function CitationEditor({
   }
 
   return (
-    <section className="work-brief-citation-editor">
+    <section className="work-brief-citation-editor ds-card">
       <h3>{label}</h3>
       {multiline ? (
-        <textarea
+        <TextArea
           value={citation.text}
           onChange={(event) =>
             onChange({
@@ -972,7 +1017,7 @@ function CitationEditor({
           }
         />
       ) : (
-        <input
+        <TextInput
           value={citation.text}
           onChange={(event) =>
             onChange({
@@ -986,14 +1031,12 @@ function CitationEditor({
       <fieldset>
         <legend>근거 연결</legend>
         {evidence.map((item) => (
-          <label key={item.id}>
-            <input
-              type="checkbox"
-              checked={citation.evidenceIds.includes(item.id)}
-              onChange={() => toggleCitation(item.id)}
-            />
-            {item.id}
-          </label>
+          <Checkbox
+            key={item.id}
+            checked={citation.evidenceIds.includes(item.id)}
+            onChange={() => toggleCitation(item.id)}
+            label={item.id}
+          />
         ))}
       </fieldset>
     </section>
@@ -1016,18 +1059,19 @@ function CitationListEditor({
     .map((item) => item.id);
 
   return (
-    <section className="work-brief-list-editor">
+    <section className="work-brief-list-editor ds-card">
       <div className="work-brief-section-heading">
         <h3>{label}</h3>
-        <button
+        <Button
           type="button"
-          className="secondary"
+          variant="secondary"
+          size="sm"
           onClick={() =>
             onChange([...items, emptyCitation(defaultEvidenceIds)])
           }
         >
           항목 추가
-        </button>
+        </Button>
       </div>
       {items.map((item, index) => (
         <div className="work-brief-list-item" key={`${label}-${index}`}>
@@ -1043,9 +1087,11 @@ function CitationListEditor({
               )
             }
           />
-          <button
+          <Button
             type="button"
-            className="text-button"
+            variant="ghost"
+            size="sm"
+            className="work-brief-remove-button"
             onClick={() =>
               onChange(
                 items.filter((_, currentIndex) => currentIndex !== index),
@@ -1053,7 +1099,7 @@ function CitationListEditor({
             }
           >
             삭제
-          </button>
+          </Button>
         </div>
       ))}
     </section>
@@ -1087,34 +1133,31 @@ function ChildTaskEditor({
   }
 
   return (
-    <section className="work-brief-list-editor">
+    <section className="work-brief-list-editor ds-card">
       <div className="work-brief-section-heading">
         <h3>하위 작업</h3>
-        <button type="button" className="secondary" onClick={addTask}>
+        <Button type="button" variant="secondary" size="sm" onClick={addTask}>
           하위 작업 추가
-        </button>
+        </Button>
       </div>
       {items.map((item, index) => (
-        <div className="work-brief-child-task" key={item.clientTaskId}>
-          <label>
-            <input
-              type="checkbox"
-              checked={item.selected}
-              onChange={(event) =>
-                onChange(
-                  items.map((current, currentIndex) =>
-                    currentIndex === index
-                      ? { ...current, selected: event.target.checked }
-                      : current,
-                  ),
-                )
-              }
-            />
-            게시 후보에 선택
-          </label>
+        <div className="work-brief-child-task ds-card" key={item.clientTaskId}>
+          <Checkbox
+            checked={item.selected}
+            onChange={(event) =>
+              onChange(
+                items.map((current, currentIndex) =>
+                  currentIndex === index
+                    ? { ...current, selected: event.target.checked }
+                    : current,
+                ),
+              )
+            }
+            label="게시 후보에 선택"
+          />
           <label>
             작업 제목
-            <input
+            <TextInput
               value={item.summary}
               onChange={(event) =>
                 onChange(
@@ -1143,9 +1186,11 @@ function ChildTaskEditor({
               )
             }
           />
-          <button
+          <Button
             type="button"
-            className="text-button"
+            variant="ghost"
+            size="sm"
+            className="work-brief-remove-button"
             onClick={() =>
               onChange(
                 items.filter((_, currentIndex) => currentIndex !== index),
@@ -1153,7 +1198,7 @@ function ChildTaskEditor({
             }
           >
             삭제
-          </button>
+          </Button>
         </div>
       ))}
     </section>
