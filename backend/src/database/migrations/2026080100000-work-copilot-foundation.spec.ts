@@ -39,4 +39,20 @@ describe('WorkCopilotFoundation1785510000000', () => {
     expect(statements).not.toContain('DROP TABLE "users"');
     expect(statements).not.toContain('DROP TABLE "post"');
   });
+
+  it('checks for Keycloak-only users before attempting a rollback', async () => {
+    const statements: string[] = [];
+    const queryRunner = {
+      query: jest.fn((statement: string) => {
+        statements.push(statement);
+        return Promise.resolve();
+      }),
+    } as unknown as QueryRunner;
+
+    await new WorkCopilotFoundation1785510000000().down(queryRunner);
+
+    expect(statements.at(0)).toContain(
+      'WORK_COPILOT_LEGACY_PASSWORD_ROLLBACK_BLOCKED',
+    );
+  });
 });
