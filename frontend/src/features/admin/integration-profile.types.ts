@@ -37,15 +37,19 @@ export type IntegrationProfileInput = {
   childTaskTemplateFields?: Record<string, ChildTaskTemplateFieldValue>;
 };
 
-type ResourceStatus = "reachable" | "authorization_required" | "unavailable";
+type ResourceStatus =
+  "reachable" | "authorization_required" | "edge_blocked" | "unavailable";
+type TokenEndpointStatus = "reachable" | "edge_blocked" | "unavailable";
 
 export type IntegrationConnectionTest = {
   jira: {
     authorizationEndpoint: "configured";
+    tokenEndpoint: TokenEndpointStatus;
     allowedResources: Record<string, ResourceStatus>;
   };
   confluence: {
     authorizationEndpoint: "configured";
+    tokenEndpoint: TokenEndpointStatus;
     allowedResources: Record<string, ResourceStatus>;
     parentPage: ResourceStatus | "not_configured";
   };

@@ -33,7 +33,10 @@ describe('IntegrationsOAuthController', () => {
 
   it('returns the user to the integration page after a successful callback', async () => {
     const completeAuthorization = jest.fn(() => Promise.resolve());
-    const redirect = jest.fn();
+    let redirectedTo = '';
+    const redirect = jest.fn((url: string) => {
+      redirectedTo = url;
+    });
     const controller = new IntegrationsOAuthController(
       { completeAuthorization } as unknown as IntegrationsOAuthService,
       {
@@ -55,7 +58,7 @@ describe('IntegrationsOAuthController', () => {
       42,
       'corr-42',
     );
-    const redirectUrl = new URL(redirect.mock.calls[0][0]);
+    const redirectUrl = new URL(redirectedTo);
     expect(redirectUrl.origin).toBe('https://work-copilot.example.test');
     expect(redirectUrl.searchParams.get('integration')).toBe('jira');
     expect(redirectUrl.searchParams.get('integration_status')).toBe(
@@ -69,7 +72,10 @@ describe('IntegrationsOAuthController', () => {
         new ProviderAuthorizationCodeRejectedError('invalid_client'),
       ),
     );
-    const redirect = jest.fn();
+    let redirectedTo = '';
+    const redirect = jest.fn((url: string) => {
+      redirectedTo = url;
+    });
     const controller = new IntegrationsOAuthController(
       { completeAuthorization } as unknown as IntegrationsOAuthService,
       {
@@ -84,7 +90,7 @@ describe('IntegrationsOAuthController', () => {
       { redirect } as unknown as Response,
     );
 
-    const redirectUrl = new URL(redirect.mock.calls[0][0]);
+    const redirectUrl = new URL(redirectedTo);
     expect(redirectUrl.searchParams.get('integration')).toBe('jira');
     expect(redirectUrl.searchParams.get('integration_status')).toBe(
       'configuration_required',
@@ -95,6 +101,7 @@ describe('IntegrationsOAuthController', () => {
     ['invalid_grant', 'authorization_code_rejected'],
     ['invalid_scope', 'scope_configuration_required'],
     ['invalid_request', 'oauth_request_rejected'],
+    ['network_rejected', 'provider_network_rejected'],
     ['unknown', 'token_exchange_failed'],
   ] as const)(
     'returns %s token-exchange feedback without a provider description',
@@ -102,7 +109,10 @@ describe('IntegrationsOAuthController', () => {
       const completeAuthorization = jest.fn(() =>
         Promise.reject(new ProviderAuthorizationCodeRejectedError(reason)),
       );
-      const redirect = jest.fn();
+      let redirectedTo = '';
+      const redirect = jest.fn((url: string) => {
+        redirectedTo = url;
+      });
       const controller = new IntegrationsOAuthController(
         { completeAuthorization } as unknown as IntegrationsOAuthService,
         {
@@ -117,17 +127,22 @@ describe('IntegrationsOAuthController', () => {
         { redirect } as unknown as Response,
       );
 
-      const redirectUrl = new URL(redirect.mock.calls[0][0]);
+      const redirectUrl = new URL(redirectedTo);
       expect(redirectUrl.searchParams.get('integration_status')).toBe(
         expectedOutcome,
       );
-      expect(redirect.mock.calls[0][0]).not.toContain(reason);
+      expect(redirectedTo).not.toContain('authorization-code');
+      expect(redirectedTo).not.toContain('state-value');
+      expect(redirectedTo).not.toContain('error_description');
     },
   );
 
   it('does not render provider error descriptions from a rejected consent flow', async () => {
     const completeAuthorization = jest.fn();
-    const redirect = jest.fn();
+    let redirectedTo = '';
+    const redirect = jest.fn((url: string) => {
+      redirectedTo = url;
+    });
     const controller = new IntegrationsOAuthController(
       { completeAuthorization } as unknown as IntegrationsOAuthService,
       {
@@ -147,13 +162,11 @@ describe('IntegrationsOAuthController', () => {
     );
 
     expect(completeAuthorization).not.toHaveBeenCalled();
-    const redirectUrl = new URL(redirect.mock.calls[0][0]);
+    const redirectUrl = new URL(redirectedTo);
     expect(redirectUrl.searchParams.get('integration')).toBe('confluence');
     expect(redirectUrl.searchParams.get('integration_status')).toBe(
       'provider_rejected',
     );
-    expect(redirect.mock.calls[0][0]).not.toContain(
-      'provider-controlled detail',
-    );
+    expect(redirectedTo).not.toContain('provider-controlled detail');
   });
 });

@@ -18,6 +18,7 @@ type IntegrationProfileListProps = {
 const statusLabel = (status: string): string => {
   if (status === "reachable") return "확인됨";
   if (status === "authorization_required") return "사용자 권한 승인 필요";
+  if (status === "edge_blocked") return "네트워크 경계 차단";
   if (status === "not_configured") return "미설정";
   return "확인 실패";
 };
@@ -30,6 +31,11 @@ function ConnectionResult({ result }: { result: IntegrationConnectionTest }) {
     <Alert tone="info" className="connection-result">
       <strong>연결 확인 결과</strong>
       <p>Jira OAuth 인증 URL: 구성됨 · Confluence OAuth 인증 URL: 구성됨</p>
+      <p>Jira token endpoint: {statusLabel(result.jira.tokenEndpoint)}</p>
+      <p>
+        Confluence token endpoint:{" "}
+        {statusLabel(result.confluence.tokenEndpoint)}
+      </p>
       {jiraStatuses.map(([key, status]) => (
         <p key={`jira-${key}`}>
           Jira 프로젝트 {key}: {statusLabel(status)}
