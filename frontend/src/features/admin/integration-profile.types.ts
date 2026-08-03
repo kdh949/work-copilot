@@ -41,11 +41,11 @@ type ResourceStatus = "reachable" | "authorization_required" | "unavailable";
 
 export type IntegrationConnectionTest = {
   jira: {
-    discovery: "reachable";
+    authorizationEndpoint: "configured";
     allowedResources: Record<string, ResourceStatus>;
   };
   confluence: {
-    discovery: "reachable";
+    authorizationEndpoint: "configured";
     allowedResources: Record<string, ResourceStatus>;
     parentPage: ResourceStatus | "not_configured";
   };

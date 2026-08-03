@@ -14,7 +14,7 @@ import type {
 type IntegrationProfileFormProps = {
   profile: IntegrationProfile | null;
   isSaving: boolean;
-  onSubmit: (input: IntegrationProfileInput) => Promise<void>;
+  onSubmit: (input: IntegrationProfileInput) => Promise<boolean>;
   onCancelEdit: () => void;
 };
 
@@ -39,6 +39,12 @@ const toCommaList = (values: string[]): string => values.join(", ");
 const parseCommaList = (value: string): string[] =>
   value
     .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const parseScopeList = (value: string): string[] =>
+  value
+    .split(/[\s,]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 
@@ -94,16 +100,35 @@ export function IntegrationProfileForm({
       return;
     }
 
+    const jiraScopes = parseScopeList(form.jiraScopes);
+    const confluenceScopes = parseScopeList(form.confluenceScopes);
+    const allowedProjectKeys = parseCommaList(form.allowedProjectKeys);
+    const allowedSpaceKeys = parseCommaList(form.allowedSpaceKeys);
+
+    if (!jiraScopes.length || !confluenceScopes.length) {
+      setFormError(
+        "Jira와 Confluence OAuth scope를 각각 하나 이상 입력하세요.",
+      );
+      return;
+    }
+
+    if (!allowedProjectKeys.length || !allowedSpaceKeys.length) {
+      setFormError(
+        "허용 Jira 프로젝트 키와 Confluence space 키를 각각 하나 이상 입력하세요.",
+      );
+      return;
+    }
+
     setFormError("");
     const input: IntegrationProfileInput = {
       jiraBaseUrl: form.jiraBaseUrl,
       confluenceBaseUrl: form.confluenceBaseUrl,
       jiraClientId: form.jiraClientId,
       confluenceClientId: form.confluenceClientId,
-      jiraScopes: parseCommaList(form.jiraScopes),
-      confluenceScopes: parseCommaList(form.confluenceScopes),
-      allowedProjectKeys: parseCommaList(form.allowedProjectKeys),
-      allowedSpaceKeys: parseCommaList(form.allowedSpaceKeys),
+      jiraScopes,
+      confluenceScopes,
+      allowedProjectKeys,
+      allowedSpaceKeys,
       briefParentPageId: form.briefParentPageId.trim(),
       childTaskIssueTypeId: form.childTaskIssueTypeId.trim(),
       childTaskTemplateFields,
@@ -116,7 +141,9 @@ export function IntegrationProfileForm({
       input.confluenceClientSecret = form.confluenceClientSecret;
     }
 
-    await onSubmit(input);
+    const saved = await onSubmit(input);
+    if (!saved) return;
+
     setForm((current) => ({
       ...current,
       jiraClientSecret: "",
@@ -173,16 +200,20 @@ export function IntegrationProfileForm({
               updateField("jiraClientSecret", event.target.value)
             }
           />
-          <label htmlFor="jira-scopes">허용 OAuth scope</label>
+          <label htmlFor="jira-scopes">
+            허용 OAuth scope (쉼표 또는 공백 구분)
+          </label>
           <TextInput
             id="jira-scopes"
             required
+            placeholder="READ"
             value={form.jiraScopes}
             onChange={(event) => updateField("jiraScopes", event.target.value)}
           />
-          <label htmlFor="jira-projects">허용 프로젝트 키</label>
+          <label htmlFor="jira-projects">허용 프로젝트 키 (필수)</label>
           <TextInput
             id="jira-projects"
+            required
             placeholder="COPILOT, PLATFORM"
             value={form.allowedProjectKeys}
             onChange={(event) =>
@@ -249,18 +280,22 @@ export function IntegrationProfileForm({
               updateField("confluenceClientSecret", event.target.value)
             }
           />
-          <label htmlFor="confluence-scopes">허용 OAuth scope</label>
+          <label htmlFor="confluence-scopes">
+            허용 OAuth scope (쉼표 또는 공백 구분)
+          </label>
           <TextInput
             id="confluence-scopes"
             required
+            placeholder="READ"
             value={form.confluenceScopes}
             onChange={(event) =>
               updateField("confluenceScopes", event.target.value)
             }
           />
-          <label htmlFor="confluence-spaces">허용 space 키</label>
+          <label htmlFor="confluence-spaces">허용 space 키 (필수)</label>
           <TextInput
             id="confluence-spaces"
+            required
             placeholder="ENG, PRODUCT"
             value={form.allowedSpaceKeys}
             onChange={(event) =>

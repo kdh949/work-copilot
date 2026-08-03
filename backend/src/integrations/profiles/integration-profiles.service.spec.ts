@@ -189,14 +189,16 @@ describe('IntegrationProfilesService', () => {
 
     await expect(
       service.create(
-        { ...profileDto('invalid-scope'), jiraScopes: ['READ_ALL'] },
+        { ...profileDto('invalidscope'), jiraScopes: ['READ_ALL'] },
         7,
         'corr-5',
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toMatchObject({
+      diagnosticCode: 'INTEGRATION_PROFILE_SCOPE_NOT_ALLOWLISTED',
+    });
     await expect(
       service.create(
-        { ...profileDto('empty-project'), allowedProjectKeys: ['   '] },
+        { ...profileDto('emptyproject'), allowedProjectKeys: ['   '] },
         7,
         'corr-6',
       ),
@@ -204,7 +206,7 @@ describe('IntegrationProfilesService', () => {
     await expect(
       service.create(
         {
-          ...profileDto('template-secret'),
+          ...profileDto('templatesecret'),
           childTaskTemplateFields: {
             customfield_10100: 'sk-proj-abc123456789',
           },

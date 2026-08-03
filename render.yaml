@@ -105,8 +105,9 @@ services:
         sync: false
       - key: INTEGRATION_CALLBACK_BASE_URL
         value: https://api.work-copilot.dhkim.cloud
+      # Jira·Confluence hostname만 쉼표로 구분합니다. URL 경로와 포트는 포함하지 않습니다.
       - key: INTEGRATION_BASE_URL_HOST_ALLOWLIST
-        sync: false
+        value: jira.dhkim.cloud,wiki.dhkim.cloud
       - key: INTEGRATION_JIRA_SCOPE_ALLOWLIST
         value: "READ"
       - key: INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST

@@ -29,7 +29,7 @@ function ConnectionResult({ result }: { result: IntegrationConnectionTest }) {
   return (
     <Alert tone="info" className="connection-result">
       <strong>연결 확인 결과</strong>
-      <p>Jira discovery: 확인됨 · Confluence discovery: 확인됨</p>
+      <p>Jira OAuth 인증 URL: 구성됨 · Confluence OAuth 인증 URL: 구성됨</p>
       {jiraStatuses.map(([key, status]) => (
         <p key={`jira-${key}`}>
           Jira 프로젝트 {key}: {statusLabel(status)}

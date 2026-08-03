@@ -19,6 +19,57 @@ type IntegrationProfilesPageProps = {
 const endpoint = "/admin/integration-profiles";
 const operationsEndpoint = "/admin/work-copilot/health";
 
+const profileSaveErrorMessages: Record<string, string> = {
+  INTEGRATION_PROFILE_BASE_URL_INVALID:
+    "Jira와 Confluence URL은 공개 HTTPS URL이어야 하며, localhost·사설 IP·별도 포트·쿼리는 사용할 수 없습니다.",
+  INTEGRATION_PROFILE_BASE_URL_HOST_NOT_ALLOWLISTED:
+    "입력한 Jira 또는 Confluence 도메인이 서버의 허용 호스트 목록과 일치하지 않습니다. 배포 환경변수 INTEGRATION_BASE_URL_HOST_ALLOWLIST를 확인하세요.",
+  INTEGRATION_PROFILE_BASE_URL_HOST_ALLOWLIST_NOT_CONFIGURED:
+    "연동 서버의 허용 호스트 목록이 설정되지 않았습니다. 배포 환경변수 INTEGRATION_BASE_URL_HOST_ALLOWLIST에 Jira와 Confluence 도메인을 쉼표로 구분해 설정하세요.",
+  INTEGRATION_PROFILE_SCOPE_ALLOWLIST_NOT_CONFIGURED:
+    "연동 OAuth scope 허용 목록이 설정되지 않았습니다. 배포 환경변수 INTEGRATION_JIRA_SCOPE_ALLOWLIST와 INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST를 확인하세요.",
+  INTEGRATION_PROFILE_SCOPE_NOT_ALLOWLISTED:
+    "입력한 OAuth scope가 서버 허용 목록에 없습니다. 배포 환경변수의 허용 scope와 입력값을 일치시키세요.",
+};
+
+type ProfileRequestError = {
+  detailCode?: unknown;
+  correlationId?: unknown;
+  status?: unknown;
+};
+
+const profileRequestError = (error: unknown): ProfileRequestError =>
+  error && typeof error === "object" ? (error as ProfileRequestError) : {};
+
+const errorCorrelationId = (error: ProfileRequestError): string | undefined =>
+  typeof error.correlationId === "string" ? error.correlationId : undefined;
+
+const withCorrelationId = (message: string, correlationId?: string): string =>
+  correlationId ? `${message} (문의 ID: ${correlationId})` : message;
+
+const profileSaveErrorMessage = (error: unknown): string => {
+  const requestError = profileRequestError(error);
+  const detailCode =
+    typeof requestError.detailCode === "string"
+      ? requestError.detailCode
+      : undefined;
+  const message =
+    (detailCode && profileSaveErrorMessages[detailCode]) ||
+    "프로필을 저장하지 못했습니다. 허용 Jira 프로젝트 키와 Confluence space 키를 각각 하나 이상 입력했는지 확인하세요.";
+
+  return withCorrelationId(message, errorCorrelationId(requestError));
+};
+
+const profileTestErrorMessage = (error: unknown): string => {
+  const requestError = profileRequestError(error);
+  const message =
+    requestError.status === 503
+      ? "Jira 또는 Confluence OAuth Provider API에 도달하지 못했습니다. /rest/oauth2/latest/authorize 경로와 배포 서버의 REST API 접근을 확인하세요."
+      : "연결을 확인하지 못했습니다. 저장된 URL과 네트워크 정책을 확인하세요.";
+
+  return withCorrelationId(message, errorCorrelationId(requestError));
+};
+
 export function IntegrationProfilesPage({
   request,
 }: IntegrationProfilesPageProps) {
@@ -109,10 +160,10 @@ export function IntegrationProfilesPage({
       setEditingProfile(null);
       await loadProfiles();
       await loadOperationsHealth();
-    } catch {
-      setError(
-        "프로필을 저장하지 못했습니다. HTTPS URL과 허용 scope를 다시 확인하세요.",
-      );
+      return true;
+    } catch (error) {
+      setError(profileSaveErrorMessage(error));
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -153,10 +204,8 @@ export function IntegrationProfilesPage({
         { method: "POST" },
       );
       setTestResults((current) => ({ ...current, [profile.id]: result }));
-    } catch {
-      setError(
-        "연결을 확인하지 못했습니다. 저장된 URL과 네트워크 정책을 확인하세요.",
-      );
+    } catch (error) {
+      setError(profileTestErrorMessage(error));
     } finally {
       setIsTestingProfileId(null);
     }

@@ -23,6 +23,7 @@ import {
   EncryptedProfileSecret,
   IntegrationProfileCryptoService,
 } from './integration-profile-crypto.service';
+import { IntegrationProfileRejectedException } from './integration-profile-rejected.exception';
 import { IntegrationProfileUrlPolicy } from './integration-profile-url.policy';
 
 type Provider = 'jira' | 'confluence';
@@ -627,12 +628,20 @@ export class IntegrationProfilesService {
       .sort();
     const allowedScopes = this.scopeAllowlist(provider);
 
+    if (allowedScopes.length === 0) {
+      throw new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_SCOPE_ALLOWLIST_NOT_CONFIGURED',
+      );
+    }
+
     if (
       normalized.length === 0 ||
       !normalized.includes('READ') ||
       normalized.some((scope) => !allowedScopes.includes(scope))
     ) {
-      throw new BadRequestException('Integration scope is not allowlisted.');
+      throw new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_SCOPE_NOT_ALLOWLISTED',
+      );
     }
 
     return normalized;

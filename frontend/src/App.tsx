@@ -208,8 +208,18 @@ function App() {
         errorMessage || "요청 처리에 실패했습니다.",
       ) as Error & {
         status?: number;
+        code?: string;
+        detailCode?: string;
+        correlationId?: string;
       };
       error.status = response.status;
+      if (typeof data.code === "string") error.code = data.code;
+      if (typeof data.detailCode === "string") {
+        error.detailCode = data.detailCode;
+      }
+      if (typeof data.correlationId === "string") {
+        error.correlationId = data.correlationId;
+      }
       throw error;
     }
 

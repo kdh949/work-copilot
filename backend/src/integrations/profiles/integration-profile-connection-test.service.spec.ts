@@ -34,12 +34,11 @@ describe('IntegrationProfileConnectionTestService', () => {
     global.fetch = originalFetch;
   });
 
-  it('probes only allowlisted metadata endpoints and returns no provider body', async () => {
+  it('uses Data Center OAuth paths and probes only allowlisted resources', async () => {
     const urlPolicy = {
       providerUrl: jest.fn(
         (baseUrl: string, path: string) => new URL(path, `${baseUrl}/`),
       ),
-      assertProviderEndpoint: jest.fn((value: string) => new URL(value)),
       assertSafeRequestUrl: jest.fn((url: URL) => Promise.resolve(url)),
       buildCallbackUrl: jest.fn(
         (provider: string) =>
@@ -49,16 +48,8 @@ describe('IntegrationProfileConnectionTestService', () => {
     const fetchMock = jest.fn<typeof fetch>((input) => {
       const url = String(input);
 
-      if (url.includes('.well-known/openid-configuration')) {
-        return Promise.resolve(
-          response(200, {
-            authorization_endpoint: `${new URL(url).origin}/authorize`,
-          }),
-        );
-      }
-
       if (url.includes('/rest/api/2/project/')) {
-        return Promise.resolve(response(401));
+        return Promise.resolve(response(303));
       }
 
       return Promise.resolve(response(200));
@@ -68,6 +59,10 @@ describe('IntegrationProfileConnectionTestService', () => {
 
     const result = await service.test(profile());
 
+    expect(result.jira.authorizationEndpoint).toBe('configured');
+    expect(new URL(result.jira.authorizationUrl).pathname).toBe(
+      '/rest/oauth2/latest/authorize',
+    );
     expect(result.jira.authorizationUrl).toContain('client_id=jira-client');
     expect(result.jira.authorizationUrl).toContain('scope=READ');
     expect(result.jira.allowedResources).toEqual({
@@ -78,18 +73,14 @@ describe('IntegrationProfileConnectionTestService', () => {
     });
     expect(result.confluence.parentPage).toBe('reachable');
     expect(JSON.stringify(result)).not.toContain('provider-response-body');
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('rejects a redirect that cannot be validated against the stored origin', async () => {
-    const assertProviderEndpoint = jest.fn(() => {
-      throw new Error('cross-origin redirect');
-    });
+  it('treats a protected-resource redirect as authorization required without following it', async () => {
     const urlPolicy = {
       providerUrl: jest.fn(
         (baseUrl: string, path: string) => new URL(path, `${baseUrl}/`),
       ),
-      assertProviderEndpoint,
       assertSafeRequestUrl: jest.fn((url: URL) => Promise.resolve(url)),
       buildCallbackUrl: jest.fn(
         (provider: string) =>
@@ -104,8 +95,12 @@ describe('IntegrationProfileConnectionTestService', () => {
     global.fetch = fetchMock;
     const service = new IntegrationProfileConnectionTestService(urlPolicy);
 
-    await expect(service.test(profile())).rejects.toThrow(
-      'cross-origin redirect',
-    );
+    await expect(service.test(profile())).resolves.toMatchObject({
+      jira: { allowedResources: { ENG: 'authorization_required' } },
+      confluence: {
+        allowedResources: { ENGSPACE: 'authorization_required' },
+        parentPage: 'authorization_required',
+      },
+    });
   });
 });
