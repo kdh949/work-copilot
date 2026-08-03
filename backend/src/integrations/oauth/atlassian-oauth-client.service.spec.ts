@@ -17,9 +17,9 @@ const configuration: OAuthClientConfiguration = {
   redirectUri: 'https://api.example.test/integrations/jira/callback',
 };
 
-const confluenceConfiguration: OAuthClientConfiguration = {
+const confluenceConfig = {
   ...configuration,
-  provider: 'confluence',
+  provider: 'confluence' as const,
   baseUrl: 'https://confluence.example.test/',
   clientId: 'confluence-client',
   redirectUri: 'https://api.example.test/integrations/confluence/callback',
@@ -212,7 +212,7 @@ describe('AtlassianOAuthClientService', () => {
 
     await expect(
       service.exchangeAuthorizationCode(
-        confluenceConfiguration,
+        confluenceConfig,
         'authorization-code',
         'verifier-value',
       ),
@@ -230,10 +230,8 @@ describe('AtlassianOAuthClientService', () => {
       typeof requestedInit?.body === 'string' ? requestedInit.body : '',
     );
     expect(body.get('grant_type')).toBe('authorization_code');
-    expect(body.get('client_id')).toBe(confluenceConfiguration.clientId);
-    expect(body.get('client_secret')).toBe(
-      confluenceConfiguration.clientSecret,
-    );
+    expect(body.get('client_id')).toBe(confluenceConfig.clientId);
+    expect(body.get('client_secret')).toBe(confluenceConfig.clientSecret);
     expect(body.get('code_verifier')).toBe('verifier-value');
   });
 
