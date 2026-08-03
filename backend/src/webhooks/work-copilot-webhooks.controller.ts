@@ -30,7 +30,7 @@ export class WorkCopilotWebhooksController {
       provider,
       payload,
       routeSecret,
-      remoteAddress: request.socket.remoteAddress,
+      remoteAddress: request.ip,
       correlationId: request.correlationId ?? 'missing-correlation-id',
     });
   }

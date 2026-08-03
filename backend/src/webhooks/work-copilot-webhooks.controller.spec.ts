@@ -14,6 +14,7 @@ describe('WorkCopilotWebhooksController', () => {
       'route-secret',
       payload,
       {
+        ip: '198.51.100.24',
         socket: { remoteAddress: '127.0.0.1' },
         correlationId: 'webhook-correlation-1',
       } as never,
@@ -23,7 +24,7 @@ describe('WorkCopilotWebhooksController', () => {
       expect.objectContaining({
         payload,
         routeSecret: 'route-secret',
-        remoteAddress: '127.0.0.1',
+        remoteAddress: '198.51.100.24',
       }),
     );
     expect(

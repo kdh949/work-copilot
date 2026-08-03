@@ -6,8 +6,10 @@ import { CorrelationIdMiddleware } from './common/http/correlation-id.middleware
 import { OriginCsrfMiddleware } from './common/http/origin-csrf.middleware';
 import { SafeHttpExceptionFilter } from './common/http/safe-http-exception.filter';
 import {
+  configureTrustProxy,
   isAllowedOrigin,
   parseFrontendOrigins,
+  parseTrustProxyHops,
 } from './config/security.config';
 
 async function bootstrap() {
@@ -15,6 +17,14 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const allowedOrigins = parseFrontendOrigins(
     configService.get<string>('FRONTEND_ORIGINS'),
+  );
+  const trustProxyHops = parseTrustProxyHops(
+    configService.get<string>('TRUST_PROXY_HOPS'),
+  );
+
+  configureTrustProxy(
+    app.getHttpAdapter().getInstance(),
+    trustProxyHops,
   );
 
   const correlationIdMiddleware = new CorrelationIdMiddleware();
