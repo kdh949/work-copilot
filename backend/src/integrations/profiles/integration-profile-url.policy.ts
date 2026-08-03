@@ -2,35 +2,52 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import {
+  IntegrationProfileRejectedException,
+  type IntegrationProfileRejectionCode,
+} from './integration-profile-rejected.exception';
 
 const LOCAL_HOSTS = new Set(['localhost', 'localhost.localdomain']);
 
 export type IntegrationProvider = 'jira' | 'confluence';
+
+// Jira and Confluence Data Center OAuth 2.0 Provider APIs publish fixed paths,
+// rather than an OpenID Connect discovery document.
+export const ATLASSIAN_OAUTH_AUTHORIZE_PATH = 'rest/oauth2/latest/authorize';
+export const ATLASSIAN_OAUTH_TOKEN_PATH = 'rest/oauth2/latest/token';
 
 @Injectable()
 export class IntegrationProfileUrlPolicy {
   constructor(private readonly configService: ConfigService) {}
 
   normalizeBaseUrl(value: string): string {
-    const url = this.parseHttpsUrl(value, 'Integration base URL is invalid.');
+    const url = this.parseHttpsUrl(
+      value,
+      'Integration base URL is invalid.',
+      'INTEGRATION_PROFILE_BASE_URL_INVALID',
+    );
     const host = url.hostname.toLowerCase();
 
     if (this.isLocalOrIpLiteral(host)) {
-      throw new BadRequestException('Integration base URL is invalid.');
+      throw new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_BASE_URL_INVALID',
+      );
     }
 
     const allowedHosts = this.getAllowedHosts();
 
     if (allowedHosts.length > 0 && !allowedHosts.includes(host)) {
-      throw new BadRequestException('Integration base URL is not allowlisted.');
+      throw new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_BASE_URL_HOST_NOT_ALLOWLISTED',
+      );
     }
 
     if (
       this.configService.get<string>('NODE_ENV') === 'production' &&
       allowedHosts.length === 0
     ) {
-      throw new BadRequestException(
-        'Integration base URL allowlist is not configured.',
+      throw new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_BASE_URL_HOST_ALLOWLIST_NOT_CONFIGURED',
       );
     }
 
@@ -108,13 +125,17 @@ export class IntegrationProfileUrlPolicy {
     return safeUrl;
   }
 
-  private parseHttpsUrl(value: string, message: string): URL {
+  private parseHttpsUrl(
+    value: string,
+    message: string,
+    rejectionCode?: IntegrationProfileRejectionCode,
+  ): URL {
     let url: URL;
 
     try {
       url = new URL(value.trim());
     } catch {
-      throw new BadRequestException(message);
+      throw this.urlRejection(message, rejectionCode);
     }
 
     if (
@@ -125,10 +146,19 @@ export class IntegrationProfileUrlPolicy {
       url.hash ||
       (url.port && url.port !== '443')
     ) {
-      throw new BadRequestException(message);
+      throw this.urlRejection(message, rejectionCode);
     }
 
     return url;
+  }
+
+  private urlRejection(
+    message: string,
+    rejectionCode?: IntegrationProfileRejectionCode,
+  ): BadRequestException {
+    return rejectionCode
+      ? new IntegrationProfileRejectedException(rejectionCode)
+      : new BadRequestException(message);
   }
 
   private parseHttpsRequestUrl(value: string, message: string): URL {

@@ -16,12 +16,6 @@ const configuration: OAuthClientConfiguration = {
   redirectUri: 'https://api.example.test/integrations/jira/callback',
 };
 
-const discovery = {
-  authorization_endpoint: 'https://jira.example.test/oauth/authorize',
-  token_endpoint: 'https://jira.example.test/oauth/token',
-  revocation_endpoint: 'https://jira.example.test/oauth/revoke',
-};
-
 const response = (status: number, body: string): Response =>
   ({
     ok: status >= 200 && status < 300,
@@ -53,15 +47,9 @@ describe('AtlassianOAuthClientService', () => {
     return new AtlassianOAuthClientService(urlPolicy);
   }
 
-  it('builds an authorization code request with S256 PKCE after same-origin discovery', async () => {
+  it('builds a Data Center authorization code request with S256 PKCE', async () => {
     const service = makeService();
-    const requests: RequestInit[] = [];
-    const fetchMock = jest.fn(
-      (_url: unknown, init?: RequestInit): Promise<Response> => {
-        requests.push(init ?? {});
-        return Promise.resolve(response(200, JSON.stringify(discovery)));
-      },
-    );
+    const fetchMock = jest.fn<typeof fetch>();
     global.fetch = fetchMock;
 
     const authorizationUrl = new URL(
@@ -73,6 +61,7 @@ describe('AtlassianOAuthClientService', () => {
     );
 
     expect(authorizationUrl.origin).toBe('https://jira.example.test');
+    expect(authorizationUrl.pathname).toBe('/rest/oauth2/latest/authorize');
     expect(authorizationUrl.searchParams.get('state')).toBe('state-value');
     expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe(
       'S256',
@@ -80,9 +69,7 @@ describe('AtlassianOAuthClientService', () => {
     expect(authorizationUrl.searchParams.get('code_challenge')).toBe(
       createHash('sha256').update('verifier-value').digest('base64url'),
     );
-    expect(requests[0]).toEqual(
-      expect.objectContaining({ redirect: 'manual' }),
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('maps provider 401/403 without reading its body or using an Authorization header', async () => {
@@ -96,7 +83,7 @@ describe('AtlassianOAuthClientService', () => {
       ...response(401, providerBody),
       text: unreadProviderBody,
     } as unknown as Response;
-    const responses = [response(200, JSON.stringify(discovery)), unauthorized];
+    const responses = [unauthorized];
     const requests: RequestInit[] = [];
     const fetchMock = jest.fn(
       (_url: unknown, init?: RequestInit): Promise<Response> => {
@@ -117,12 +104,15 @@ describe('AtlassianOAuthClientService', () => {
     ).rejects.toBeInstanceOf(ProviderReauthorizationRequiredError);
 
     expect(unreadProviderBody).not.toHaveBeenCalled();
-    expect(requests[1]?.headers).toEqual({
+    expect(requests[0]?.headers).toEqual({
       'Content-Type': 'application/x-www-form-urlencoded',
     });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/rest/oauth2/latest/token',
+    );
   });
 
-  it('rejects an invalid discovery document without exposing the provider response', async () => {
+  it('rejects an invalid token response without exposing the provider response', async () => {
     const service = makeService();
     const providerBody = JSON.stringify({ error: 'untrusted provider detail' });
     const fetchMock = jest
@@ -131,9 +121,9 @@ describe('AtlassianOAuthClientService', () => {
     global.fetch = fetchMock;
 
     await expect(
-      service.createAuthorizationUrl(
+      service.exchangeAuthorizationCode(
         configuration,
-        'state-value',
+        'authorization-code',
         'verifier-value',
       ),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);

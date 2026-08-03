@@ -51,6 +51,26 @@ docker compose up -d
 - `INTEGRATION_JIRA_SCOPE_ALLOWLIST`, `INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST`: 프로필에서 선택 가능한 최소 OAuth scope 목록
 - `AI_SERVICE_URL`: FastAPI AI 서비스 주소
 
+### Jira·Confluence 프로필 저장 전 운영 설정
+
+운영 환경에서는 `INTEGRATION_BASE_URL_HOST_ALLOWLIST`가 비어 있으면 보안상
+프로필을 저장할 수 없습니다. Jira와 Confluence의 **hostname만** 쉼표로 구분해
+설정합니다. URL의 `https://`, 경로, 포트는 포함하지 않습니다.
+
+```dotenv
+INTEGRATION_BASE_URL_HOST_ALLOWLIST=jira.example.com,confluence.example.com
+INTEGRATION_JIRA_SCOPE_ALLOWLIST=READ
+INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ
+```
+
+프로필의 OAuth scope는 각 provider의 해당 allowlist에 있는 값만 사용할 수 있습니다.
+관리자 화면은 허용 목록 미설정, URL host 불일치, scope 불일치를 안전한 오류 코드와
+함께 구분해 안내합니다.
+
+Jira·Confluence Data Center OAuth Provider API는 OpenID Connect discovery를 제공하지
+않습니다. 연동은 각 base URL의 `/rest/oauth2/latest/authorize` 및
+`/rest/oauth2/latest/token` 경로를 사용합니다.
+
 ## 권한
 
 - Keycloak ID token의 `work-copilot-admin` claim이 있는 사용자만 관리자 권한을 가집니다.

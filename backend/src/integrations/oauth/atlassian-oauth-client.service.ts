@@ -6,6 +6,8 @@ import {
 import { createHash } from 'node:crypto';
 import type { IntegrationProfile } from '../profiles/entities/integration-profile.entity';
 import {
+  ATLASSIAN_OAUTH_AUTHORIZE_PATH,
+  ATLASSIAN_OAUTH_TOKEN_PATH,
   IntegrationProfileUrlPolicy,
   type IntegrationProvider,
 } from '../profiles/integration-profile-url.policy';
@@ -43,8 +45,10 @@ export class AtlassianOAuthClientService {
     state: string,
     verifier: string,
   ): Promise<string> {
-    const discovery = await this.discovery(configuration);
-    const authorizationUrl = new URL(discovery.authorizationEndpoint);
+    const authorizationUrl = this.providerEndpoint(
+      configuration,
+      ATLASSIAN_OAUTH_AUTHORIZE_PATH,
+    );
     authorizationUrl.searchParams.set('response_type', 'code');
     authorizationUrl.searchParams.set('client_id', configuration.clientId);
     authorizationUrl.searchParams.set(
@@ -67,8 +71,7 @@ export class AtlassianOAuthClientService {
     code: string,
     verifier: string,
   ): Promise<OAuthTokenPair> {
-    const discovery = await this.discovery(configuration);
-    return this.requestToken(configuration, discovery.tokenEndpoint, {
+    return this.requestToken(configuration, {
       grant_type: 'authorization_code',
       code,
       redirect_uri: configuration.redirectUri,
@@ -82,8 +85,7 @@ export class AtlassianOAuthClientService {
     configuration: OAuthClientConfiguration,
     refreshToken: string,
   ): Promise<OAuthTokenPair> {
-    const discovery = await this.discovery(configuration);
-    return this.requestToken(configuration, discovery.tokenEndpoint, {
+    return this.requestToken(configuration, {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
       client_id: configuration.clientId,
@@ -92,37 +94,12 @@ export class AtlassianOAuthClientService {
   }
 
   async revoke(
-    configuration: OAuthClientConfiguration,
-    refreshToken: string,
+    _configuration: OAuthClientConfiguration,
+    _refreshToken: string,
   ): Promise<void> {
-    try {
-      const discovery = await this.discovery(configuration);
-
-      if (!discovery.revocationEndpoint) {
-        return;
-      }
-
-      const response = await this.fetchSameOrigin(
-        new URL(discovery.revocationEndpoint),
-        configuration.baseUrl,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            token: refreshToken,
-            token_type_hint: 'refresh_token',
-            client_id: configuration.clientId,
-            client_secret: configuration.clientSecret,
-          }).toString(),
-        },
-      );
-
-      if (!response.ok) {
-        return;
-      }
-    } catch {
-      // Local token removal proceeds even when remote revocation is unavailable.
-    }
+    // Jira and Confluence Data Center document authorization and token endpoints,
+    // but not a same-origin token revocation endpoint. Local token removal remains
+    // the safe disconnect behavior.
   }
 
   configurationFromProfile(
@@ -148,63 +125,12 @@ export class AtlassianOAuthClientService {
     };
   }
 
-  private async discovery(configuration: OAuthClientConfiguration): Promise<{
-    authorizationEndpoint: string;
-    tokenEndpoint: string;
-    revocationEndpoint?: string;
-  }> {
-    const discoveryUrl = this.urlPolicy.providerUrl(
-      configuration.baseUrl,
-      '.well-known/openid-configuration',
-    );
-    const response = await this.fetchSameOrigin(
-      discoveryUrl,
-      configuration.baseUrl,
-      { headers: { Accept: 'application/json' } },
-    );
-
-    if (!response.ok) {
-      throw new ServiceUnavailableException(
-        'Integration discovery is unavailable.',
-      );
-    }
-
-    const document = await this.readJson(
-      response,
-      'Integration discovery is invalid.',
-    );
-    const authorizationEndpoint = this.requiredEndpoint(
-      document.authorization_endpoint,
-      configuration.baseUrl,
-    );
-    const tokenEndpoint = this.requiredEndpoint(
-      document.token_endpoint,
-      configuration.baseUrl,
-    );
-    const revocationEndpoint =
-      typeof document.revocation_endpoint === 'string'
-        ? this.urlPolicy
-            .assertProviderEndpoint(
-              document.revocation_endpoint,
-              configuration.baseUrl,
-            )
-            .toString()
-        : undefined;
-
-    return {
-      authorizationEndpoint: authorizationEndpoint.toString(),
-      tokenEndpoint: tokenEndpoint.toString(),
-      revocationEndpoint,
-    };
-  }
-
   private async requestToken(
     configuration: OAuthClientConfiguration,
-    tokenEndpoint: string,
     values: Record<string, string>,
   ): Promise<OAuthTokenPair> {
     const response = await this.fetchSameOrigin(
-      new URL(tokenEndpoint),
+      this.providerEndpoint(configuration, ATLASSIAN_OAUTH_TOKEN_PATH),
       configuration.baseUrl,
       {
         method: 'POST',
@@ -248,20 +174,11 @@ export class AtlassianOAuthClientService {
     };
   }
 
-  private requiredEndpoint(value: unknown, baseUrl: string): URL {
-    if (typeof value !== 'string') {
-      throw new ServiceUnavailableException(
-        'Integration discovery is invalid.',
-      );
-    }
-
-    try {
-      return this.urlPolicy.assertProviderEndpoint(value, baseUrl);
-    } catch {
-      throw new ServiceUnavailableException(
-        'Integration discovery is invalid.',
-      );
-    }
+  private providerEndpoint(
+    configuration: OAuthClientConfiguration,
+    path: string,
+  ): URL {
+    return this.urlPolicy.providerUrl(configuration.baseUrl, path);
   }
 
   private async fetchSameOrigin(

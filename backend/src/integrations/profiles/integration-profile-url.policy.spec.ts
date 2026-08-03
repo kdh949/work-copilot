@@ -3,6 +3,7 @@ jest.mock('node:dns/promises', () => ({ lookup: jest.fn() }));
 import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { lookup } from 'node:dns/promises';
+import { IntegrationProfileRejectedException } from './integration-profile-rejected.exception';
 import { IntegrationProfileUrlPolicy } from './integration-profile-url.policy';
 
 const lookupMock = jest.mocked(lookup);
@@ -39,6 +40,23 @@ describe('IntegrationProfileUrlPolicy', () => {
     expect(() => policy.normalizeBaseUrl('https://other.example.test')).toThrow(
       BadRequestException,
     );
+  });
+
+  it('returns a safe reason when the production host allowlist is missing', () => {
+    const policy = makePolicy({ NODE_ENV: 'production' });
+
+    expect(() => policy.normalizeBaseUrl('https://jira.example.test')).toThrow(
+      IntegrationProfileRejectedException,
+    );
+
+    try {
+      policy.normalizeBaseUrl('https://jira.example.test');
+    } catch (error) {
+      expect(error).toMatchObject({
+        diagnosticCode:
+          'INTEGRATION_PROFILE_BASE_URL_HOST_ALLOWLIST_NOT_CONFIGURED',
+      });
+    }
   });
 
   it('rejects discovery endpoints and runtime DNS answers outside the approved public origin', async () => {

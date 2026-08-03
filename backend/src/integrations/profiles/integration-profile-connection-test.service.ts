@@ -5,18 +5,15 @@ import {
 } from '@nestjs/common';
 import { IntegrationProfile } from './entities/integration-profile.entity';
 import {
+  ATLASSIAN_OAUTH_AUTHORIZE_PATH,
   IntegrationProfileUrlPolicy,
   type IntegrationProvider,
 } from './integration-profile-url.policy';
 
-type DiscoveryDocument = {
-  authorization_endpoint?: unknown;
-};
-
 type ProbeStatus = 'reachable' | 'authorization_required' | 'unavailable';
 
 type ProviderTestResult = {
-  discovery: 'reachable';
+  authorizationEndpoint: 'configured';
   authorizationUrl: string;
   allowedResources: Record<string, ProbeStatus>;
 };
@@ -46,7 +43,7 @@ export class IntegrationProfileConnectionTestService {
   private async testJira(
     profile: IntegrationProfile,
   ): Promise<ProviderTestResult> {
-    const authorizationUrl = await this.buildAuthorizationUrl(
+    const authorizationUrl = this.buildAuthorizationUrl(
       'jira',
       profile.jiraBaseUrl,
       profile.jiraClientId,
@@ -66,7 +63,7 @@ export class IntegrationProfileConnectionTestService {
     }
 
     return {
-      discovery: 'reachable',
+      authorizationEndpoint: 'configured',
       authorizationUrl,
       allowedResources,
     };
@@ -77,7 +74,7 @@ export class IntegrationProfileConnectionTestService {
   ): Promise<
     ProviderTestResult & { parentPage: ProbeStatus | 'not_configured' }
   > {
-    const authorizationUrl = await this.buildAuthorizationUrl(
+    const authorizationUrl = this.buildAuthorizationUrl(
       'confluence',
       profile.confluenceBaseUrl,
       profile.confluenceClientId,
@@ -107,50 +104,22 @@ export class IntegrationProfileConnectionTestService {
       : 'not_configured';
 
     return {
-      discovery: 'reachable',
+      authorizationEndpoint: 'configured',
       authorizationUrl,
       allowedResources,
       parentPage,
     };
   }
 
-  private async buildAuthorizationUrl(
+  private buildAuthorizationUrl(
     provider: IntegrationProvider,
     baseUrl: string,
     clientId: string,
     scopes: string[],
-  ): Promise<string> {
-    const discoveryUrl = this.urlPolicy.providerUrl(
+  ): string {
+    const authorizationUrl = this.urlPolicy.providerUrl(
       baseUrl,
-      '.well-known/openid-configuration',
-    );
-    const response = await this.fetchSameOrigin(discoveryUrl, baseUrl);
-
-    if (!response.ok) {
-      throw new ServiceUnavailableException(
-        'Integration discovery is unavailable.',
-      );
-    }
-
-    let document: DiscoveryDocument;
-
-    try {
-      document = (await response.json()) as DiscoveryDocument;
-    } catch {
-      throw new ServiceUnavailableException(
-        'Integration discovery is invalid.',
-      );
-    }
-
-    if (typeof document.authorization_endpoint !== 'string') {
-      throw new ServiceUnavailableException(
-        'Integration discovery is invalid.',
-      );
-    }
-
-    const authorizationUrl = this.urlPolicy.assertProviderEndpoint(
-      document.authorization_endpoint,
-      baseUrl,
+      ATLASSIAN_OAUTH_AUTHORIZE_PATH,
     );
     authorizationUrl.searchParams.set('response_type', 'code');
     authorizationUrl.searchParams.set('client_id', clientId);
@@ -170,7 +139,11 @@ export class IntegrationProfileConnectionTestService {
       return 'reachable';
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (
+      (response.status >= 300 && response.status < 400) ||
+      response.status === 401 ||
+      response.status === 403
+    ) {
       return 'authorization_required';
     }
 
@@ -178,43 +151,19 @@ export class IntegrationProfileConnectionTestService {
   }
 
   private async fetchSameOrigin(url: URL, baseUrl: string): Promise<Response> {
-    let currentUrl = await this.urlPolicy.assertSafeRequestUrl(url, baseUrl);
+    const safeUrl = await this.urlPolicy.assertSafeRequestUrl(url, baseUrl);
 
-    for (let redirectCount = 0; redirectCount < 3; redirectCount += 1) {
-      let response: Response;
-
-      try {
-        response = await fetch(currentUrl, {
-          headers: { Accept: 'application/json' },
-          redirect: 'manual',
-          signal: AbortSignal.timeout(5000),
-        });
-      } catch {
-        throw new ServiceUnavailableException(
-          'Integration endpoint is unavailable.',
-        );
-      }
-
-      if (response.status < 300 || response.status >= 400) {
-        return response;
-      }
-
-      const location = response.headers.get('location');
-
-      if (!location) {
-        throw new BadRequestException('Integration redirect is invalid.');
-      }
-
-      currentUrl = await this.urlPolicy.assertSafeRequestUrl(
-        this.urlPolicy.assertProviderEndpoint(
-          new URL(location, currentUrl).toString(),
-          baseUrl,
-        ),
-        baseUrl,
+    try {
+      return await fetch(safeUrl, {
+        headers: { Accept: 'application/json' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Integration endpoint is unavailable.',
       );
     }
-
-    throw new BadRequestException('Integration redirect is invalid.');
   }
 
   private scopes(

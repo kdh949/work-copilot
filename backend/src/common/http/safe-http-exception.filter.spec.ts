@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { SafeHttpExceptionFilter } from './safe-http-exception.filter';
+import { IntegrationProfileRejectedException } from '../../integrations/profiles/integration-profile-rejected.exception';
 
 describe('SafeHttpExceptionFilter', () => {
   it('does not expose an unexpected exception message', () => {
@@ -83,6 +84,35 @@ describe('SafeHttpExceptionFilter', () => {
       statusCode: HttpStatus.UNAUTHORIZED,
       code: 'UNAUTHORIZED',
       correlationId: 'correlation-789',
+    });
+  });
+
+  it('exposes only a fixed integration-profile detail code to an administrator', () => {
+    const status = jest.fn().mockReturnThis();
+    const json = jest.fn();
+    const response = {
+      status,
+      json,
+    } as unknown as Response;
+    const host = {
+      switchToHttp: () => ({
+        getRequest: () => ({ correlationId: 'correlation-321' }),
+        getResponse: () => response,
+      }),
+    } as unknown as ArgumentsHost;
+
+    new SafeHttpExceptionFilter().catch(
+      new IntegrationProfileRejectedException(
+        'INTEGRATION_PROFILE_BASE_URL_HOST_ALLOWLIST_NOT_CONFIGURED',
+      ),
+      host,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      statusCode: HttpStatus.BAD_REQUEST,
+      code: 'BAD_REQUEST',
+      detailCode: 'INTEGRATION_PROFILE_BASE_URL_HOST_ALLOWLIST_NOT_CONFIGURED',
+      correlationId: 'correlation-321',
     });
   });
 });

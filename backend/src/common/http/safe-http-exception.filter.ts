@@ -29,10 +29,16 @@ const diagnosticCode = (exception: unknown): string | undefined => {
   const value = (exception as HttpException & { diagnosticCode?: unknown })
     .diagnosticCode;
 
-  return typeof value === 'string' && /^(?:OIDC|AUTH)_[A-Z_]{1,96}$/.test(value)
+  return typeof value === 'string' &&
+    /^(?:(?:OIDC|AUTH)_[A-Z_]{1,96}|INTEGRATION_PROFILE_[A-Z_]{1,96})$/.test(
+      value,
+    )
     ? value
     : undefined;
 };
+
+const publicDetailCode = (value: string | undefined): string | undefined =>
+  value?.startsWith('INTEGRATION_PROFILE_') ? value : undefined;
 
 @Catch()
 export class SafeHttpExceptionFilter implements ExceptionFilter {
@@ -49,6 +55,7 @@ export class SafeHttpExceptionFilter implements ExceptionFilter {
     const code = publicErrorCode(status);
     const correlationId = request.correlationId ?? 'missing-correlation-id';
     const rejectionCode = diagnosticCode(exception);
+    const detailCode = publicDetailCode(rejectionCode);
 
     this.logger.warn(
       `${code}${rejectionCode ? ` diagnosticCode=${rejectionCode}` : ''} correlationId=${correlationId}`,
@@ -56,6 +63,7 @@ export class SafeHttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       code,
+      ...(detailCode ? { detailCode } : {}),
       correlationId,
     });
   }
