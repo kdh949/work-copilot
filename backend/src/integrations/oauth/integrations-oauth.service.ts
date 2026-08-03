@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -22,6 +24,7 @@ import {
   AtlassianOAuthClientService,
   type OAuthClientConfiguration,
   type OAuthTokenPair,
+  ProviderAuthorizationCodeRejectedError,
   ProviderReauthorizationRequiredError,
 } from './atlassian-oauth-client.service';
 import { IntegrationProfile } from '../profiles/entities/integration-profile.entity';
@@ -47,6 +50,8 @@ export type IntegrationConnectionResponse = {
 
 @Injectable()
 export class IntegrationsOAuthService {
+  private readonly logger = new Logger(IntegrationsOAuthService.name);
+
   constructor(
     @InjectRepository(IntegrationProfile)
     private readonly profilesRepository: Repository<IntegrationProfile>,
@@ -187,6 +192,12 @@ export class IntegrationsOAuthService {
         correlationId,
       );
     } catch (error) {
+      this.logger.warn({
+        event: 'OAUTH_AUTHORIZATION_FAILED',
+        provider,
+        failureCode: this.authorizationFailureCode(error),
+        correlationId,
+      });
       await this.writeAudit(
         this.auditRepository.manager,
         userId,
@@ -198,6 +209,39 @@ export class IntegrationsOAuthService {
       );
       throw error;
     }
+  }
+
+  private authorizationFailureCode(error: unknown): string {
+    if (error instanceof ProviderAuthorizationCodeRejectedError) {
+      return `PROVIDER_${error.reason.toUpperCase()}`;
+    }
+
+    if (error instanceof ServiceUnavailableException) {
+      switch (error.message) {
+        case 'Integration endpoint is unavailable.':
+          return 'PROVIDER_ENDPOINT_UNAVAILABLE';
+        case 'Integration token response is invalid.':
+          return 'PROVIDER_TOKEN_RESPONSE_INVALID';
+        case 'Integration client credentials are unavailable.':
+          return 'PROFILE_CREDENTIALS_UNAVAILABLE';
+        default:
+          return 'PROVIDER_SERVICE_UNAVAILABLE';
+      }
+    }
+
+    if (error instanceof BadRequestException) {
+      return 'REQUEST_POLICY_REJECTED';
+    }
+
+    if (error instanceof ConflictException) {
+      return 'PROFILE_CONFIGURATION_CONFLICT';
+    }
+
+    if (error instanceof UnauthorizedException) {
+      return 'CALLBACK_REJECTED';
+    }
+
+    return 'INTERNAL_FAILURE';
   }
 
   async getAccessToken(
