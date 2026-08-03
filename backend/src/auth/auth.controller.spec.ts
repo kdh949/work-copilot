@@ -80,7 +80,7 @@ describe('AuthController', () => {
     expect(redirect).toHaveBeenCalledWith('https://app.example.test');
   });
 
-  it('permits the production session cookie on the separately hosted frontend', async () => {
+  it('keeps the production session cookie first-party on the unified domain', async () => {
     const credentials = {
       sessionToken: 'opaque-session-token',
       csrfToken: 'csrf-token-that-must-not-be-in-the-cookie',
@@ -112,7 +112,7 @@ describe('AuthController', () => {
       expect.objectContaining({
         httpOnly: true,
         secure: true,
-        sameSite: 'none',
+        sameSite: 'lax',
       }),
     );
   });

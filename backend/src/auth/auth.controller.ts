@@ -90,16 +90,12 @@ export class AuthController {
   }
 
   private cookieOptions() {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-
     return {
       httpOnly: true,
       secure: true,
-      // Vercel and Render use different sites in production, so the browser
-      // must be allowed to include the opaque Render session on API requests.
-      // OriginCsrfMiddleware still verifies unsafe requests independently.
-      sameSite: isProduction ? ('none' as const) : ('lax' as const),
+      // The web app and API now share one public origin, including after an
+      // external OIDC provider redirects back to the top-level callback URL.
+      sameSite: 'lax' as const,
       path: '/',
     };
   }
