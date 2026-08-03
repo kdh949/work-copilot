@@ -25,7 +25,14 @@ services:
       dockerfile: backend/Dockerfile
     image: work-copilot-api:local
     restart: "no"
-    command: ["npm", "run", "migration:run:compiled", "--workspace=backend"]
+    command:
+      [
+        "node",
+        "../node_modules/typeorm/cli.js",
+        "migration:run",
+        "-d",
+        "dist/src/database/data-source.js",
+      ]
     environment: &database-environment
       NODE_ENV: production
       DB_HOST: postgres
