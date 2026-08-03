@@ -46,6 +46,7 @@ type IntegrationCallbackStatus =
   | "authorization_code_rejected"
   | "scope_configuration_required"
   | "oauth_request_rejected"
+  | "provider_network_rejected"
   | "token_exchange_failed";
 
 type User = {
@@ -149,8 +150,10 @@ function integrationCallbackErrorMessage(
       return `${providerName} OAuth scope가 Incoming OAuth 2.0 링크의 허용 범위와 일치하지 않습니다. 링크와 연동 프로필 모두에 READ 권한을 설정한 뒤 다시 연결하세요.`;
     case "oauth_request_rejected":
       return `${providerName}가 토큰 교환 요청을 거절했습니다. 연결을 새로 시작하고, 반복되면 Incoming OAuth 2.0 링크의 Redirect URL과 Client ID를 확인하세요.`;
+    case "provider_network_rejected":
+      return `${providerName} 네트워크 경계가 서버의 토큰 요청을 차단했습니다. 관리자에게 WAF 허용 상태를 확인해 달라고 요청하세요.`;
     case "token_exchange_failed":
-      return `${providerName} 연결을 완료하지 못했습니다. 잠시 후 다시 시도하고, 계속되면 연동 프로필의 Client ID와 Client Secret을 확인하세요.`;
+      return `${providerName} 연결을 완료하지 못했습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 문의하세요.`;
     default:
       return "";
   }
@@ -609,11 +612,15 @@ function App() {
         status !== "authorization_code_rejected" &&
         status !== "scope_configuration_required" &&
         status !== "oauth_request_rejected" &&
+        status !== "provider_network_rejected" &&
         status !== "token_exchange_failed")
     ) {
       return;
     }
 
+    // The OAuth callback query is external navigation state that is consumed
+    // once, then removed from the address bar in this same effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMenu("integrations");
     const message = integrationCallbackErrorMessage(provider, status);
     if (message) setMessage(message);

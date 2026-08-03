@@ -30,6 +30,7 @@ type OAuthCallbackOutcome =
   | 'authorization_code_rejected'
   | 'scope_configuration_required'
   | 'oauth_request_rejected'
+  | 'provider_network_rejected'
   | 'token_exchange_failed';
 
 @Controller('integrations')
@@ -131,6 +132,8 @@ export class IntegrationsOAuthController {
           return 'scope_configuration_required';
         case 'invalid_request':
           return 'oauth_request_rejected';
+        case 'network_rejected':
+          return 'provider_network_rejected';
         default:
           return 'token_exchange_failed';
       }

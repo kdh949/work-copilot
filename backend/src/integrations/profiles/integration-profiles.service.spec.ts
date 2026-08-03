@@ -314,4 +314,56 @@ describe('IntegrationProfilesService', () => {
       ]),
     );
   });
+
+  it('records a bounded audit result when a connection test finds an edge block', async () => {
+    const profile = { id: 'profile-edge-blocked' } as IntegrationProfile;
+    const savedAuditEvents: SecurityAuditEvent[] = [];
+    const manager = {
+      create: jest.fn(<T>(_entity: unknown, value: T) => value),
+      save: jest.fn((value: SecurityAuditEvent) => {
+        savedAuditEvents.push(value);
+        return Promise.resolve(value);
+      }),
+    } as unknown as EntityManager;
+    const connectionResult = {
+      jira: {
+        authorizationEndpoint: 'configured' as const,
+        authorizationUrl: 'https://jira.example.test/authorize',
+        tokenEndpoint: 'edge_blocked' as const,
+        allowedResources: { ENG: 'edge_blocked' as const },
+      },
+      confluence: {
+        authorizationEndpoint: 'configured' as const,
+        authorizationUrl: 'https://confluence.example.test/authorize',
+        tokenEndpoint: 'reachable' as const,
+        allowedResources: { ENGSPACE: 'authorization_required' as const },
+        parentPage: 'authorization_required' as const,
+      },
+    };
+    const service = new IntegrationProfilesService(
+      {
+        findOne: jest.fn().mockResolvedValue(profile),
+      } as unknown as Repository<IntegrationProfile>,
+      { manager } as Repository<SecurityAuditEvent>,
+      {} as DataSource,
+      {} as ConfigService,
+      {} as IntegrationProfileCryptoService,
+      {} as IntegrationProfileUrlPolicy,
+      {
+        test: jest.fn().mockResolvedValue(connectionResult),
+      } as unknown as IntegrationProfileConnectionTestService,
+    );
+
+    await expect(service.test(profile.id, 7, 'corr-edge')).resolves.toEqual(
+      connectionResult,
+    );
+    expect(savedAuditEvents).toEqual([
+      expect.objectContaining({
+        action: 'INTEGRATION_PROFILE_TESTED',
+        profileId: profile.id,
+        correlationId: 'corr-edge',
+        resultCode: 'TEST_EDGE_BLOCKED',
+      }),
+    ]);
+  });
 });

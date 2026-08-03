@@ -35,11 +35,20 @@ export type ProviderAuthorizationCodeRejectionReason =
   | 'invalid_grant'
   | 'invalid_scope'
   | 'invalid_request'
+  | 'network_rejected'
   | 'unknown';
 
-const AUTHORIZATION_CODE_REJECTION_REASONS = new Set<
-  Exclude<ProviderAuthorizationCodeRejectionReason, 'unknown'>
->(['invalid_client', 'invalid_grant', 'invalid_scope', 'invalid_request']);
+type ProviderOAuthErrorReason = Exclude<
+  ProviderAuthorizationCodeRejectionReason,
+  'network_rejected' | 'unknown'
+>;
+
+const AUTHORIZATION_CODE_REJECTION_REASONS = new Set<ProviderOAuthErrorReason>([
+  'invalid_client',
+  'invalid_grant',
+  'invalid_scope',
+  'invalid_request',
+]);
 
 export class ProviderReauthorizationRequiredError extends Error {
   constructor() {
@@ -192,15 +201,13 @@ export class AtlassianOAuthClientService {
       response.status >= 400 &&
       response.status < 500
     ) {
+      const responseKind = this.responseKind(response);
       throw new ProviderAuthorizationCodeRejectedError(
-        await this.tokenRejectionReason(response),
+        response.status === 403 && responseKind === 'other'
+          ? 'network_rejected'
+          : await this.tokenRejectionReason(response),
         response.status,
-        response.headers
-          .get('content-type')
-          ?.toLowerCase()
-          .includes('application/json')
-          ? 'json'
-          : 'other',
+        responseKind,
       );
     }
 
@@ -381,16 +388,22 @@ export class AtlassianOAuthClientService {
       }
 
       return AUTHORIZATION_CODE_REJECTION_REASONS.has(
-        body.error as Exclude<
-          ProviderAuthorizationCodeRejectionReason,
-          'unknown'
-        >,
+        body.error as ProviderOAuthErrorReason,
       )
         ? (body.error as ProviderAuthorizationCodeRejectionReason)
         : 'unknown';
     } catch {
       return 'unknown';
     }
+  }
+
+  private responseKind(response: Response): 'json' | 'other' {
+    return response.headers
+      .get('content-type')
+      ?.toLowerCase()
+      .includes('application/json')
+      ? 'json'
+      : 'other';
   }
 
   private isExpiresIn(value: unknown): value is number {

@@ -196,6 +196,12 @@ export class IntegrationsOAuthService {
         event: 'OAUTH_AUTHORIZATION_FAILED',
         provider,
         failureCode: this.authorizationFailureCode(error),
+        ...(error instanceof ProviderAuthorizationCodeRejectedError
+          ? {
+              providerStatus: error.providerStatus,
+              responseKind: error.responseKind,
+            }
+          : {}),
         correlationId,
       });
       await this.writeAudit(

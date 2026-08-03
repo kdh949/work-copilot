@@ -291,7 +291,9 @@ export class IntegrationProfilesService {
         'INTEGRATION_PROFILE_TESTED',
         profile.id,
         correlationId,
-        'TEST_COMPLETED',
+        this.hasEdgeBlockedResult(result)
+          ? 'TEST_EDGE_BLOCKED'
+          : 'TEST_COMPLETED',
       );
       return result;
     } catch (error) {
@@ -305,6 +307,22 @@ export class IntegrationProfilesService {
       );
       throw error;
     }
+  }
+
+  private hasEdgeBlockedResult(
+    result: Awaited<
+      ReturnType<IntegrationProfileConnectionTestService['test']>
+    >,
+  ): boolean {
+    return (
+      result.jira.tokenEndpoint === 'edge_blocked' ||
+      result.confluence.tokenEndpoint === 'edge_blocked' ||
+      Object.values(result.jira.allowedResources).includes('edge_blocked') ||
+      Object.values(result.confluence.allowedResources).includes(
+        'edge_blocked',
+      ) ||
+      result.confluence.parentPage === 'edge_blocked'
+    );
   }
 
   private normalizeCreate(

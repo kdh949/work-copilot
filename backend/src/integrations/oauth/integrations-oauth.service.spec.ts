@@ -370,7 +370,11 @@ describe('IntegrationsOAuthService', () => {
     );
     const state = new URL(started.authorizationUrl).searchParams.get('state');
     exchangeAuthorizationCode.mockRejectedValueOnce(
-      new ProviderAuthorizationCodeRejectedError('unknown', 403, 'other'),
+      new ProviderAuthorizationCodeRejectedError(
+        'network_rejected',
+        403,
+        'other',
+      ),
     );
 
     await expect(
@@ -386,7 +390,9 @@ describe('IntegrationsOAuthService', () => {
     expect(warn).toHaveBeenCalledWith({
       event: 'OAUTH_AUTHORIZATION_FAILED',
       provider: 'jira',
-      failureCode: 'PROVIDER_UNKNOWN_HTTP_403_OTHER',
+      failureCode: 'PROVIDER_NETWORK_REJECTED',
+      providerStatus: 403,
+      responseKind: 'other',
       correlationId: 'corr-safe',
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(

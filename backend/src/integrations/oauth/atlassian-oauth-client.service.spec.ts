@@ -199,6 +199,59 @@ describe('AtlassianOAuthClientService', () => {
     expect(tokenUrl.searchParams.get('code_verifier')).toBe('verifier-value');
   });
 
+  it('classifies a non-JSON 403 token rejection as a network boundary rejection', async () => {
+    const service = makeService();
+    const providerBody = 'proxy denial containing untrusted diagnostics';
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(response(403, providerBody, 'text/html'));
+
+    let rejection: unknown;
+
+    try {
+      await service.exchangeAuthorizationCode(
+        configuration,
+        'authorization-code',
+        'verifier-value',
+      );
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toMatchObject({
+      reason: 'network_rejected',
+      providerStatus: 403,
+      responseKind: 'other',
+    });
+    expect(JSON.stringify(rejection)).not.toContain(providerBody);
+    expect(JSON.stringify(rejection)).not.toContain('authorization-code');
+  });
+
+  it('does not misclassify a JSON 403 response as a network rejection', async () => {
+    const service = makeService();
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        response(
+          403,
+          JSON.stringify({ error: 'invalid_client' }),
+          'application/json',
+        ),
+      );
+
+    await expect(
+      service.exchangeAuthorizationCode(
+        configuration,
+        'authorization-code',
+        'verifier-value',
+      ),
+    ).rejects.toMatchObject({
+      reason: 'invalid_client',
+      providerStatus: 403,
+      responseKind: 'json',
+    });
+  });
+
   it('keeps Confluence Data Center token parameters in the form body', async () => {
     const service = makeService();
     let requestedUrl: URL | undefined;
