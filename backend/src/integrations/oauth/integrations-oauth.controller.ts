@@ -27,6 +27,9 @@ type OAuthCallbackOutcome =
   | 'connected'
   | 'provider_rejected'
   | 'configuration_required'
+  | 'authorization_code_rejected'
+  | 'scope_configuration_required'
+  | 'oauth_request_rejected'
   | 'token_exchange_failed';
 
 @Controller('integrations')
@@ -119,7 +122,18 @@ export class IntegrationsOAuthController {
 
   private callbackFailureOutcome(error: unknown): OAuthCallbackOutcome {
     if (error instanceof ProviderAuthorizationCodeRejectedError) {
-      return 'configuration_required';
+      switch (error.reason) {
+        case 'invalid_client':
+          return 'configuration_required';
+        case 'invalid_grant':
+          return 'authorization_code_rejected';
+        case 'invalid_scope':
+          return 'scope_configuration_required';
+        case 'invalid_request':
+          return 'oauth_request_rejected';
+        default:
+          return 'token_exchange_failed';
+      }
     }
 
     return 'token_exchange_failed';

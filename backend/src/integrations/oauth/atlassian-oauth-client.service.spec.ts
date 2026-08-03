@@ -112,25 +112,39 @@ describe('AtlassianOAuthClientService', () => {
     const body = new URLSearchParams(String(requests[0]?.body));
     expect(body.get('grant_type')).toBe('refresh_token');
     expect(body.get('refresh_token')).toBe('refresh-token');
-    expect(body.get('redirect_uri')).toBe(
-      configuration.redirectUri,
-    );
+    expect(body.get('redirect_uri')).toBe(configuration.redirectUri);
   });
 
-  it('uses form-encoded token parameters and reports an authorization-code rejection safely', async () => {
+  it('uses form-encoded token parameters and classifies an invalid client safely', async () => {
     const service = makeService();
-    const fetchMock = jest
-      .fn<typeof fetch>()
-      .mockResolvedValue(response(401, 'provider response must stay unread'));
+    const providerDescription =
+      'provider-controlled detail containing credentials must not leave the backend';
+    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(
+      response(
+        401,
+        JSON.stringify({
+          error: 'invalid_client',
+          error_description: providerDescription,
+        }),
+      ),
+    );
     global.fetch = fetchMock;
 
-    await expect(
-      service.exchangeAuthorizationCode(
+    let rejection: unknown;
+
+    try {
+      await service.exchangeAuthorizationCode(
         configuration,
         'authorization-code',
         'verifier-value',
-      ),
-    ).rejects.toBeInstanceOf(ProviderAuthorizationCodeRejectedError);
+      );
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ProviderAuthorizationCodeRejectedError);
+    expect(rejection).toMatchObject({ reason: 'invalid_client' });
+    expect(JSON.stringify(rejection)).not.toContain(providerDescription);
 
     const tokenUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(tokenUrl.pathname).toBe('/rest/oauth2/latest/token');
@@ -144,6 +158,67 @@ describe('AtlassianOAuthClientService', () => {
     expect(body.get('client_secret')).toBe(configuration.clientSecret);
     expect(body.get('redirect_uri')).toBe(configuration.redirectUri);
     expect(body.get('code_verifier')).toBe('verifier-value');
+  });
+
+  it.each([
+    ['invalid_grant', 'invalid_grant'],
+    ['invalid_scope', 'invalid_scope'],
+    ['invalid_request', 'invalid_request'],
+    ['untrusted_provider_code', 'unknown'],
+  ] as const)(
+    'keeps only the recognized OAuth error code for %s',
+    async (providerError, expectedReason) => {
+      const service = makeService();
+      global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+        response(
+          400,
+          JSON.stringify({
+            error: providerError,
+            error_description: 'provider-controlled detail',
+          }),
+        ),
+      );
+
+      let rejection: unknown;
+
+      try {
+        await service.exchangeAuthorizationCode(
+          configuration,
+          'authorization-code',
+          'verifier-value',
+        );
+      } catch (error) {
+        rejection = error;
+      }
+
+      expect(rejection).toMatchObject({ reason: expectedReason });
+      expect(JSON.stringify(rejection)).not.toContain(
+        'provider-controlled detail',
+      );
+    },
+  );
+
+  it('does not expose a non-JSON provider rejection', async () => {
+    const service = makeService();
+    const providerBody = 'provider response must not leave the backend';
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(response(400, providerBody));
+
+    let rejection: unknown;
+
+    try {
+      await service.exchangeAuthorizationCode(
+        configuration,
+        'authorization-code',
+        'verifier-value',
+      );
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toMatchObject({ reason: 'unknown' });
+    expect(JSON.stringify(rejection)).not.toContain(providerBody);
   });
 
   it('rejects an invalid token response without exposing the provider response', async () => {

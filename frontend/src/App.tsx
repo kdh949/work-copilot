@@ -43,6 +43,9 @@ type IntegrationCallbackStatus =
   | "connected"
   | "provider_rejected"
   | "configuration_required"
+  | "authorization_code_rejected"
+  | "scope_configuration_required"
+  | "oauth_request_rejected"
   | "token_exchange_failed";
 
 type User = {
@@ -139,7 +142,13 @@ function integrationCallbackErrorMessage(
     case "provider_rejected":
       return `${providerName} OAuth 요청이 거절되었습니다. Application Link의 Redirect URL과 READ 권한을 확인한 뒤 다시 연결하세요.`;
     case "configuration_required":
-      return `${providerName} 인증 정보를 확인하세요. Incoming OAuth 2.0 링크에서 발급한 Client ID와 Client Secret을 연동 프로필에 저장한 뒤 다시 연결하세요.`;
+      return `${providerName}가 Client ID 또는 Client Secret을 거절했습니다. Incoming OAuth 2.0 링크에서 발급한 값을 연동 프로필에 다시 저장한 뒤 새로 연결하세요.`;
+    case "authorization_code_rejected":
+      return `${providerName} 인증 코드가 만료되었거나 이미 사용되었습니다. 연결을 다시 눌러 새 동의 절차를 완료하세요.`;
+    case "scope_configuration_required":
+      return `${providerName} OAuth scope가 Incoming OAuth 2.0 링크의 허용 범위와 일치하지 않습니다. 링크와 연동 프로필 모두에 READ 권한을 설정한 뒤 다시 연결하세요.`;
+    case "oauth_request_rejected":
+      return `${providerName}가 토큰 교환 요청을 거절했습니다. 연결을 새로 시작하고, 반복되면 Incoming OAuth 2.0 링크의 Redirect URL과 Client ID를 확인하세요.`;
     case "token_exchange_failed":
       return `${providerName} 연결을 완료하지 못했습니다. 잠시 후 다시 시도하고, 계속되면 연동 프로필의 Client ID와 Client Secret을 확인하세요.`;
     default:
@@ -597,6 +606,9 @@ function App() {
       (status !== "connected" &&
         status !== "provider_rejected" &&
         status !== "configuration_required" &&
+        status !== "authorization_code_rejected" &&
+        status !== "scope_configuration_required" &&
+        status !== "oauth_request_rejected" &&
         status !== "token_exchange_failed")
     ) {
       return;
