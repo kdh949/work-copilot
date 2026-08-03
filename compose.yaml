@@ -1,0 +1,172 @@
+name: work-copilot
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  migration:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: work-copilot-api:local
+    restart: "no"
+    command: ["npm", "run", "migration:run:compiled", "--workspace=backend"]
+    environment: &database-environment
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_SSL: "false"
+      DB_SSL_REJECT_UNAUTHORIZED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  ai:
+    build:
+      context: .
+      dockerfile: backend/ai-service/Dockerfile
+    image: work-copilot-ai:local
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:?AI_SERVICE_API_KEY is required}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      WORK_BRIEF_OPENAI_MODEL: ${WORK_BRIEF_OPENAI_MODEL:-}
+      WORK_BRIEF_DLP_RULES_JSON: ${WORK_BRIEF_DLP_RULES_JSON:-[]}
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-hybrid-chunks}
+      RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0}
+      OPENAI_INPUT_COST_PER_1M: ${OPENAI_INPUT_COST_PER_1M:-0.15}
+      OPENAI_OUTPUT_COST_PER_1M: ${OPENAI_OUTPUT_COST_PER_1M:-0.60}
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      HOLIDAY_COUNTRY: ${HOLIDAY_COUNTRY:-KR}
+      HOLIDAY_API_URL: ${HOLIDAY_API_URL:-https://date.nager.at/api/v3/PublicHolidays}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+      - egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api:
+    image: work-copilot-api:local
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      PORT: "3000"
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:?FRONTEND_ORIGINS is required}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI:?KEYCLOAK_REDIRECT_URI is required}
+      KEYCLOAK_ALLOWED_EMAIL_DOMAINS: ${KEYCLOAK_ALLOWED_EMAIL_DOMAINS:-}
+      OIDC_ATTEMPT_ENCRYPTION_KEY: ${OIDC_ATTEMPT_ENCRYPTION_KEY:-}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-3600}
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
+      INTEGRATION_ENCRYPTION_KEY_VERSION: ${INTEGRATION_ENCRYPTION_KEY_VERSION:-1}
+      INTEGRATION_ENCRYPTION_PREVIOUS_KEY: ${INTEGRATION_ENCRYPTION_PREVIOUS_KEY:-}
+      INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION: ${INTEGRATION_ENCRYPTION_PREVIOUS_KEY_VERSION:-}
+      INTEGRATION_CALLBACK_BASE_URL: ${INTEGRATION_CALLBACK_BASE_URL:?INTEGRATION_CALLBACK_BASE_URL is required}
+      INTEGRATION_BASE_URL_HOST_ALLOWLIST: ${INTEGRATION_BASE_URL_HOST_ALLOWLIST:-}
+      INTEGRATION_JIRA_SCOPE_ALLOWLIST: ${INTEGRATION_JIRA_SCOPE_ALLOWLIST:-READ}
+      INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST: ${INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST:-READ}
+      TRANSIENT_CONTENT_ENCRYPTION_KEY: ${TRANSIENT_CONTENT_ENCRYPTION_KEY:-}
+      TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION: ${TRANSIENT_CONTENT_ENCRYPTION_KEY_VERSION:-1}
+      TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY: ${TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY:-}
+      TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION: ${TRANSIENT_CONTENT_ENCRYPTION_PREVIOUS_KEY_VERSION:-}
+      TRANSIENT_EVIDENCE_TTL_SECONDS: ${TRANSIENT_EVIDENCE_TTL_SECONDS:-86400}
+      TRANSIENT_EVIDENCE_PURGE_INTERVAL_SECONDS: ${TRANSIENT_EVIDENCE_PURGE_INTERVAL_SECONDS:-900}
+      WORK_COPILOT_CLEANUP_MAX_AGE_SECONDS: ${WORK_COPILOT_CLEANUP_MAX_AGE_SECONDS:-4200}
+      WEBHOOK_SHADOW_MODE: ${WEBHOOK_SHADOW_MODE:-false}
+      WEBHOOK_INGRESS_VERIFIED: ${WEBHOOK_INGRESS_VERIFIED:-false}
+      WEBHOOK_INGRESS_ALLOWED_CIDRS: ${WEBHOOK_INGRESS_ALLOWED_CIDRS:-}
+      AI_SERVICE_URL: http://ai:8000
+      AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:?AI_SERVICE_API_KEY is required}
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      ai:
+        condition: service_healthy
+    networks:
+      - edge
+      - private
+      - egress
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  cleanup:
+    image: work-copilot-api:local
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/work-copilot-cleanup-loop"]
+    environment:
+      <<: *database-environment
+      CLEANUP_INTERVAL_SECONDS: ${CLEANUP_INTERVAL_SECONDS:-900}
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: /api
+    image: work-copilot-web:local
+    restart: unless-stopped
+    ports:
+      - "${SERVER_BIND_ADDRESS:?SERVER_BIND_ADDRESS is required}:7236:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+networks:
+  edge:
+    internal: true
+  private:
+    internal: true
+  egress:
+
+volumes:
+  postgres-data:
