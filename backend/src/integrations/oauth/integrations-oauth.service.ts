@@ -213,7 +213,11 @@ export class IntegrationsOAuthService {
 
   private authorizationFailureCode(error: unknown): string {
     if (error instanceof ProviderAuthorizationCodeRejectedError) {
-      return `PROVIDER_${error.reason.toUpperCase()}`;
+      const reason = `PROVIDER_${error.reason.toUpperCase()}`;
+
+      return error.reason === 'unknown' && error.providerStatus !== null
+        ? `${reason}_HTTP_${error.providerStatus}_${error.responseKind.toUpperCase()}`
+        : reason;
     }
 
     if (error instanceof ServiceUnavailableException) {

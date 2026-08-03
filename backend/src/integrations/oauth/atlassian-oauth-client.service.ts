@@ -55,6 +55,8 @@ export class ProviderReauthorizationRequiredError extends Error {
 export class ProviderAuthorizationCodeRejectedError extends BadRequestException {
   constructor(
     readonly reason: ProviderAuthorizationCodeRejectionReason = 'unknown',
+    readonly providerStatus: number | null = null,
+    readonly responseKind: 'json' | 'other' = 'other',
   ) {
     super('Integration authorization code exchange was rejected.');
   }
@@ -192,6 +194,13 @@ export class AtlassianOAuthClientService {
     ) {
       throw new ProviderAuthorizationCodeRejectedError(
         await this.tokenRejectionReason(response),
+        response.status,
+        response.headers
+          .get('content-type')
+          ?.toLowerCase()
+          .includes('application/json')
+          ? 'json'
+          : 'other',
       );
     }
 
