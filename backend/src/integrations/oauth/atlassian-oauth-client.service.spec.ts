@@ -17,6 +17,14 @@ const configuration: OAuthClientConfiguration = {
   redirectUri: 'https://api.example.test/integrations/jira/callback',
 };
 
+const confluenceConfiguration: OAuthClientConfiguration = {
+  ...configuration,
+  provider: 'confluence',
+  baseUrl: 'https://confluence.example.test/',
+  clientId: 'confluence-client',
+  redirectUri: 'https://api.example.test/integrations/confluence/callback',
+};
+
 const response = (status: number, body: string): Response =>
   ({
     ok: status >= 200 && status < 300,
@@ -70,6 +78,7 @@ describe('AtlassianOAuthClientService', () => {
     expect(authorizationUrl.searchParams.get('code_challenge')).toBe(
       createHash('sha256').update('verifier-value').digest('base64url'),
     );
+    expect(authorizationUrl.searchParams.has('client_secret')).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -109,24 +118,38 @@ describe('AtlassianOAuthClientService', () => {
     expect(requests[0]?.headers).toEqual({
       'Content-Type': 'application/x-www-form-urlencoded',
     });
-    const body = new URLSearchParams(String(requests[0]?.body));
-    expect(body.get('grant_type')).toBe('refresh_token');
-    expect(body.get('refresh_token')).toBe('refresh-token');
-    expect(body.get('redirect_uri')).toBe(configuration.redirectUri);
+    expect(requests[0]?.body).toBeUndefined();
+    const tokenUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(tokenUrl.searchParams.get('grant_type')).toBe('refresh_token');
+    expect(tokenUrl.searchParams.get('refresh_token')).toBe('refresh-token');
+    expect(tokenUrl.searchParams.get('redirect_uri')).toBe(
+      configuration.redirectUri,
+    );
   });
 
-  it('uses form-encoded token parameters and classifies an invalid client safely', async () => {
+  it('uses Jira Data Center query parameters and classifies an invalid client safely', async () => {
     const service = makeService();
     const providerDescription =
       'provider-controlled detail containing credentials must not leave the backend';
-    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(
-      response(
-        401,
-        JSON.stringify({
-          error: 'invalid_client',
-          error_description: providerDescription,
-        }),
-      ),
+    let requestedUrl: URL | undefined;
+    let requestedInit: RequestInit | undefined;
+    const fetchMock = jest.fn(
+      (url: URL | Request | string, init?: RequestInit) => {
+        if (!(url instanceof URL)) {
+          throw new Error('expected URL request');
+        }
+        requestedUrl = url;
+        requestedInit = init;
+        return Promise.resolve(
+          response(
+            401,
+            JSON.stringify({
+              error: 'invalid_client',
+              error_description: providerDescription,
+            }),
+          ),
+        );
+      },
     );
     global.fetch = fetchMock;
 
@@ -145,19 +168,127 @@ describe('AtlassianOAuthClientService', () => {
     expect(rejection).toBeInstanceOf(ProviderAuthorizationCodeRejectedError);
     expect(rejection).toMatchObject({ reason: 'invalid_client' });
     expect(JSON.stringify(rejection)).not.toContain(providerDescription);
+    expect(JSON.stringify(rejection)).not.toContain(configuration.clientSecret);
 
-    const tokenUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const tokenUrl = new URL(requestedUrl?.toString() ?? '');
     expect(tokenUrl.pathname).toBe('/rest/oauth2/latest/token');
+    expect(requestedInit?.body).toBeUndefined();
+    expect(tokenUrl.searchParams.get('grant_type')).toBe('authorization_code');
+    expect(tokenUrl.searchParams.get('code')).toBe('authorization-code');
+    expect(tokenUrl.searchParams.get('client_id')).toBe(configuration.clientId);
+    expect(tokenUrl.searchParams.get('client_secret')).toBe(
+      configuration.clientSecret,
+    );
+    expect(tokenUrl.searchParams.get('redirect_uri')).toBe(
+      configuration.redirectUri,
+    );
+    expect(tokenUrl.searchParams.get('code_verifier')).toBe('verifier-value');
+  });
+
+  it('keeps Confluence Data Center token parameters in the form body', async () => {
+    const service = makeService();
+    let requestedUrl: URL | undefined;
+    let requestedInit: RequestInit | undefined;
+    const fetchMock = jest.fn(
+      (url: URL | Request | string, init?: RequestInit) => {
+        if (!(url instanceof URL)) {
+          throw new Error('expected URL request');
+        }
+        requestedUrl = url;
+        requestedInit = init;
+        return Promise.resolve(
+          response(
+            200,
+            JSON.stringify({
+              access_token: 'confluence-access',
+              refresh_token: 'confluence-refresh',
+              expires_in: 3600,
+            }),
+          ),
+        );
+      },
+    );
+    global.fetch = fetchMock;
+
+    await expect(
+      service.exchangeAuthorizationCode(
+        confluenceConfiguration,
+        'authorization-code',
+        'verifier-value',
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'confluence-access',
+        refreshToken: 'confluence-refresh',
+      }),
+    );
+
+    const tokenUrl = new URL(requestedUrl?.toString() ?? '');
     expect(tokenUrl.search).toBe('');
+    expect(typeof requestedInit?.body).toBe('string');
     const body = new URLSearchParams(
-      String(fetchMock.mock.calls[0]?.[1]?.body),
+      typeof requestedInit?.body === 'string' ? requestedInit.body : '',
     );
     expect(body.get('grant_type')).toBe('authorization_code');
-    expect(body.get('code')).toBe('authorization-code');
-    expect(body.get('client_id')).toBe(configuration.clientId);
-    expect(body.get('client_secret')).toBe(configuration.clientSecret);
-    expect(body.get('redirect_uri')).toBe(configuration.redirectUri);
+    expect(body.get('client_id')).toBe(confluenceConfiguration.clientId);
+    expect(body.get('client_secret')).toBe(
+      confluenceConfiguration.clientSecret,
+    );
     expect(body.get('code_verifier')).toBe('verifier-value');
+  });
+
+  it('maps refresh invalid_grant to reauthorization without exposing provider detail', async () => {
+    const service = makeService();
+    const providerDescription =
+      'provider-controlled refresh token detail must stay private';
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      response(
+        400,
+        JSON.stringify({
+          error: 'invalid_grant',
+          error_description: providerDescription,
+        }),
+      ),
+    );
+
+    let rejection: unknown;
+
+    try {
+      await service.refresh(configuration, 'expired-refresh-token');
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ProviderReauthorizationRequiredError);
+    expect(JSON.stringify(rejection)).not.toContain(providerDescription);
+    expect(JSON.stringify(rejection)).not.toContain('expired-refresh-token');
+    expect(JSON.stringify(rejection)).not.toContain(configuration.clientSecret);
+  });
+
+  it('keeps other refresh 400 responses as provider failures', async () => {
+    const service = makeService();
+    const providerDescription = 'provider-controlled invalid request detail';
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      response(
+        400,
+        JSON.stringify({
+          error: 'invalid_request',
+          error_description: providerDescription,
+        }),
+      ),
+    );
+
+    let rejection: unknown;
+
+    try {
+      await service.refresh(configuration, 'refresh-token');
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ServiceUnavailableException);
+    expect(JSON.stringify(rejection)).not.toContain(providerDescription);
+    expect(JSON.stringify(rejection)).not.toContain('refresh-token');
   });
 
   it.each([

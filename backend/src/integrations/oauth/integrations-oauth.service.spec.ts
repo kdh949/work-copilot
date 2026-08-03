@@ -579,7 +579,7 @@ describe('IntegrationsOAuthService', () => {
   });
 
   it('turns provider reauthorization failures into a safe reconnect state', async () => {
-    const { service, connections, refresh, crypto } = harness;
+    const { service, connections, refresh, crypto, auditEvents } = harness;
     const encrypted = crypto.encrypt(
       JSON.stringify({
         accessToken: 'old-access',
@@ -610,5 +610,13 @@ describe('IntegrationsOAuthService', () => {
       { provider: 'jira', status: 'reauthorization_required' },
       { provider: 'confluence', status: 'authorization_required' },
     ]);
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'OAUTH_REAUTHORIZATION_REQUIRED',
+        resultCode: 'RECONNECT_REQUIRED',
+        actorUserId: 101,
+      }),
+    );
+    expect(JSON.stringify(auditEvents)).not.toContain('old-refresh');
   });
 });
