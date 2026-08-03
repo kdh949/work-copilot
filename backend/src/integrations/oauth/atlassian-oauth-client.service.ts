@@ -64,7 +64,7 @@ export class ProviderAuthorizationCodeRejectedError extends BadRequestException 
 export class AtlassianOAuthClientService {
   constructor(private readonly urlPolicy: IntegrationProfileUrlPolicy) {}
 
-  async createAuthorizationUrl(
+  createAuthorizationUrl(
     configuration: OAuthClientConfiguration,
     state: string,
     verifier: string,
@@ -87,7 +87,7 @@ export class AtlassianOAuthClientService {
     );
     authorizationUrl.searchParams.set('code_challenge_method', 'S256');
 
-    return authorizationUrl.toString();
+    return Promise.resolve(authorizationUrl.toString());
   }
 
   async exchangeAuthorizationCode(
@@ -118,13 +118,16 @@ export class AtlassianOAuthClientService {
     });
   }
 
-  async revoke(
-    _configuration: OAuthClientConfiguration,
-    _refreshToken: string,
+  revoke(
+    configuration: OAuthClientConfiguration,
+    refreshToken: string,
   ): Promise<void> {
+    void configuration;
+    void refreshToken;
     // Jira and Confluence Data Center document authorization and token endpoints,
     // but not a same-origin token revocation endpoint. Local token removal remains
     // the safe disconnect behavior.
+    return Promise.resolve();
   }
 
   configurationFromProfile(
@@ -154,17 +157,32 @@ export class AtlassianOAuthClientService {
     configuration: OAuthClientConfiguration,
     values: Record<string, string>,
   ): Promise<OAuthTokenPair> {
+    const tokenEndpoint = this.providerEndpoint(
+      configuration,
+      ATLASSIAN_OAUTH_TOKEN_PATH,
+    );
+    const request: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    };
+
+    if (configuration.provider === 'jira') {
+      // Jira Data Center's documented incoming-link flow reads token
+      // parameters from the POST URL query. The request still carries the
+      // form content type required by the provider endpoint.
+      for (const [key, value] of Object.entries(values)) {
+        tokenEndpoint.searchParams.set(key, value);
+      }
+    } else {
+      // Confluence Data Center accepts client credentials and token
+      // parameters in the form body, keeping them out of intermediary URLs.
+      request.body = new URLSearchParams(values).toString();
+    }
+
     const response = await this.fetchSameOrigin(
-      this.providerEndpoint(configuration, ATLASSIAN_OAUTH_TOKEN_PATH),
+      tokenEndpoint,
       configuration.baseUrl,
-      {
-        method: 'POST',
-        // OAuth token endpoints accept form-encoded parameters. Keep the
-        // client secret out of the URL so it cannot be captured by access
-        // logs on intermediary infrastructure.
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(values).toString(),
-      },
+      request,
     );
 
     if (
@@ -173,13 +191,21 @@ export class AtlassianOAuthClientService {
       response.status < 500
     ) {
       throw new ProviderAuthorizationCodeRejectedError(
-        await this.authorizationCodeRejectionReason(response),
+        await this.tokenRejectionReason(response),
       );
     }
 
     if (
       values.grant_type === 'refresh_token' &&
       (response.status === 401 || response.status === 403)
+    ) {
+      throw new ProviderReauthorizationRequiredError();
+    }
+
+    if (
+      values.grant_type === 'refresh_token' &&
+      response.status === 400 &&
+      (await this.tokenRejectionReason(response)) === 'invalid_grant'
     ) {
       throw new ProviderReauthorizationRequiredError();
     }
@@ -314,7 +340,7 @@ export class AtlassianOAuthClientService {
    * provider-controlled description, so callback feedback stays actionable
    * without disclosing authorization codes or credentials.
    */
-  private async authorizationCodeRejectionReason(
+  private async tokenRejectionReason(
     response: Response,
   ): Promise<ProviderAuthorizationCodeRejectionReason> {
     const contentLength = Number(response.headers.get('content-length'));
