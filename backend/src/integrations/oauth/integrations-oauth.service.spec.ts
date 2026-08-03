@@ -1,4 +1,8 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
   AtlassianOAuthClientService,
@@ -352,6 +356,46 @@ describe('IntegrationsOAuthService', () => {
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(exchangeAuthorizationCode).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs only a bounded failure code when authorization token exchange fails', async () => {
+    const { service, exchangeAuthorizationCode } = harness;
+    const warn = jest.fn();
+    (
+      service as unknown as {
+        logger: { warn: jest.Mock };
+      }
+    ).logger.warn = warn;
+    const started = await service.createAuthorizationUrl(
+      'jira',
+      101,
+      'corr-safe',
+    );
+    const state = new URL(started.authorizationUrl).searchParams.get('state');
+    exchangeAuthorizationCode.mockRejectedValueOnce(
+      new ServiceUnavailableException('Integration token response is invalid.'),
+    );
+
+    await expect(
+      service.completeAuthorization(
+        'jira',
+        'authorization-code-sensitive',
+        state as string,
+        101,
+        'corr-safe',
+      ),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(warn).toHaveBeenCalledWith({
+      event: 'OAUTH_AUTHORIZATION_FAILED',
+      provider: 'jira',
+      failureCode: 'PROVIDER_TOKEN_RESPONSE_INVALID',
+      correlationId: 'corr-safe',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      'authorization-code-sensitive',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('client-secret');
   });
 
   it('re-encrypts all profile secrets when a legacy profile is read for OAuth', async () => {
