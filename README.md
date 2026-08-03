@@ -66,7 +66,7 @@ flowchart LR
 | API       | NestJS 11, TypeORM, PostgreSQL                                                               |
 | AI        | FastAPI, LangChain, OpenAI, pgvector 하이브리드 검색                                         |
 | 인증·보안 | Keycloak OIDC Authorization Code + PKCE, HttpOnly 세션, CSRF·Origin 검증, AES-256-GCM 암호화 |
-| 연동·운영 | Jira·Confluence OAuth, Webhook freshness, idempotent publication saga, Render                |
+| 연동·운영 | Jira·Confluence OAuth, Webhook freshness, idempotent publication saga, Docker Compose + Sophos WAF |
 
 ## 빠른 시작
 
@@ -101,7 +101,7 @@ cd ../..
 ### 3. 데이터베이스와 스키마 준비
 
 ```bash
-docker compose up -d
+docker compose -f compose.dev.yaml up -d
 npm run migration:run --workspace=backend
 ```
 
@@ -145,7 +145,7 @@ npm run dev:frontend
 ```bash
 npm run build
 npm test
-docker compose config
+docker compose --env-file deploy/.env.production.example config --quiet
 ```
 
 AI 서비스 단위 테스트는 다음처럼 실행합니다.
@@ -166,22 +166,31 @@ python -m unittest discover -s tests -p 'test_*.py'
 │   └── ai-service/          # FastAPI RAG, DLP, 업무 브리프 생성 서비스
 ├── frontend/                # React + Vite 업무 공간
 ├── docs/                    # 아키텍처와 구현 계획
-├── docker-compose.yml       # 로컬 PostgreSQL + pgvector
-└── render.yaml              # Render 배포 정의
+├── compose.yaml             # Ubuntu 단일 서버 전체 배포
+├── compose.dev.yaml         # 개발용 PostgreSQL + pgvector
+└── deploy/                  # 운영 환경 예제, 백업 timer
 ```
 
 ## 배포
 
-프런트엔드는 루트의 `vercel.json`으로 Vercel에, API와 AI 서비스는 `render.yaml`으로 Render에 배포합니다. 현재 배포 브랜치 변경은 자동 배포되며, 운영 PostgreSQL은 Supabase Shared Pooler session endpoint와 TLS 연결을 사용합니다.
+운영 서비스는 Ubuntu 24.04 서버의 Docker Compose로 실행합니다. Sophos WAF가
+`https://work-copilot.dhkim.cloud:443`을 종료하고, 서버의 사설 IP `:7236`으로
+전달합니다. 웹과 API는 같은 도메인에서 제공되며 API 경로는 `/api`입니다.
 
-- Web: Vercel 배포 URL
-- API: <https://work-copilot-api.onrender.com>
-- AI: <https://work-copilot-ai.onrender.com>
+```bash
+cp deploy/.env.production.example .env.production
+chmod 600 .env.production
+# 실제 비밀값과 서버 사설 IP를 입력한 뒤 실행
+docker compose --env-file .env.production up --build -d
+```
+
+자세한 WAF, OAuth callback, 백업과 복구 절차는 [Ubuntu 24.04 배포 안내](docs/ubuntu-24.04-deployment.md)를 참고하세요.
 
 ## 더 알아보기
 
 - [백엔드 API와 환경 변수](backend/README.md)
 - [AI 서비스와 위키 데이터 적재](backend/ai-service/README.md)
+- [Ubuntu 24.04 단일 서버 배포](docs/ubuntu-24.04-deployment.md)
 - [업무 코파일럿 MVP 구현 계획](docs/jira-confluence-work-copilot-implementation-plan.md)
 
 ---

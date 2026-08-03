@@ -15,7 +15,7 @@ npm run start:dev
 Postgres는 루트 폴더에서 실행할 수 있습니다.
 
 ```bash
-docker compose up -d
+docker compose -f compose.dev.yaml up -d
 ```
 
 ## 주요 API
@@ -50,6 +50,7 @@ docker compose up -d
 - `INTEGRATION_BASE_URL_HOST_ALLOWLIST`: 쉼표로 구분한 Jira·Confluence HTTPS hostname allowlist
 - `INTEGRATION_JIRA_SCOPE_ALLOWLIST`, `INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST`: 프로필에서 선택 가능한 최소 OAuth scope 목록
 - `AI_SERVICE_URL`: FastAPI AI 서비스 주소
+- `TRUST_PROXY_HOPS`: WAF와 Nginx 앞단을 신뢰하는 프록시 홉 수. 운영 Compose는 `2`, API 직접 로컬 개발은 `0`
 
 ### Jira·Confluence 프로필 저장 전 운영 설정
 
