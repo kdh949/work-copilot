@@ -40,6 +40,11 @@ const diagnosticCode = (exception: unknown): string | undefined => {
 const publicDetailCode = (value: string | undefined): string | undefined =>
   value?.startsWith('INTEGRATION_PROFILE_') ? value : undefined;
 
+const safeExceptionType = (exception: unknown): string =>
+  exception instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,95}$/.test(exception.name)
+    ? exception.name
+    : 'UnknownException';
+
 @Catch()
 export class SafeHttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(SafeHttpExceptionFilter.name);
@@ -56,9 +61,10 @@ export class SafeHttpExceptionFilter implements ExceptionFilter {
     const correlationId = request.correlationId ?? 'missing-correlation-id';
     const rejectionCode = diagnosticCode(exception);
     const detailCode = publicDetailCode(rejectionCode);
+    const exceptionType = safeExceptionType(exception);
 
     this.logger.warn(
-      `${code}${rejectionCode ? ` diagnosticCode=${rejectionCode}` : ''} correlationId=${correlationId}`,
+      `${code} exception=${exceptionType}${rejectionCode ? ` diagnosticCode=${rejectionCode}` : ''} correlationId=${correlationId}`,
     );
     response.status(status).json({
       statusCode: status,

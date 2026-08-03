@@ -38,6 +38,13 @@ const WIKI_PAGE_SIZE = 12;
 let csrfToken = "";
 const IS_WORK_BRIEF_PREVIEW = import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "work-brief";
 
+type IntegrationProvider = "jira" | "confluence";
+type IntegrationCallbackStatus =
+  | "connected"
+  | "provider_rejected"
+  | "configuration_required"
+  | "token_exchange_failed";
+
 type User = {
   id: number;
   email: string;
@@ -120,6 +127,24 @@ function getAncestorPathKeys(path: string[]) {
   }
 
   return keys;
+}
+
+function integrationCallbackErrorMessage(
+  provider: IntegrationProvider,
+  status: IntegrationCallbackStatus,
+) {
+  const providerName = provider === "jira" ? "Jira" : "Confluence";
+
+  switch (status) {
+    case "provider_rejected":
+      return `${providerName} OAuth 요청이 거절되었습니다. Application Link의 Redirect URL과 READ 권한을 확인한 뒤 다시 연결하세요.`;
+    case "configuration_required":
+      return `${providerName} 인증 정보를 확인하세요. Incoming OAuth 2.0 링크에서 발급한 Client ID와 Client Secret을 연동 프로필에 저장한 뒤 다시 연결하세요.`;
+    case "token_exchange_failed":
+      return `${providerName} 연결을 완료하지 못했습니다. 잠시 후 다시 시도하고, 계속되면 연동 프로필의 Client ID와 Client Secret을 확인하세요.`;
+    default:
+      return "";
+  }
 }
 
 function App() {
@@ -558,6 +583,32 @@ function App() {
     return () => {
       isCurrent = false;
     };
+  }, []);
+
+  useEffect(() => {
+    if (IS_WORK_BRIEF_PREVIEW) return;
+
+    const url = new URL(window.location.href);
+    const provider = url.searchParams.get("integration");
+    const status = url.searchParams.get("integration_status");
+
+    if (
+      (provider !== "jira" && provider !== "confluence") ||
+      (status !== "connected" &&
+        status !== "provider_rejected" &&
+        status !== "configuration_required" &&
+        status !== "token_exchange_failed")
+    ) {
+      return;
+    }
+
+    setMenu("integrations");
+    const message = integrationCallbackErrorMessage(provider, status);
+    if (message) setMessage(message);
+
+    url.searchParams.delete("integration");
+    url.searchParams.delete("integration_status");
+    window.history.replaceState({}, document.title, url);
   }, []);
 
   function startKeycloakLogin() {

@@ -2,6 +2,7 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import {
   AtlassianOAuthClientService,
+  ProviderAuthorizationCodeRejectedError,
   type OAuthClientConfiguration,
   ProviderReauthorizationRequiredError,
 } from './atlassian-oauth-client.service';
@@ -72,7 +73,7 @@ describe('AtlassianOAuthClientService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('maps provider 401/403 without reading its body or using an Authorization header', async () => {
+  it('maps a rejected refresh token without reading its body', async () => {
     const service = makeService();
     const providerBody =
       'provider response containing an access token must stay unread';
@@ -104,12 +105,45 @@ describe('AtlassianOAuthClientService', () => {
     ).rejects.toBeInstanceOf(ProviderReauthorizationRequiredError);
 
     expect(unreadProviderBody).not.toHaveBeenCalled();
+    expect(requests[0]?.method).toBe('POST');
     expect(requests[0]?.headers).toEqual({
       'Content-Type': 'application/x-www-form-urlencoded',
     });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-      '/rest/oauth2/latest/token',
+    const body = new URLSearchParams(String(requests[0]?.body));
+    expect(body.get('grant_type')).toBe('refresh_token');
+    expect(body.get('refresh_token')).toBe('refresh-token');
+    expect(body.get('redirect_uri')).toBe(
+      configuration.redirectUri,
     );
+  });
+
+  it('uses form-encoded token parameters and reports an authorization-code rejection safely', async () => {
+    const service = makeService();
+    const fetchMock = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(response(401, 'provider response must stay unread'));
+    global.fetch = fetchMock;
+
+    await expect(
+      service.exchangeAuthorizationCode(
+        configuration,
+        'authorization-code',
+        'verifier-value',
+      ),
+    ).rejects.toBeInstanceOf(ProviderAuthorizationCodeRejectedError);
+
+    const tokenUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(tokenUrl.pathname).toBe('/rest/oauth2/latest/token');
+    expect(tokenUrl.search).toBe('');
+    const body = new URLSearchParams(
+      String(fetchMock.mock.calls[0]?.[1]?.body),
+    );
+    expect(body.get('grant_type')).toBe('authorization_code');
+    expect(body.get('code')).toBe('authorization-code');
+    expect(body.get('client_id')).toBe(configuration.clientId);
+    expect(body.get('client_secret')).toBe(configuration.clientSecret);
+    expect(body.get('redirect_uri')).toBe(configuration.redirectUri);
+    expect(body.get('code_verifier')).toBe('verifier-value');
   });
 
   it('rejects an invalid token response without exposing the provider response', async () => {

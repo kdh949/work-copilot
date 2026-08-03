@@ -36,6 +36,17 @@ export class ProviderReauthorizationRequiredError extends Error {
   }
 }
 
+/**
+ * The provider accepted the browser authorization request but rejected the
+ * subsequent one-time-code exchange. This is actionable configuration state,
+ * not a server crash and must not expose the provider response body.
+ */
+export class ProviderAuthorizationCodeRejectedError extends BadRequestException {
+  constructor() {
+    super('Integration authorization code exchange was rejected.');
+  }
+}
+
 @Injectable()
 export class AtlassianOAuthClientService {
   constructor(private readonly urlPolicy: IntegrationProfileUrlPolicy) {}
@@ -90,6 +101,7 @@ export class AtlassianOAuthClientService {
       refresh_token: refreshToken,
       client_id: configuration.clientId,
       client_secret: configuration.clientSecret,
+      redirect_uri: configuration.redirectUri,
     });
   }
 
@@ -134,12 +146,26 @@ export class AtlassianOAuthClientService {
       configuration.baseUrl,
       {
         method: 'POST',
+        // OAuth token endpoints accept form-encoded parameters. Keep the
+        // client secret out of the URL so it cannot be captured by access
+        // logs on intermediary infrastructure.
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(values).toString(),
       },
     );
 
-    if (response.status === 401 || response.status === 403) {
+    if (
+      values.grant_type === 'authorization_code' &&
+      response.status >= 400 &&
+      response.status < 500
+    ) {
+      throw new ProviderAuthorizationCodeRejectedError();
+    }
+
+    if (
+      values.grant_type === 'refresh_token' &&
+      (response.status === 401 || response.status === 403)
+    ) {
       throw new ProviderReauthorizationRequiredError();
     }
 
