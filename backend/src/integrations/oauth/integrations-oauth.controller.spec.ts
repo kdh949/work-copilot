@@ -63,9 +63,11 @@ describe('IntegrationsOAuthController', () => {
     );
   });
 
-  it('returns a safe configuration outcome when the token endpoint rejects the authorization code', async () => {
+  it('returns a safe credential outcome when Jira rejects the client credentials', async () => {
     const completeAuthorization = jest.fn(() =>
-      Promise.reject(new ProviderAuthorizationCodeRejectedError()),
+      Promise.reject(
+        new ProviderAuthorizationCodeRejectedError('invalid_client'),
+      ),
     );
     const redirect = jest.fn();
     const controller = new IntegrationsOAuthController(
@@ -88,6 +90,40 @@ describe('IntegrationsOAuthController', () => {
       'configuration_required',
     );
   });
+
+  it.each([
+    ['invalid_grant', 'authorization_code_rejected'],
+    ['invalid_scope', 'scope_configuration_required'],
+    ['invalid_request', 'oauth_request_rejected'],
+    ['unknown', 'token_exchange_failed'],
+  ] as const)(
+    'returns %s token-exchange feedback without a provider description',
+    async (reason, expectedOutcome) => {
+      const completeAuthorization = jest.fn(() =>
+        Promise.reject(new ProviderAuthorizationCodeRejectedError(reason)),
+      );
+      const redirect = jest.fn();
+      const controller = new IntegrationsOAuthController(
+        { completeAuthorization } as unknown as IntegrationsOAuthService,
+        {
+          get: jest.fn(() => 'https://work-copilot.example.test'),
+        } as unknown as ConfigService,
+      );
+
+      await controller.callback(
+        'jira',
+        { code: 'authorization-code', state: 'state-value' },
+        { user: { sub: 42 }, correlationId: 'corr-42' } as never,
+        { redirect } as unknown as Response,
+      );
+
+      const redirectUrl = new URL(redirect.mock.calls[0][0]);
+      expect(redirectUrl.searchParams.get('integration_status')).toBe(
+        expectedOutcome,
+      );
+      expect(redirect.mock.calls[0][0]).not.toContain(reason);
+    },
+  );
 
   it('does not render provider error descriptions from a rejected consent flow', async () => {
     const completeAuthorization = jest.fn();

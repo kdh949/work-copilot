@@ -30,6 +30,17 @@ export type OAuthTokenPair = {
   expiresAt: Date;
 };
 
+export type ProviderAuthorizationCodeRejectionReason =
+  | 'invalid_client'
+  | 'invalid_grant'
+  | 'invalid_scope'
+  | 'invalid_request'
+  | 'unknown';
+
+const AUTHORIZATION_CODE_REJECTION_REASONS = new Set<
+  Exclude<ProviderAuthorizationCodeRejectionReason, 'unknown'>
+>(['invalid_client', 'invalid_grant', 'invalid_scope', 'invalid_request']);
+
 export class ProviderReauthorizationRequiredError extends Error {
   constructor() {
     super('Provider reauthorization is required.');
@@ -42,7 +53,9 @@ export class ProviderReauthorizationRequiredError extends Error {
  * not a server crash and must not expose the provider response body.
  */
 export class ProviderAuthorizationCodeRejectedError extends BadRequestException {
-  constructor() {
+  constructor(
+    readonly reason: ProviderAuthorizationCodeRejectionReason = 'unknown',
+  ) {
     super('Integration authorization code exchange was rejected.');
   }
 }
@@ -159,7 +172,9 @@ export class AtlassianOAuthClientService {
       response.status >= 400 &&
       response.status < 500
     ) {
-      throw new ProviderAuthorizationCodeRejectedError();
+      throw new ProviderAuthorizationCodeRejectedError(
+        await this.authorizationCodeRejectionReason(response),
+      );
     }
 
     if (
@@ -290,6 +305,56 @@ export class AtlassianOAuthClientService {
       return value;
     } catch {
       throw new ServiceUnavailableException(message);
+    }
+  }
+
+  /**
+   * OAuth providers normally return a short, standardized `error` value for
+   * token endpoint failures. Preserve only known codes, never the
+   * provider-controlled description, so callback feedback stays actionable
+   * without disclosing authorization codes or credentials.
+   */
+  private async authorizationCodeRejectionReason(
+    response: Response,
+  ): Promise<ProviderAuthorizationCodeRejectionReason> {
+    const contentLength = Number(response.headers.get('content-length'));
+
+    if (
+      Number.isFinite(contentLength) &&
+      (contentLength < 0 || contentLength > MAX_RESPONSE_BYTES)
+    ) {
+      return 'unknown';
+    }
+
+    let text: string;
+
+    try {
+      text = await response.text();
+    } catch {
+      return 'unknown';
+    }
+
+    if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
+      return 'unknown';
+    }
+
+    try {
+      const body: unknown = JSON.parse(text);
+
+      if (!this.isRecord(body) || typeof body.error !== 'string') {
+        return 'unknown';
+      }
+
+      return AUTHORIZATION_CODE_REJECTION_REASONS.has(
+        body.error as Exclude<
+          ProviderAuthorizationCodeRejectionReason,
+          'unknown'
+        >,
+      )
+        ? (body.error as ProviderAuthorizationCodeRejectionReason)
+        : 'unknown';
+    } catch {
+      return 'unknown';
     }
   }
 
