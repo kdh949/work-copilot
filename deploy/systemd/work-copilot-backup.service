@@ -1,0 +1,10 @@
+[Unit]
+Description=Work Copilot PostgreSQL backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=WORK_COPILOT_DEPLOY_DIR=/opt/work-copilot
+Environment=WORK_COPILOT_BACKUP_DIR=/var/lib/work-copilot/backups
+ExecStart=/usr/bin/env bash /opt/work-copilot/deploy/backup-postgres.sh
