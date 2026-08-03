@@ -25,11 +25,20 @@ const confluenceConfig = {
   redirectUri: 'https://api.example.test/integrations/confluence/callback',
 };
 
-const response = (status: number, body: string): Response =>
+const response = (
+  status: number,
+  body: string,
+  contentType?: string,
+): Response =>
   ({
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: () => String(Buffer.byteLength(body, 'utf8')) },
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === 'content-length'
+          ? String(Buffer.byteLength(body, 'utf8'))
+          : (contentType ?? null),
+    },
     text: jest.fn(() => Promise.resolve(body)),
   }) as unknown as Response;
 
@@ -147,6 +156,7 @@ describe('AtlassianOAuthClientService', () => {
               error: 'invalid_client',
               error_description: providerDescription,
             }),
+            'application/json',
           ),
         );
       },
@@ -166,7 +176,11 @@ describe('AtlassianOAuthClientService', () => {
     }
 
     expect(rejection).toBeInstanceOf(ProviderAuthorizationCodeRejectedError);
-    expect(rejection).toMatchObject({ reason: 'invalid_client' });
+    expect(rejection).toMatchObject({
+      reason: 'invalid_client',
+      providerStatus: 401,
+      responseKind: 'json',
+    });
     expect(JSON.stringify(rejection)).not.toContain(providerDescription);
     expect(JSON.stringify(rejection)).not.toContain(configuration.clientSecret);
 
