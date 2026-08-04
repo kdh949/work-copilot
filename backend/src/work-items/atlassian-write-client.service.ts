@@ -109,6 +109,14 @@ export class AtlassianWriteClientService {
       );
     }
 
+    // Several Jira write resources acknowledge a successful mutation with an
+    // empty 200/201/204 response.  The caller still validates fields required
+    // for its own operation, but an empty success body must not turn a
+    // completed provider write into a retryable local failure.
+    if (text.trim().length === 0) {
+      return {};
+    }
+
     try {
       const body: unknown = JSON.parse(text);
       if (!this.isRecord(body)) {
