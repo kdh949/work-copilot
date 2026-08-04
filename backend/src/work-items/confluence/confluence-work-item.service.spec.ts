@@ -143,6 +143,55 @@ describe('ConfluenceWorkItemService', () => {
     expect(getJson).toHaveBeenCalled();
   });
 
+  it('stops scheduling recommendation searches once the result limit is filled', async () => {
+    const manySpaces = Array.from({ length: 25 }, (_, index) => `ENG${index}`);
+    const recommendationProfile = {
+      ...profile,
+      allowedSpaceKeys: manySpaces,
+    } as IntegrationProfile;
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(recommendationProfile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) => spaceKey,
+      ),
+      providerBaseUrl: jest.fn(() => recommendationProfile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, recommendationProfile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      const spaceKey = /space = "([^"]+)"/.exec(
+        url.searchParams.get('cql') ?? '',
+      )?.[1];
+      return Promise.resolve({
+        status: 'ok' as const,
+        body: {
+          results: Array.from({ length: 10 }, (_, index) => ({
+            id: `${spaceKey}-${index + 1}`,
+            title: `ENG-1 근거 ${index + 1}`,
+            space: { key: spaceKey },
+            version: { number: 1 },
+          })),
+        },
+      });
+    });
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.recommendEvidence(1, 'eng-1', '배포 정책', 'corr-a');
+
+    expect(result.recommendations).toHaveLength(10);
+    // Three workers may already be in flight, but no follow-up search is
+    // scheduled after one response fills the bounded result set.
+    expect(getJson).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps selected page storage inside the draft-only adapter and returns metadata without the raw excerpt', async () => {
     const accessPolicy = {
       activeProfile: jest.fn(() => Promise.resolve(profile)),

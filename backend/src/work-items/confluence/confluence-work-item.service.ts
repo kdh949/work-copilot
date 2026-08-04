@@ -13,6 +13,8 @@ import { IntegrationAccessPolicyService } from '../integration-access-policy.ser
 const MAX_SEARCH_RESULTS = 10;
 const MAX_TRANSIENT_EVIDENCE_CHARS = 8_000;
 const MAX_RECOMMENDATION_TERMS = 3;
+const MAX_RECOMMENDATION_REQUESTS = 12;
+const MAX_RECOMMENDATION_CONCURRENCY = 3;
 
 export type EvidenceRecommendationReason = 'jira_issue' | 'jira_summary';
 
@@ -139,14 +141,33 @@ export class ConfluenceWorkItemService {
     > = 'not_found';
     let hasAccessibleSearch = false;
 
-    for (const term of terms) {
-      for (const configuredSpaceKey of profile.allowedSpaceKeys) {
-        const spaceKey = this.accessPolicy.assertAllowedSpace(
+    const searches = terms.flatMap((term) =>
+      profile.allowedSpaceKeys.map((configuredSpaceKey) => ({
+        term,
+        spaceKey: this.accessPolicy.assertAllowedSpace(
           profile,
           configuredSpaceKey,
-        );
+        ),
+      })),
+    );
+    let nextSearch = 0;
+
+    const collect = async () => {
+      while (
+        collected.size < MAX_SEARCH_RESULTS &&
+        nextSearch < searches.length &&
+        nextSearch < MAX_RECOMMENDATION_REQUESTS
+      ) {
+        const searchInput = searches[nextSearch++];
+        if (!searchInput) {
+          return;
+        }
         const search = await this.readClient.getJson(
-          this.recommendationSearchUrl(profile, spaceKey, term.value),
+          this.recommendationSearchUrl(
+            profile,
+            searchInput.spaceKey,
+            searchInput.term.value,
+          ),
           this.accessPolicy.providerBaseUrl(profile, 'confluence'),
           accessToken,
         );
@@ -164,7 +185,7 @@ export class ConfluenceWorkItemService {
           try {
             evidence = this.normalizeRecommendationPage(
               profile,
-              spaceKey,
+              searchInput.spaceKey,
               item,
             );
           } catch {
@@ -174,18 +195,35 @@ export class ConfluenceWorkItemService {
           }
           const existing = collected.get(evidence.id);
           if (existing) {
-            if (!existing.recommendationReasons.includes(term.reason)) {
-              existing.recommendationReasons.push(term.reason);
+            if (
+              !existing.recommendationReasons.includes(
+                searchInput.term.reason,
+              )
+            ) {
+              existing.recommendationReasons.push(searchInput.term.reason);
             }
             continue;
           }
           collected.set(evidence.id, {
             ...evidence,
-            recommendationReasons: [term.reason],
+            recommendationReasons: [searchInput.term.reason],
           });
         }
       }
-    }
+    };
+
+    await Promise.all(
+      Array.from(
+        {
+          length: Math.min(
+            MAX_RECOMMENDATION_CONCURRENCY,
+            MAX_RECOMMENDATION_REQUESTS,
+            searches.length,
+          ),
+        },
+        () => collect(),
+      ),
+    );
 
     if (!hasAccessibleSearch) {
       return { accessStatus: lastUnavailable, recommendations: [] };
