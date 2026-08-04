@@ -14,6 +14,7 @@ import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
 import { PublicationService } from './publication.service';
 import { PublicationRendererService } from './publication-renderer.service';
 import { PublicationPreviewService } from './publication-preview.service';
+import { PublicationStepClaimerService } from './publication-step-claimer.service';
 import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
 
 @Module({
@@ -34,6 +35,7 @@ import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
     AtlassianPublicationWriteGateway,
     PublicationRendererService,
     PublicationPreviewService,
+    PublicationStepClaimerService,
     {
       provide: PUBLICATION_WRITE_GATEWAY,
       inject: [

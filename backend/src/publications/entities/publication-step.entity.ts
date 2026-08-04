@@ -37,8 +37,20 @@ export class PublicationStep {
   @Column({ type: 'varchar', nullable: true })
   providerObjectId: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  providerObjectVersion: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  providerUrl: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  contentHash: string | null;
+
   @Column({ type: 'varchar', length: 128, nullable: true })
   idempotencyKeyHash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  executionLeaseExpiresAt: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
