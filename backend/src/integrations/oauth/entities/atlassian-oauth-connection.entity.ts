@@ -59,6 +59,14 @@ export class AtlassianOAuthConnection {
   @Column({ type: 'varchar', length: 64, nullable: true })
   scopeFingerprint: string | null;
 
+  /**
+   * Normalized scopes shown in the completed user-consent flow.  This is kept
+   * alongside the fingerprint because a later profile scope expansion must
+   * not invalidate capabilities that the user already granted.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  grantedScopes: string[] | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

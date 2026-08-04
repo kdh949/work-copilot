@@ -10,9 +10,15 @@ export class OAuthWriteScopeFingerprint1785786000000 implements MigrationInterfa
     await queryRunner.query(
       'ALTER TABLE "atlassian_oauth_connections" ADD COLUMN IF NOT EXISTS "scopeFingerprint" character varying(64)',
     );
+    await queryRunner.query(
+      'ALTER TABLE "atlassian_oauth_connections" ADD COLUMN IF NOT EXISTS "grantedScopes" jsonb',
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      'ALTER TABLE "atlassian_oauth_connections" DROP COLUMN IF EXISTS "grantedScopes"',
+    );
     await queryRunner.query(
       'ALTER TABLE "atlassian_oauth_connections" DROP COLUMN IF EXISTS "scopeFingerprint"',
     );

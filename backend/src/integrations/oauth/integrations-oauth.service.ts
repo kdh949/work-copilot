@@ -26,6 +26,7 @@ import {
   type OAuthTokenPair,
   ProviderAuthorizationCodeRejectedError,
   ProviderReauthorizationRequiredError,
+  ProviderScopeUpgradeRequiredError,
 } from './atlassian-oauth-client.service';
 import { IntegrationProfile } from '../profiles/entities/integration-profile.entity';
 import { SecurityAuditEvent } from '../profiles/entities/security-audit-event.entity';
@@ -208,6 +209,7 @@ export class IntegrationsOAuthService {
         provider,
         tokenPair,
         scopeFingerprint,
+        configuration.scopes,
         correlationId,
       );
     } catch (error) {
@@ -288,11 +290,6 @@ export class IntegrationsOAuthService {
     const configuration = this.configuration(profile, provider);
     const requiredScopes = options.requiredScopes ?? [];
     this.assertRequiredScopes(configuration.scopes, requiredScopes);
-    const scopeFingerprint = this.scopeFingerprint(
-      provider,
-      configuration.scopes,
-    );
-
     try {
       return await this.dataSource.transaction(async (manager) => {
         await this.lockConnection(manager, userId, profile.id, provider);
@@ -309,11 +306,12 @@ export class IntegrationsOAuthService {
           connection.status === 'reauthorization_required' ||
           this.requiresReauthorizationForScopes(
             connection,
-            scopeFingerprint,
             requiredScopes,
           )
         ) {
-          throw new ProviderReauthorizationRequiredError();
+          throw connection && connection.status !== 'reauthorization_required'
+            ? new ProviderScopeUpgradeRequiredError()
+            : new ProviderReauthorizationRequiredError();
         }
 
         const tokens = this.tokensFromConnection(connection);
@@ -362,12 +360,14 @@ export class IntegrationsOAuthService {
         throw error;
       }
 
-      await this.markReauthorizationRequired(
-        userId,
-        profile.id,
-        provider,
-        correlationId,
-      );
+      if (error.invalidatesConnection) {
+        await this.markReauthorizationRequired(
+          userId,
+          profile.id,
+          provider,
+          correlationId,
+        );
+      }
       throw new ConflictException('Reconnect the integration to continue.');
     }
   }
@@ -492,6 +492,7 @@ export class IntegrationsOAuthService {
     provider: IntegrationProvider,
     tokenPair: OAuthTokenPair,
     scopeFingerprint: string,
+    grantedScopes: readonly string[],
     correlationId: string,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
@@ -517,6 +518,7 @@ export class IntegrationsOAuthService {
       connection.tokenVersion += 1;
       connection.status = 'connected';
       connection.scopeFingerprint = scopeFingerprint;
+      connection.grantedScopes = this.normalizedScopes(grantedScopes);
       const savedConnection = await manager.save(connection);
       await this.writeAudit(
         manager,
@@ -763,30 +765,40 @@ export class IntegrationsOAuthService {
 
   private requiresReauthorizationForScopes(
     connection: AtlassianOAuthConnection,
-    expectedScopeFingerprint: string,
     requiredScopes: readonly string[],
   ): boolean {
-    if (!connection.scopeFingerprint) {
-      // Pre-fingerprint grants retain read compatibility, but cannot be used
-      // to gain new write authority until the user consents again.
-      return requiredScopes.length > 0;
+    if (requiredScopes.length === 0) {
+      return false;
     }
 
-    return connection.scopeFingerprint !== expectedScopeFingerprint;
+    if (!connection.grantedScopes) {
+      // Pre-fingerprint grants retain read compatibility, but cannot be used
+      // to gain new write authority until the user consents again.
+      return true;
+    }
+
+    const granted = new Set(this.normalizedScopes(connection.grantedScopes));
+    return requiredScopes.some(
+      (scope) => !granted.has(scope.trim().toUpperCase()),
+    );
   }
 
   private scopeFingerprint(
     provider: IntegrationProvider,
     scopes: readonly string[],
   ): string {
-    const normalized = [
+    const normalized = this.normalizedScopes(scopes);
+    return createHash('sha256')
+      .update(`${provider}:${normalized.join(' ')}`)
+      .digest('hex');
+  }
+
+  private normalizedScopes(scopes: readonly string[]): string[] {
+    return [
       ...new Set(
         scopes.map((scope) => scope.trim().toUpperCase()).filter(Boolean),
       ),
     ].sort();
-    return createHash('sha256')
-      .update(`${provider}:${normalized.join(' ')}`)
-      .digest('hex');
   }
 
   private async findConnection(

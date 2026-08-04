@@ -667,7 +667,7 @@ describe('IntegrationsOAuthService', () => {
     expect(JSON.stringify(auditEvents)).not.toContain('old-refresh');
   });
 
-  it('binds write access to the consented scope fingerprint and reconnects after a scope change', async () => {
+  it('keeps a consented read grant usable when the profile later adds write scope', async () => {
     const { service, connections, oauthClient } = harness;
     const oauthClientMock = oauthClient as unknown as {
       configurationFromProfile: jest.Mock;
@@ -695,6 +695,7 @@ describe('IntegrationsOAuthService', () => {
     );
 
     expect(connections[0]?.scopeFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(connections[0]?.grantedScopes).toEqual(['READ', 'WRITE']);
     await expect(
       service.getAccessToken(101, 'jira', 'corr-c', {
         requiredScopes: ['WRITE'],
@@ -707,13 +708,53 @@ describe('IntegrationsOAuthService', () => {
     });
     await expect(
       service.getAccessToken(101, 'jira', 'corr-d', {
+        requiredScopes: ['WRITE_ADMIN'],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.getAccessToken(101, 'jira', 'corr-e')).resolves.toBe(
+      'access-token-user-a',
+    );
+    await expect(service.list(101)).resolves.toEqual([
+      { provider: 'jira', status: 'connected' },
+      { provider: 'confluence', status: 'authorization_required' },
+    ]);
+  });
+
+  it('requires a scope upgrade for write without revoking an existing read grant', async () => {
+    const { service, connections, oauthClient } = harness;
+    const oauthClientMock = oauthClient as unknown as {
+      configurationFromProfile: jest.Mock;
+    };
+
+    const started = await service.createAuthorizationUrl('jira', 101, 'corr-a');
+    const state = new URL(started.authorizationUrl).searchParams.get('state');
+    await service.completeAuthorization(
+      'jira',
+      'authorization-code',
+      state as string,
+      101,
+      'corr-b',
+    );
+    expect(connections[0]?.grantedScopes).toEqual(['READ']);
+
+    oauthClientMock.configurationFromProfile.mockReturnValue({
+      provider: 'jira',
+      baseUrl: 'https://jira.example.test/',
+      clientId: 'jira-client',
+      clientSecret: 'client-secret',
+      scopes: ['READ', 'WRITE'],
+      redirectUri: 'https://api.example.test/integrations/jira/callback',
+    });
+
+    await expect(
+      service.getAccessToken(101, 'jira', 'corr-c', {
         requiredScopes: ['WRITE'],
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-    await expect(service.list(101)).resolves.toEqual([
-      { provider: 'jira', status: 'reauthorization_required' },
-      { provider: 'confluence', status: 'authorization_required' },
-    ]);
+    await expect(service.getAccessToken(101, 'jira', 'corr-d')).resolves.toBe(
+      'access-token-user-a',
+    );
+    expect(connections[0]?.status).toBe('connected');
   });
 
   it('rejects a callback when the profile scope changed after the user opened consent', async () => {

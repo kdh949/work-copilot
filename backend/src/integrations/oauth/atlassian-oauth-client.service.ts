@@ -51,8 +51,19 @@ const AUTHORIZATION_CODE_REJECTION_REASONS = new Set<ProviderOAuthErrorReason>([
 ]);
 
 export class ProviderReauthorizationRequiredError extends Error {
-  constructor() {
+  constructor(readonly invalidatesConnection = true) {
     super('Provider reauthorization is required.');
+  }
+}
+
+/**
+ * The stored token is still valid for its previously consented scopes, but a
+ * caller requested an additional capability.  Keep the connection readable
+ * and ask the user to reconnect only for the scope upgrade.
+ */
+export class ProviderScopeUpgradeRequiredError extends ProviderReauthorizationRequiredError {
+  constructor() {
+    super(false);
   }
 }
 
