@@ -1,4 +1,14 @@
-import type { BriefDraft, WorkBriefApiRequest, WorkEvidence } from "./work-briefs.types";
+import type {
+  BriefDraft,
+  BriefPublication,
+  ChildTasksPublicationPreview,
+  ConfluencePublicationPreview,
+  EvidenceCollection,
+  JiraPublicationPreview,
+  ReadinessAssessment,
+  WorkBriefApiRequest,
+  WorkEvidence,
+} from "./work-briefs.types";
 
 export const WORK_BRIEF_PREVIEW_USER = {
   id: 7,
@@ -30,7 +40,15 @@ const previewDraft: BriefDraft = {
     acceptanceCriteria: [{ text: "정책에 따른 자동 재시도 결과를 확인합니다.", evidenceIds: ["confluence:PAY-42"] }],
     risks: [{ text: "PG사별 응답 차이를 검토합니다.", evidenceIds: ["confluence:PAY-31"] }],
     nextSteps: [{ text: "정책 리뷰 일정을 잡습니다.", evidenceIds: ["jira:PROJ-284"] }],
-    childTasks: [],
+    childTasks: [
+      {
+        clientTaskId: "preview-child-task-1",
+        text: "재시도 결과를 검증합니다.",
+        summary: "결제 재시도 검증 시나리오 작성",
+        evidenceIds: ["jira:PROJ-284", "confluence:PAY-42"],
+        selected: true,
+      },
+    ],
   },
   evidence: WORK_BRIEF_PREVIEW_EVIDENCE.slice(0, 5).map((item) => ({ ...item, aiStatus: "included" as const })),
   status: "draft",
@@ -40,8 +58,235 @@ const previewDraft: BriefDraft = {
   updatedAt: new Date().toISOString(),
 };
 
-export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(path: string) => {
-  if (path === "/brief-drafts") return previewDraft as T;
-  if (path.includes("/publication")) throw Object.assign(new Error("게시 전"), { status: 404 });
+const draftPath = `/brief-drafts/${previewDraft.id}`;
+
+const readiness: ReadinessAssessment = {
+  draftId: previewDraft.id,
+  assessmentVersion: 1,
+  status: "READY",
+  publishAllowed: true,
+  findings: [],
+  blockers: [],
+  evaluatedAt: "2026-08-04T09:00:00.000Z",
+};
+
+const confluencePreview: ConfluencePublicationPreview = {
+  phase: "confluence",
+  draftVersion: previewDraft.optimisticVersion,
+  previewHash: "a".repeat(64),
+  spaceKey: "PAY",
+  parentPage: {
+    id: "preview-parent-page",
+    title: "결제 플랫폼 실행 브리프",
+    url: "#preview-parent-page",
+    version: "12",
+  },
+  pageTitle: "[PROJ-284] 결제 실패 재시도 정책 실행 브리프",
+  bodyPreview:
+    "<h1>결제 실패 재시도 정책 실행 브리프</h1>\n<p>근거 기반 실행 계획입니다.</p>",
+  contentHash: "b".repeat(64),
+  evidence: previewDraft.evidence.map((item) => ({
+    id: item.id,
+    provider: item.provider,
+    title: item.title,
+    url: item.url,
+    version: item.version,
+  })),
+};
+
+const confluencePage = {
+  id: "preview-confluence-page",
+  url: "#preview-confluence-page",
+  title: confluencePreview.pageTitle,
+};
+
+const jiraPreview: JiraPublicationPreview = {
+  phase: "jira",
+  draftVersion: previewDraft.optimisticVersion,
+  previewHash: "c".repeat(64),
+  confluencePage,
+  remoteLink: {
+    globalId: "work-copilot:publication:preview-1",
+    url: confluencePage.url,
+    title: confluencePage.title,
+  },
+  summaryComment: {
+    summary: previewDraft.content?.summary.text ?? "",
+    url: confluencePage.url,
+  },
+};
+
+const childTasksPreview: ChildTasksPublicationPreview = {
+  phase: "child_tasks",
+  draftVersion: previewDraft.optimisticVersion,
+  previewHash: "d".repeat(64),
+  childTasks:
+    previewDraft.content?.childTasks
+      .filter((task) => task.selected)
+      .map((task) => ({
+        clientTaskId: task.clientTaskId,
+        summary: task.summary,
+      })) ?? [],
+};
+
+const publicationBase = {
+  id: "preview-publication-1",
+  draftId: previewDraft.id,
+  draftVersion: previewDraft.optimisticVersion,
+  executionMode: "mock" as const,
+  externalWritePerformed: false,
+  confluencePage: {
+    id: confluencePage.id,
+    version: "1",
+    url: confluencePage.url,
+    contentHash: confluencePreview.contentHash,
+  },
+  canRetry: true,
+  requiresReview: false,
+  updatedAt: "2026-08-04T09:05:00.000Z",
+};
+
+const confluencePublication: BriefPublication = {
+  ...publicationBase,
+  status: "CONFLUENCE_PUBLISHED",
+  steps: [
+    {
+      key: "confluence_page",
+      phase: "confluence",
+      status: "SUCCEEDED",
+      attempts: 1,
+      errorCode: null,
+      retryable: false,
+    },
+  ],
+};
+
+const jiraPublication: BriefPublication = {
+  ...publicationBase,
+  status: "JIRA_PUBLISHED",
+  steps: [
+    ...confluencePublication.steps,
+    {
+      key: "jira_remote_link",
+      phase: "jira",
+      status: "SUCCEEDED",
+      attempts: 1,
+      errorCode: null,
+      retryable: false,
+    },
+    {
+      key: "jira_summary_comment",
+      phase: "jira",
+      status: "SUCCEEDED",
+      attempts: 1,
+      errorCode: null,
+      retryable: false,
+    },
+  ],
+};
+
+const completedPublication: BriefPublication = {
+  ...publicationBase,
+  status: "PUBLISHED",
+  canRetry: false,
+  steps: [
+    ...jiraPublication.steps,
+    {
+      key: "jira_child_task:preview-child-task-1",
+      phase: "child_tasks",
+      status: "SUCCEEDED",
+      attempts: 1,
+      errorCode: null,
+      retryable: false,
+    },
+  ],
+};
+
+let publication: BriefPublication | null = null;
+
+export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
+  path: string,
+  options?: RequestInit,
+) => {
+  const method = options?.method?.toUpperCase() ?? "GET";
+
+  if (path === "/brief-drafts" && method === "POST") {
+    publication = null;
+    return previewDraft as T;
+  }
+  if (path.endsWith("/context")) {
+    return ({
+      accessStatus: "accessible",
+      evidence: WORK_BRIEF_PREVIEW_EVIDENCE.filter(
+        (item) => item.provider === "jira",
+      ),
+      recommendations: WORK_BRIEF_PREVIEW_EVIDENCE.filter(
+        (item) => item.provider === "confluence",
+      ).map((item) => ({
+        ...item,
+        recommendationReasons: ["jira_issue"],
+      })),
+      recommendationAccessStatus: "accessible",
+    } satisfies EvidenceCollection) as T;
+  }
+  if (path.includes("/spaces/") && path.includes("/search")) {
+    return ({
+      accessStatus: "accessible",
+      evidence: WORK_BRIEF_PREVIEW_EVIDENCE.filter(
+        (item) => item.provider === "confluence",
+      ),
+    } satisfies EvidenceCollection) as T;
+  }
+  if (path === `${draftPath}/readiness`) return readiness as T;
+  if (path === `${draftPath}/publication-preview`) {
+    return confluencePreview as T;
+  }
+  if (path === `${draftPath}/publish` && method === "POST") {
+    publication = confluencePublication;
+    return publication as T;
+  }
+  if (path === `${draftPath}/publication`) {
+    if (!publication) {
+      throw Object.assign(new Error("게시 전"), { status: 404 });
+    }
+    return publication as T;
+  }
+  if (path.includes("/jira-preview")) return jiraPreview as T;
+  if (path.endsWith("/jira") && method === "POST") {
+    publication = jiraPublication;
+    return publication as T;
+  }
+  if (path.includes("/child-tasks-preview")) return childTasksPreview as T;
+  if (path.endsWith("/child-tasks") && method === "POST") {
+    publication = completedPublication;
+    return publication as T;
+  }
+  if (path.endsWith("/retry") && method === "POST") {
+    const input = parsePreviewBody(options?.body);
+    publication =
+      input?.phase === "child_tasks"
+        ? completedPublication
+        : input?.phase === "jira"
+          ? jiraPublication
+          : confluencePublication;
+    return publication as T;
+  }
+  if (path === draftPath || path.endsWith("/refresh") || method === "PATCH") {
+    return previewDraft as T;
+  }
   return previewDraft as T;
 };
+
+function parsePreviewBody(
+  body: RequestInit["body"],
+): { phase?: string } | null {
+  if (typeof body !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as { phase?: string })
+      : null;
+  } catch {
+    return null;
+  }
+}
