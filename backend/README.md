@@ -37,6 +37,13 @@ docker compose -f compose.dev.yaml up -d
 - `POST /ai/onboarding`: 부서별 온보딩 추천
 - `POST /ai/lecture`: 강의안 생성
 - `POST /ai/agent`: Agent 실행
+- `GET /brief-drafts/:id/publication-preview`: Confluence 게시 대상, 부모 페이지, 본문, 인용 근거 미리보기
+- `POST /brief-drafts/:id/publish`: 승인한 Confluence 페이지 생성
+- `GET /brief-drafts/:id/publication/:publicationId/jira-preview`: Jira 링크·댓글 미리보기
+- `POST /brief-drafts/:id/publication/:publicationId/jira`: 승인한 Jira remote link·요약 댓글 반영
+- `GET /brief-drafts/:id/publication/:publicationId/child-tasks-preview`: 선택한 하위 작업과 createmeta 점검 결과 미리보기
+- `POST /brief-drafts/:id/publication/:publicationId/child-tasks`: 승인한 하위 작업 생성
+- `POST /brief-drafts/:id/publication/:publicationId/retry`: 같은 단계 idempotency key로 실패한 항목만 복구
 
 ## 환경변수
 
@@ -67,6 +74,30 @@ INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ
 프로필의 OAuth scope는 각 provider의 해당 allowlist에 있는 값만 사용할 수 있습니다.
 관리자 화면은 허용 목록 미설정, URL host 불일치, scope 불일치를 안전한 오류 코드와
 함께 구분해 안내합니다.
+
+### 실제 Jira·Confluence 게시 설정
+
+기본 어댑터는 실제 사용자 OAuth 토큰으로만 쓰기 요청을 보냅니다. 실제 게시를 켜려면
+각 provider allowlist와 활성 연동 프로필에 `WRITE`를 포함하고, 기존 사용자는 OAuth를
+다시 연결해야 합니다. scope 구성이 바뀐 이전 grant는 읽기에는 계속 사용할 수 있어도
+쓰기에 승격되지 않습니다.
+
+```dotenv
+INTEGRATION_JIRA_SCOPE_ALLOWLIST=READ,WRITE
+INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ,WRITE
+PUBLICATION_WRITE_MODE=real
+```
+
+`PUBLICATION_WRITE_MODE=mock`은 로컬 데모와 테스트에만 사용합니다. 값을 생략하거나
+`real`로 설정하면 실제 어댑터를 사용합니다.
+
+각 외부 쓰기 단계는 별도의 미리보기와 사용자 승인을 요구하며, 모든 `POST` 요청에는
+`Idempotency-Key`가 필요합니다. 같은 키로 재시도하면 성공한 단계는 건너뜁니다.
+Confluence 단계는 페이지 ID·버전·URL·content hash·요청자·요청 시각을 보존하고, 이후
+Jira 링크/댓글과 선택된 하위 작업을 순서대로 처리합니다.
+
+추천 Confluence 근거는 Jira 키와 요약에서 만든 metadata 검색 결과만 사용합니다. 문서
+본문은 추천 또는 모델 지시로 취급하지 않으며, 게시 본문은 서버 렌더러가 이스케이프합니다.
 
 Jira·Confluence Data Center OAuth Provider API는 OpenID Connect discovery를 제공하지
 않습니다. 연동은 각 base URL의 `/rest/oauth2/latest/authorize` 및
