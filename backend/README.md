@@ -86,11 +86,15 @@ INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ
 INTEGRATION_JIRA_SCOPE_ALLOWLIST=READ,WRITE
 INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ,WRITE
 PUBLICATION_WRITE_MODE=real
+PUBLICATION_ATLASSIAN_OAUTH_CONTRACT=verified
 ```
 
 `PUBLICATION_WRITE_MODE`를 생략하면 쓰기를 수행하지 않는 `mock` 어댑터를 사용합니다.
 실제 외부 쓰기는 `real`을 명시했을 때만 활성화되며, `mokc` 같은 알 수 없는 값은
-애플리케이션 시작을 실패시킵니다.
+애플리케이션 시작을 실패시킵니다. 또한 `real` 모드는 대상 Data Center 버전의 사용자
+OAuth2 staging contract를 통과한 뒤에만 `PUBLICATION_ATLASSIAN_OAUTH_CONTRACT=verified`로
+켜야 합니다. 계약 실행 방법과 필수 endpoint는
+[`docs/atlassian-dc-oauth-contract.md`](../docs/atlassian-dc-oauth-contract.md)에 정리했습니다.
 
 각 외부 쓰기 단계는 별도의 미리보기와 사용자 승인을 요구하며, 모든 `POST` 요청에는
 `Idempotency-Key`가 필요합니다. 같은 키로 재시도하면 성공한 단계는 건너뜁니다.

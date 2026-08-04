@@ -8,6 +8,7 @@ import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.en
 import type { BriefPublication } from './entities/brief-publication.entity';
 import type { PublicationPhase } from './publication.types';
 import { PublicationRendererService } from './publication-renderer.service';
+import { confluencePublicationTitle } from './confluence-publication-title';
 import {
   buildChildTaskCreatePayload,
   type CanonicalChildTaskCreatePayload,
@@ -129,7 +130,11 @@ export class PublicationPreviewService {
       draftVersion: draft.optimisticVersion,
       spaceKey,
       parentPage: { id: parentId, title, url: parentUrl, version },
-      pageTitle: rendered.pageTitle,
+      pageTitle: confluencePublicationTitle(
+        rendered.pageTitle,
+        draft.id,
+        rendered.contentHash,
+      ),
       bodyPreview: rendered.storageBody,
       contentHash: rendered.contentHash,
       evidence,

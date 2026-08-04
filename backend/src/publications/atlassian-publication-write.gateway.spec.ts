@@ -1,4 +1,5 @@
 import { AtlassianPublicationWriteGateway } from './atlassian-publication-write.gateway';
+import { confluencePublicationTitle } from './confluence-publication-title';
 import { PublicationRendererService } from './publication-renderer.service';
 
 const PROFILE = {
@@ -75,7 +76,20 @@ describe('AtlassianPublicationWriteGateway', () => {
     ],
   };
 
-  it('creates a Confluence page under the verified parent and records a stable property', async () => {
+  function expectedConfluenceTitle(): string {
+    const rendered = new PublicationRendererService().render(
+      input.sourceJiraKey,
+      input.content,
+      input.evidence,
+    );
+    return confluencePublicationTitle(
+      rendered.pageTitle,
+      input.draftId,
+      rendered.contentHash,
+    );
+  }
+
+  it('creates a Confluence page under the verified parent with a stable title marker', async () => {
     const harness = createGateway(
       [
         {
@@ -84,10 +98,7 @@ describe('AtlassianPublicationWriteGateway', () => {
         },
         { status: 'ok', body: { results: [] } },
       ],
-      [
-        { status: 'ok', body: { id: '99', version: { number: 1 } } },
-        { status: 'ok', body: { id: 'property-1' } },
-      ],
+      [{ status: 'ok', body: { id: '99', version: { number: 1 } } }],
     );
 
     const result = await harness.gateway.upsertConfluenceBrief(input);
@@ -116,20 +127,13 @@ describe('AtlassianPublicationWriteGateway', () => {
       expect.objectContaining({
         ancestors: [{ id: '55' }],
         space: { key: 'ENG' },
+        title: expectedConfluenceTitle(),
       }),
     );
-    expect(harness.writeClient.postJson).toHaveBeenNthCalledWith(
-      2,
-      expect.any(URL),
-      'https://confluence.example.test/',
-      'user-token',
-      expect.objectContaining({
-        key: 'work-copilot.publication',
-      }),
-    );
+    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses a page carrying the same operation property without another write', async () => {
+  it('reuses a page carrying the same deterministic title without another write', async () => {
     const harness = createGateway(
       [
         {
@@ -142,15 +146,11 @@ describe('AtlassianPublicationWriteGateway', () => {
             results: [
               {
                 id: '99',
-                title: '[ENG-42] 배포 브리프',
+                title: expectedConfluenceTitle(),
                 version: { number: 1 },
               },
             ],
           },
-        },
-        {
-          status: 'ok',
-          body: { value: { operationId: input.operationId } },
         },
       ],
       [],
@@ -164,7 +164,38 @@ describe('AtlassianPublicationWriteGateway', () => {
     expect(harness.writeClient.postJson).not.toHaveBeenCalled();
   });
 
-  it('finds a Confluence reconciliation marker on a later child-page page', async () => {
+  it('reconciles a page after an ambiguous create response without a property write', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: [] } },
+        {
+          status: 'ok',
+          body: {
+            results: [
+              {
+                id: '99',
+                title: expectedConfluenceTitle(),
+                version: { number: 1 },
+              },
+            ],
+          },
+        },
+      ],
+      [{ status: 'rejected', body: {} }],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).resolves.toMatchObject({ providerObjectId: '99' });
+    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+  });
+
+  it('finds a Confluence title marker on a later child-page page', async () => {
     const unrelated = Array.from({ length: 50 }, (_, index) => ({
       id: `unrelated-${index}`,
       title: '다른 제목',
@@ -183,16 +214,12 @@ describe('AtlassianPublicationWriteGateway', () => {
             results: [
               {
                 id: '99',
-                title: '[ENG-42] 배포 브리프',
+                title: expectedConfluenceTitle(),
                 version: { number: 1 },
               },
             ],
             total: 51,
           },
-        },
-        {
-          status: 'ok',
-          body: { value: { operationId: input.operationId } },
         },
       ],
       [],
@@ -201,7 +228,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     await expect(
       harness.gateway.upsertConfluenceBrief(input),
     ).resolves.toMatchObject({ providerObjectId: '99' });
-    expect(harness.readClient.getJson).toHaveBeenCalledTimes(4);
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(3);
     expect(harness.writeClient.postJson).not.toHaveBeenCalled();
   });
 

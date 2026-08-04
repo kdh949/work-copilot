@@ -22,8 +22,8 @@ import {
   buildChildTaskCreatePayload,
   normalizeJiraSummary,
 } from './child-task-create-payload';
+import { confluencePublicationTitle } from './confluence-publication-title';
 
-const CONFLUENCE_PROPERTY_KEY = 'work-copilot.publication';
 const JIRA_CHILD_PROPERTY_KEY = 'work-copilot.publication-task';
 const RECONCILIATION_PAGE_SIZE = 50;
 const MAX_RECONCILIATION_PAGES = 5;
@@ -45,8 +45,9 @@ type ConfluencePage = {
 
 /**
  * Real, user-context-only publication adapter for Jira and Confluence Data
- * Center. It intentionally persists no provider response body and uses stable
- * properties/markers for reconciliation after an ambiguous network failure.
+ * Center. It intentionally persists no provider response body and uses a
+ * deterministic Confluence title plus Jira markers for reconciliation after
+ * an ambiguous network failure.
  */
 @Injectable()
 export class AtlassianPublicationWriteGateway implements PublicationWriteGateway {
@@ -76,6 +77,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       input.content,
       input.evidence,
     );
+    const pageTitle = confluencePublicationTitle(
+      rendered.pageTitle,
+      input.draftId,
+      rendered.contentHash,
+    );
     const accessToken = await this.token(input, 'confluence');
 
     if (input.existingContentId) {
@@ -100,12 +106,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       accessToken,
       input.parentPageId,
     );
-    const reconciled = await this.findConfluencePageByOperation(
+    const reconciled = await this.findConfluencePageByTitle(
       input.profile,
       accessToken,
       parent.id,
-      input.operationId,
-      rendered.pageTitle,
+      pageTitle,
     );
     if (reconciled) {
       return {
@@ -126,7 +131,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       accessToken,
       {
         type: 'page',
-        title: rendered.pageTitle,
+        title: pageTitle,
         space: { key: parent.spaceKey },
         ancestors: [{ id: parent.id }],
         body: {
@@ -137,38 +142,12 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         },
       },
     );
-    if (created.status === 'conflict') {
-      this.fail('CONFLUENCE_VERSION_CONFLICT', false);
-    }
     if (created.status !== 'ok') {
-      this.fail('CONFLUENCE_WRITE_FAILED', created.status === 'rejected');
-    }
-
-    const page = this.confluencePage(input.profile, created.body);
-    const property = await this.writeClient.postJson(
-      this.accessPolicy.providerUrl(
-        input.profile,
-        'confluence',
-        `rest/api/content/${encodeURIComponent(page.id)}/property`,
-      ),
-      this.accessPolicy.providerBaseUrl(input.profile, 'confluence'),
-      accessToken,
-      {
-        key: CONFLUENCE_PROPERTY_KEY,
-        value: {
-          operationId: input.operationId,
-          draftId: input.draftId,
-          contentHash: rendered.contentHash,
-        },
-      },
-    );
-    if (property.status !== 'ok') {
-      const recovered = await this.findConfluencePageByOperation(
+      const recovered = await this.findConfluencePageByTitle(
         input.profile,
         accessToken,
         parent.id,
-        input.operationId,
-        rendered.pageTitle,
+        pageTitle,
       );
       if (recovered) {
         return {
@@ -178,9 +157,13 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
           contentHash: rendered.contentHash,
         };
       }
-      this.fail('CONFLUENCE_WRITE_FAILED', false);
+      if (created.status === 'conflict') {
+        this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+      }
+      this.fail('CONFLUENCE_WRITE_FAILED', created.status === 'rejected');
     }
 
+    const page = this.confluencePage(input.profile, created.body);
     return {
       providerObjectId: page.id,
       providerObjectVersion: page.version,
@@ -459,15 +442,13 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       : null;
   }
 
-  private async findConfluencePageByOperation(
+  private async findConfluencePageByTitle(
     profile: IntegrationProfile,
     accessToken: string,
     parentPageId: string,
-    operationId: string,
     expectedTitle: string,
   ): Promise<ConfluencePage | null> {
     let start = 0;
-    let propertyLookups = 0;
     for (
       let pageIndex = 0;
       pageIndex < MAX_RECONCILIATION_PAGES;
@@ -490,29 +471,10 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         : [];
       for (const item of items) {
         const candidate = this.record(item);
-        if (
-          !candidate ||
-          candidate.title !== expectedTitle ||
-          propertyLookups >= MAX_RECONCILIATION_PROPERTY_LOOKUPS
-        ) {
+        if (!candidate || candidate.title !== expectedTitle) {
           continue;
         }
-        const page = this.confluencePage(profile, candidate);
-        propertyLookups += 1;
-        const property = await this.readClient.getJson(
-          this.accessPolicy.providerUrl(
-            profile,
-            'confluence',
-            `rest/api/content/${encodeURIComponent(page.id)}/property/${CONFLUENCE_PROPERTY_KEY}`,
-          ),
-          this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-          accessToken,
-        );
-        const value =
-          property.status === 'ok' ? this.record(property.body.value) : null;
-        if (value?.operationId === operationId) {
-          return page;
-        }
+        return this.confluencePage(profile, candidate);
       }
       if (!this.hasNextPage(children.body, start, items.length)) {
         return null;

@@ -5,16 +5,26 @@ describe('publicationWriteMode', () => {
     expect(publicationWriteMode(undefined)).toBe('mock');
   });
 
-  it.each([
-    ['mock', 'mock'],
-    [' REAL ', 'real'],
-  ] as const)('accepts the explicit %s mode', (value, expected) => {
-    expect(publicationWriteMode(value)).toBe(expected);
+  it.each([['mock', 'mock']] as const)(
+    'accepts the explicit %s mode',
+    (value, expected) => {
+      expect(publicationWriteMode(value)).toBe(expected);
+    },
+  );
+
+  it('requires a verified staging contract before enabling real writes', () => {
+    expect(() => publicationWriteMode('real')).toThrow(
+      'OAuth2 staging contract',
+    );
+    expect(publicationWriteMode(' REAL ', true)).toBe('real');
   });
 
-  it.each(['', 'mokc', 'enabled'])('fails closed for invalid mode %s', (value) => {
-    expect(() => publicationWriteMode(value)).toThrow(
-      'PUBLICATION_WRITE_MODE',
-    );
-  });
+  it.each(['', 'mokc', 'enabled'])(
+    'fails closed for invalid mode %s',
+    (value) => {
+      expect(() => publicationWriteMode(value)).toThrow(
+        'PUBLICATION_WRITE_MODE',
+      );
+    },
+  );
 });

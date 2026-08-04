@@ -19,12 +19,18 @@ import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
 
 export function publicationWriteMode(
   configured: string | undefined,
+  oauthContractVerified = false,
 ): 'mock' | 'real' {
   if (configured === undefined) {
     return 'mock';
   }
   const normalized = configured.trim().toLowerCase();
   if (normalized === 'mock' || normalized === 'real') {
+    if (normalized === 'real' && !oauthContractVerified) {
+      throw new Error(
+        'PUBLICATION_WRITE_MODE=real requires a verified Atlassian OAuth2 staging contract.',
+      );
+    }
     return normalized;
   }
   throw new Error('PUBLICATION_WRITE_MODE must be either "mock" or "real".');
@@ -63,6 +69,8 @@ export function publicationWriteMode(
       ) =>
         publicationWriteMode(
           configService.get<string>('PUBLICATION_WRITE_MODE'),
+          configService.get<string>('PUBLICATION_ATLASSIAN_OAUTH_CONTRACT') ===
+            'verified',
         ) === 'mock'
           ? mockGateway
           : realGateway,
