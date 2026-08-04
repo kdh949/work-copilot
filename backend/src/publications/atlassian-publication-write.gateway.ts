@@ -25,7 +25,11 @@ import {
 
 const CONFLUENCE_PROPERTY_KEY = 'work-copilot.publication';
 const JIRA_CHILD_PROPERTY_KEY = 'work-copilot.publication-task';
-const MAX_RECONCILIATION_CANDIDATES = 100;
+const RECONCILIATION_PAGE_SIZE = 50;
+const MAX_RECONCILIATION_PAGES = 5;
+const MAX_RECONCILIATION_REQUESTS = 30;
+const MAX_RECONCILIATION_PROPERTY_LOOKUPS =
+  MAX_RECONCILIATION_REQUESTS - MAX_RECONCILIATION_PAGES;
 
 type GatewayContext = {
   userId: number;
@@ -276,7 +280,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     const endpoint = this.accessPolicy.providerUrl(
       input.profile,
       'jira',
-      `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/comment?maxResults=${MAX_RECONCILIATION_CANDIDATES}`,
+      `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/comment`,
     );
     const existing = await this.findCommentByMarker(
       endpoint,
@@ -462,41 +466,58 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     operationId: string,
     expectedTitle: string,
   ): Promise<ConfluencePage | null> {
-    const children = await this.readClient.getJson(
-      this.accessPolicy.providerUrl(
-        profile,
-        'confluence',
-        `rest/api/content/${encodeURIComponent(parentPageId)}/child/page?expand=version&limit=${MAX_RECONCILIATION_CANDIDATES}`,
-      ),
-      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-      accessToken,
-    );
-    if (children.status !== 'ok') {
-      return null;
-    }
-    const items = Array.isArray(children.body.results)
-      ? children.body.results
-      : [];
-    for (const item of items) {
-      const candidate = this.record(item);
-      if (!candidate || candidate.title !== expectedTitle) {
-        continue;
-      }
-      const page = this.confluencePage(profile, candidate);
-      const property = await this.readClient.getJson(
+    let start = 0;
+    let propertyLookups = 0;
+    for (
+      let pageIndex = 0;
+      pageIndex < MAX_RECONCILIATION_PAGES;
+      pageIndex += 1
+    ) {
+      const children = await this.readClient.getJson(
         this.accessPolicy.providerUrl(
           profile,
           'confluence',
-          `rest/api/content/${encodeURIComponent(page.id)}/property/${CONFLUENCE_PROPERTY_KEY}`,
+          `rest/api/content/${encodeURIComponent(parentPageId)}/child/page?expand=version&limit=${RECONCILIATION_PAGE_SIZE}&start=${start}`,
         ),
         this.accessPolicy.providerBaseUrl(profile, 'confluence'),
         accessToken,
       );
-      const value =
-        property.status === 'ok' ? this.record(property.body.value) : null;
-      if (value?.operationId === operationId) {
-        return page;
+      if (children.status !== 'ok') {
+        return null;
       }
+      const items = Array.isArray(children.body.results)
+        ? children.body.results
+        : [];
+      for (const item of items) {
+        const candidate = this.record(item);
+        if (
+          !candidate ||
+          candidate.title !== expectedTitle ||
+          propertyLookups >= MAX_RECONCILIATION_PROPERTY_LOOKUPS
+        ) {
+          continue;
+        }
+        const page = this.confluencePage(profile, candidate);
+        propertyLookups += 1;
+        const property = await this.readClient.getJson(
+          this.accessPolicy.providerUrl(
+            profile,
+            'confluence',
+            `rest/api/content/${encodeURIComponent(page.id)}/property/${CONFLUENCE_PROPERTY_KEY}`,
+          ),
+          this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+          accessToken,
+        );
+        const value =
+          property.status === 'ok' ? this.record(property.body.value) : null;
+        if (value?.operationId === operationId) {
+          return page;
+        }
+      }
+      if (!this.hasNextPage(children.body, start, items.length)) {
+        return null;
+      }
+      start += items.length;
     }
     return null;
   }
@@ -507,26 +528,42 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     accessToken: string,
     marker: string,
   ): Promise<string | null> {
-    const result = await this.readClient.getJson(
-      endpoint,
-      this.accessPolicy.providerBaseUrl(profile, 'jira'),
-      accessToken,
-    );
-    if (result.status !== 'ok' || !Array.isArray(result.body.comments)) {
-      return null;
-    }
-    for (const comment of result.body.comments) {
-      const candidate = this.record(comment);
-      if (
-        candidate &&
-        typeof candidate.body === 'string' &&
-        candidate.body.includes(marker)
-      ) {
-        const id = this.identifier(candidate.id);
-        if (id) {
-          return id;
+    let startAt = 0;
+    for (
+      let pageIndex = 0;
+      pageIndex < MAX_RECONCILIATION_PAGES;
+      pageIndex += 1
+    ) {
+      const page = new URL(endpoint);
+      page.searchParams.set('startAt', String(startAt));
+      page.searchParams.set('maxResults', String(RECONCILIATION_PAGE_SIZE));
+      const result = await this.readClient.getJson(
+        page,
+        this.accessPolicy.providerBaseUrl(profile, 'jira'),
+        accessToken,
+      );
+      if (result.status !== 'ok' || !Array.isArray(result.body.comments)) {
+        return null;
+      }
+      for (const comment of result.body.comments) {
+        const candidate = this.record(comment);
+        if (
+          candidate &&
+          typeof candidate.body === 'string' &&
+          candidate.body.includes(marker)
+        ) {
+          const id = this.identifier(candidate.id);
+          if (id) {
+            return id;
+          }
         }
       }
+      if (
+        !this.hasNextPage(result.body, startAt, result.body.comments.length)
+      ) {
+        return null;
+      }
+      startAt += result.body.comments.length;
     }
     return null;
   }
@@ -538,45 +575,128 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     operationId: string,
     clientTaskId: string,
   ): Promise<string | null> {
-    const query = new URLSearchParams({
-      jql: `parent = ${parentIssueKey}`,
-      fields: 'summary',
-      maxResults: String(MAX_RECONCILIATION_CANDIDATES),
-    });
-    const search = await this.readClient.getJson(
-      this.accessPolicy.providerUrl(
-        profile,
-        'jira',
-        `rest/api/2/search?${query.toString()}`,
-      ),
-      this.accessPolicy.providerBaseUrl(profile, 'jira'),
-      accessToken,
-    );
-    if (search.status !== 'ok' || !Array.isArray(search.body.issues)) {
-      return null;
-    }
-    for (const issue of search.body.issues) {
-      const candidate = this.record(issue);
-      const issueId = candidate ? this.identifier(candidate.id) : null;
-      if (!issueId) {
-        continue;
-      }
-      const property = await this.readClient.getJson(
+    let startAt = 0;
+    let propertyLookups = 0;
+    for (
+      let pageIndex = 0;
+      pageIndex < MAX_RECONCILIATION_PAGES;
+      pageIndex += 1
+    ) {
+      const query = new URLSearchParams({
+        jql: `parent = ${parentIssueKey}`,
+        fields: 'summary',
+        properties: JIRA_CHILD_PROPERTY_KEY,
+        maxResults: String(RECONCILIATION_PAGE_SIZE),
+        startAt: String(startAt),
+      });
+      const search = await this.readClient.getJson(
         this.accessPolicy.providerUrl(
           profile,
           'jira',
-          `rest/api/2/issue/${encodeURIComponent(issueId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+          `rest/api/2/search?${query.toString()}`,
         ),
         this.accessPolicy.providerBaseUrl(profile, 'jira'),
         accessToken,
       );
-      const value =
-        property.status === 'ok' ? this.record(property.body.value) : null;
-      if (
-        value?.operationId === operationId &&
-        value.clientTaskId === clientTaskId
-      ) {
-        return issueId;
+      if (search.status !== 'ok' || !Array.isArray(search.body.issues)) {
+        return null;
+      }
+      for (const issue of search.body.issues) {
+        const candidate = this.record(issue);
+        const issueId = candidate ? this.identifier(candidate.id) : null;
+        if (!candidate || !issueId) {
+          continue;
+        }
+        const inlineValue = this.issuePropertyValue(
+          candidate,
+          JIRA_CHILD_PROPERTY_KEY,
+        );
+        if (
+          inlineValue?.operationId === operationId &&
+          inlineValue.clientTaskId === clientTaskId
+        ) {
+          return issueId;
+        }
+        if (
+          inlineValue !== null ||
+          propertyLookups >= MAX_RECONCILIATION_PROPERTY_LOOKUPS
+        ) {
+          continue;
+        }
+        propertyLookups += 1;
+        const property = await this.readClient.getJson(
+          this.accessPolicy.providerUrl(
+            profile,
+            'jira',
+            `rest/api/2/issue/${encodeURIComponent(issueId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+          ),
+          this.accessPolicy.providerBaseUrl(profile, 'jira'),
+          accessToken,
+        );
+        const value =
+          property.status === 'ok' ? this.record(property.body.value) : null;
+        if (
+          value?.operationId === operationId &&
+          value.clientTaskId === clientTaskId
+        ) {
+          return issueId;
+        }
+      }
+      if (!this.hasNextPage(search.body, startAt, search.body.issues.length)) {
+        return null;
+      }
+      startAt += search.body.issues.length;
+    }
+    return null;
+  }
+
+  private hasNextPage(
+    body: Record<string, unknown>,
+    start: number,
+    received: number,
+  ): boolean {
+    if (received === 0) {
+      return false;
+    }
+    if (typeof body.total === 'number') {
+      return start + received < body.total;
+    }
+    if (typeof body.isLast === 'boolean') {
+      return !body.isLast;
+    }
+    const links = this.record(body._links);
+    if (typeof links?.next === 'string' && links.next.trim()) {
+      return true;
+    }
+    return received >= RECONCILIATION_PAGE_SIZE;
+  }
+
+  private issuePropertyValue(
+    issue: Record<string, unknown>,
+    propertyKey: string,
+  ): Record<string, unknown> | null {
+    const properties = issue.properties;
+    if (Array.isArray(properties)) {
+      for (const property of properties) {
+        const candidate = this.record(property);
+        if (candidate?.key === propertyKey) {
+          return this.record(candidate.value);
+        }
+      }
+      return null;
+    }
+    const record = this.record(properties);
+    if (!record) {
+      return null;
+    }
+    const direct = this.record(record[propertyKey]);
+    if (direct) {
+      return this.record(direct.value) ?? direct;
+    }
+    for (const property of Object.values(record)) {
+      const candidate = this.record(property);
+      if (candidate?.key === propertyKey) {
+        return this.record(candidate.value);
       }
     }
     return null;

@@ -164,6 +164,83 @@ describe('AtlassianPublicationWriteGateway', () => {
     expect(harness.writeClient.postJson).not.toHaveBeenCalled();
   });
 
+  it('finds a Confluence reconciliation marker on a later child-page page', async () => {
+    const unrelated = Array.from({ length: 50 }, (_, index) => ({
+      id: `unrelated-${index}`,
+      title: '다른 제목',
+      version: { number: 1 },
+    }));
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: unrelated, total: 51 } },
+        {
+          status: 'ok',
+          body: {
+            results: [
+              {
+                id: '99',
+                title: '[ENG-42] 배포 브리프',
+                version: { number: 1 },
+              },
+            ],
+            total: 51,
+          },
+        },
+        {
+          status: 'ok',
+          body: { value: { operationId: input.operationId } },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).resolves.toMatchObject({ providerObjectId: '99' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(4);
+    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+  });
+
+  it('finds a summary comment marker on a later result page', async () => {
+    const marker = `[work-copilot-operation:${input.operationId}]`;
+    const unrelated = Array.from({ length: 50 }, (_, index) => ({
+      id: `comment-${index}`,
+      body: '다른 댓글',
+    }));
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { comments: unrelated, total: 51 } },
+        {
+          status: 'ok',
+          body: {
+            comments: [{ id: 'comment-99', body: `요약\n${marker}` }],
+            total: 51,
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.createJiraSummaryComment({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        summary: '요약',
+        confluenceContentId: '99',
+        confluenceUrl: 'https://confluence.example.test/pages/99',
+      }),
+    ).resolves.toEqual({ providerObjectId: 'comment-99' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+  });
+
   it('creates the child-task operation marker atomically in issue creation', async () => {
     const harness = createGateway(
       [{ status: 'ok', body: { issues: [] } }],
@@ -252,5 +329,63 @@ describe('AtlassianPublicationWriteGateway', () => {
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
     expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds a child-task marker on the second Jira search page without property N+1', async () => {
+    const unrelated = Array.from({ length: 50 }, (_, index) => ({
+      id: `child-${index}`,
+      properties: {
+        'work-copilot.publication-task': {
+          value: { operationId: 'other-operation', clientTaskId: 'other-task' },
+        },
+      },
+    }));
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: unrelated, total: 51 } },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-99',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 51,
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        sourceJiraKey: 'ENG-42',
+        childTask: {
+          clientTaskId: 'child-task-1',
+          text: '하위 작업',
+          summary: '하위 작업 요약',
+          evidenceIds: [],
+          selected: true,
+        },
+        template: { issueTypeId: '10001', fields: {} },
+      }),
+    ).resolves.toEqual({ providerObjectId: 'child-99' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
   });
 });
