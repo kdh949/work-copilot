@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IntegrationsOAuthModule } from '../integrations/oauth/integrations-oauth.module';
 import { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
@@ -12,6 +13,7 @@ import { PublicationStep } from './entities/publication-step.entity';
 import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
 import { PublicationService } from './publication.service';
 import { PublicationRendererService } from './publication-renderer.service';
+import { PublicationPreviewService } from './publication-preview.service';
 import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
 
 @Module({
@@ -31,9 +33,25 @@ import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
     MockPublicationWriteGateway,
     AtlassianPublicationWriteGateway,
     PublicationRendererService,
+    PublicationPreviewService,
     {
       provide: PUBLICATION_WRITE_GATEWAY,
-      useExisting: MockPublicationWriteGateway,
+      inject: [
+        ConfigService,
+        MockPublicationWriteGateway,
+        AtlassianPublicationWriteGateway,
+      ],
+      useFactory: (
+        configService: ConfigService,
+        mockGateway: MockPublicationWriteGateway,
+        realGateway: AtlassianPublicationWriteGateway,
+      ) =>
+        configService
+          .get<string>('PUBLICATION_WRITE_MODE')
+          ?.trim()
+          .toLowerCase() === 'mock'
+          ? mockGateway
+          : realGateway,
     },
     PublicationService,
   ],

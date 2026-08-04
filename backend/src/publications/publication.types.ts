@@ -1,9 +1,13 @@
 export type PublicationStatus =
   | 'PENDING'
   | 'PUBLISHING'
+  | 'CONFLUENCE_PUBLISHED'
+  | 'JIRA_PUBLISHED'
   | 'PUBLISHED'
   | 'PARTIALLY_PUBLISHED'
   | 'NEEDS_REVIEW';
+
+export type PublicationPhase = 'confluence' | 'jira' | 'child_tasks';
 
 export type PublicationStepStatus =
   'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'NEEDS_REVIEW';
@@ -19,6 +23,7 @@ export type PublicationErrorCode =
 
 export type PublicationStepView = {
   key: string;
+  phase: PublicationPhase;
   status: PublicationStepStatus;
   attempts: number;
   errorCode: PublicationErrorCode | null;
@@ -31,7 +36,13 @@ export type BriefPublicationView = {
   draftVersion: number;
   status: PublicationStatus;
   executionMode: PublicationExecutionMode;
-  externalWritePerformed: false;
+  externalWritePerformed: boolean;
+  confluencePage: {
+    id: string;
+    version: string | null;
+    url: string | null;
+    contentHash: string | null;
+  } | null;
   canRetry: boolean;
   requiresReview: boolean;
   steps: PublicationStepView[];

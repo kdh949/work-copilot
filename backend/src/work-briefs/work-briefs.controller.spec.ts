@@ -14,8 +14,13 @@ describe('WorkBriefsController', () => {
     assessDraft: jest.fn(),
   };
   const publicationService = {
+    previewConfluence: jest.fn(),
     publish: jest.fn(),
     findLatest: jest.fn(),
+    previewJira: jest.fn(),
+    publishJira: jest.fn(),
+    previewChildTasks: jest.fn(),
+    publishChildTasks: jest.fn(),
     retry: jest.fn(),
   };
 
@@ -77,7 +82,7 @@ describe('WorkBriefsController', () => {
     );
   });
 
-  it('passes an idempotency key and explicit approval to the publication saga', async () => {
+  it('passes a bound preview, idempotency key, and explicit approval to Confluence publication', async () => {
     const controller = new WorkBriefsController(
       service as never,
       readinessService as never,
@@ -88,7 +93,11 @@ describe('WorkBriefsController', () => {
     await controller.publish(
       'draft-id',
       'publish-key-1',
-      { draftVersion: 3, approved: true },
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: 'a'.repeat(64),
+      },
       { user: { sub: 7 }, correlationId: 'correlation-id' } as never,
     );
 
@@ -98,8 +107,79 @@ describe('WorkBriefsController', () => {
       {
         draftVersion: 3,
         approved: true,
+        previewHash: 'a'.repeat(64),
         idempotencyKey: 'publish-key-1',
       },
+      'correlation-id',
+    );
+  });
+
+  it('keeps Jira and child-task write commands on their separately approved endpoints', async () => {
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+      publicationService as never,
+    );
+    const request = {
+      user: { sub: 7 },
+      correlationId: 'correlation-id',
+    } as never;
+    const dto = {
+      draftVersion: 3,
+      approved: true,
+      previewHash: 'b'.repeat(64),
+    };
+
+    await controller.previewConfluencePublication('draft-id', request);
+    await controller.publishJira(
+      'draft-id',
+      'publication-id',
+      'jira-key',
+      dto,
+      request,
+    );
+    await controller.previewChildTaskPublication(
+      'draft-id',
+      'publication-id',
+      request,
+    );
+    await controller.publishChildTasks(
+      'draft-id',
+      'publication-id',
+      'child-key',
+      dto,
+      request,
+    );
+
+    expect(publicationService.previewConfluence).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      'correlation-id',
+    );
+    expect(publicationService.publishJira).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      'publication-id',
+      expect.objectContaining({
+        previewHash: 'b'.repeat(64),
+        idempotencyKey: 'jira-key',
+      }),
+      'correlation-id',
+    );
+    expect(publicationService.previewChildTasks).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      'publication-id',
+      'correlation-id',
+    );
+    expect(publicationService.publishChildTasks).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      'publication-id',
+      expect.objectContaining({
+        previewHash: 'b'.repeat(64),
+        idempotencyKey: 'child-key',
+      }),
       'correlation-id',
     );
   });

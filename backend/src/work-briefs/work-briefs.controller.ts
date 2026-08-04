@@ -59,6 +59,18 @@ export class WorkBriefsController {
     );
   }
 
+  @Get('brief-drafts/:id/publication-preview')
+  previewConfluencePublication(
+    @Param('id') id: string,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.publicationService.previewConfluence(
+      request.user.sub,
+      id,
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
   @Post('brief-drafts/:id/publish')
   publish(
     @Param('id') id: string,
@@ -72,6 +84,7 @@ export class WorkBriefsController {
       {
         draftVersion: dto.draftVersion,
         approved: dto.approved,
+        previewHash: dto.previewHash,
         idempotencyKey,
       },
       request.correlationId ?? 'missing-correlation-id',
@@ -83,10 +96,82 @@ export class WorkBriefsController {
     return this.publicationService.findLatest(request.user.sub, id);
   }
 
+  @Get('brief-drafts/:id/publication/:publicationId/jira-preview')
+  previewJiraPublication(
+    @Param('id') id: string,
+    @Param('publicationId') publicationId: string,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.publicationService.previewJira(
+      request.user.sub,
+      id,
+      publicationId,
+    );
+  }
+
+  @Post('brief-drafts/:id/publication/:publicationId/jira')
+  publishJira(
+    @Param('id') id: string,
+    @Param('publicationId') publicationId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() dto: PublishBriefDraftDto,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.publicationService.publishJira(
+      request.user.sub,
+      id,
+      publicationId,
+      {
+        draftVersion: dto.draftVersion,
+        approved: dto.approved,
+        previewHash: dto.previewHash,
+        idempotencyKey,
+      },
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
+  @Get('brief-drafts/:id/publication/:publicationId/child-tasks-preview')
+  previewChildTaskPublication(
+    @Param('id') id: string,
+    @Param('publicationId') publicationId: string,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.publicationService.previewChildTasks(
+      request.user.sub,
+      id,
+      publicationId,
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
+  @Post('brief-drafts/:id/publication/:publicationId/child-tasks')
+  publishChildTasks(
+    @Param('id') id: string,
+    @Param('publicationId') publicationId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() dto: PublishBriefDraftDto,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.publicationService.publishChildTasks(
+      request.user.sub,
+      id,
+      publicationId,
+      {
+        draftVersion: dto.draftVersion,
+        approved: dto.approved,
+        previewHash: dto.previewHash,
+        idempotencyKey,
+      },
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
   @Post('brief-drafts/:id/publication/:publicationId/retry')
   retryPublication(
     @Param('id') id: string,
     @Param('publicationId') publicationId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: RetryPublicationDto,
     @Req() request: WorkBriefRequest,
   ) {
@@ -94,7 +179,13 @@ export class WorkBriefsController {
       request.user.sub,
       id,
       publicationId,
-      { draftVersion: dto.draftVersion, approved: dto.approved },
+      {
+        phase: dto.phase,
+        draftVersion: dto.draftVersion,
+        approved: dto.approved,
+        previewHash: dto.previewHash,
+        idempotencyKey,
+      },
       request.correlationId ?? 'missing-correlation-id',
     );
   }

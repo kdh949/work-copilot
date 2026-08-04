@@ -47,9 +47,12 @@ export class MockPublicationWriteGateway implements PublicationWriteGateway {
     evidence: StoredBriefEvidence[];
   }): Promise<PublicationWriteResult> {
     this.consumeFailure('confluence_page');
+    const providerObjectId =
+      input.existingContentId ?? `mock-confluence:${input.operationId}`;
     return Promise.resolve({
-      providerObjectId:
-        input.existingContentId ?? `mock-confluence:${input.operationId}`,
+      providerObjectId,
+      providerObjectVersion: '1',
+      providerUrl: `https://mock.example.invalid/confluence/${encodeURIComponent(providerObjectId)}`,
     });
   }
 
