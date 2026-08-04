@@ -8,6 +8,10 @@ import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.en
 import type { BriefPublication } from './entities/brief-publication.entity';
 import type { PublicationPhase } from './publication.types';
 import { PublicationRendererService } from './publication-renderer.service';
+import {
+  buildChildTaskCreatePayload,
+  type CanonicalChildTaskCreatePayload,
+} from './child-task-create-payload';
 
 type PreviewEvidence = {
   id: string;
@@ -42,7 +46,12 @@ export type ChildTasksPublicationPreview = {
   phase: 'child_tasks';
   draftVersion: number;
   previewHash: string;
-  childTasks: Array<{ clientTaskId: string; summary: string }>;
+  configurationFingerprint: string;
+  childTasks: Array<{
+    clientTaskId: string;
+    summary: string;
+    payload: CanonicalChildTaskCreatePayload;
+  }>;
 };
 
 export type PublicationPreview =
@@ -159,19 +168,39 @@ export class PublicationPreviewService {
   childTasks(
     draft: WorkBriefDraft,
     publication: BriefPublication,
+    profile: IntegrationProfile,
   ): ChildTasksPublicationPreview {
     if (!publication.confluenceContentId) {
       throw new ConflictException({ code: 'CONFLUENCE_PUBLICATION_REQUIRED' });
     }
+    const template = profile.policy.childTaskTemplate;
+    if (!template) {
+      throw new ConflictException({ code: 'CHILD_TASK_TEMPLATE_REQUIRED' });
+    }
     const preview: Omit<ChildTasksPublicationPreview, 'previewHash'> = {
       phase: 'child_tasks',
       draftVersion: draft.optimisticVersion,
+      configurationFingerprint: this.configurationFingerprint(profile),
       childTasks: draft.maskedBrief.childTasks
         .filter((task) => task.selected)
-        .map((task) => ({
-          clientTaskId: task.clientTaskId,
-          summary: task.summary,
-        })),
+        .map((task) => {
+          const payload = buildChildTaskCreatePayload({
+            sourceJiraId: draft.sourceJiraId,
+            sourceJiraKey: draft.sourceJiraKey,
+            childTask: task,
+            template,
+          });
+          if (!payload) {
+            throw new ConflictException({
+              code: 'CHILD_TASK_TEMPLATE_REQUIRED',
+            });
+          }
+          return {
+            clientTaskId: task.clientTaskId,
+            summary: payload.fields.summary as string,
+            payload,
+          };
+        }),
     };
     return { ...preview, previewHash: this.hash(preview) };
   }
@@ -185,7 +214,32 @@ export class PublicationPreviewService {
   }
 
   private hash(value: object): string {
-    return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    return createHash('sha256')
+      .update(JSON.stringify(this.canonical(value)))
+      .digest('hex');
+  }
+
+  private configurationFingerprint(profile: IntegrationProfile): string {
+    return this.hash({
+      profileId: profile.id,
+      jiraBaseUrl: profile.jiraBaseUrl,
+      allowedProjectKeys: [...profile.allowedProjectKeys].sort(),
+      childTaskTemplate: profile.policy.childTaskTemplate,
+    });
+  }
+
+  private canonical(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.canonical(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, item]) => [key, this.canonical(item)]),
+      );
+    }
+    return value;
   }
 
   private identifier(value: unknown): string | null {

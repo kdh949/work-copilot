@@ -163,4 +163,94 @@ describe('AtlassianPublicationWriteGateway', () => {
     });
     expect(harness.writeClient.postJson).not.toHaveBeenCalled();
   });
+
+  it('creates the child-task operation marker atomically in issue creation', async () => {
+    const harness = createGateway(
+      [{ status: 'ok', body: { issues: [] } }],
+      [{ status: 'ok', body: { id: 'child-99' } }],
+    );
+
+    const result = await harness.gateway.createJiraChildTask({
+      userId: 7,
+      correlationId: 'correlation-1',
+      profile: PROFILE,
+      operationId: input.operationId,
+      sourceJiraId: '42',
+      sourceJiraKey: 'ENG-42',
+      childTask: {
+        clientTaskId: 'child-task-1',
+        text: '하위 작업',
+        summary: '하위 작업 요약',
+        evidenceIds: [],
+        selected: true,
+      },
+      template: {
+        issueTypeId: '10001',
+        fields: { priority: 'high' },
+      },
+    });
+
+    expect(result).toEqual({ providerObjectId: 'child-99' });
+    expect(harness.writeClient.postJson).toHaveBeenCalledWith(
+      expect.any(URL),
+      'https://jira.example.test/',
+      'user-token',
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          project: { key: 'ENG' },
+          issuetype: { id: '10001' },
+          parent: { id: '42' },
+        }),
+        properties: [
+          {
+            key: 'work-copilot.publication-task',
+            value: {
+              operationId: input.operationId,
+              clientTaskId: 'child-task-1',
+            },
+          },
+        ],
+      }),
+    );
+    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an ambiguous child-task create through its atomic marker', async () => {
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: [] } },
+        { status: 'ok', body: { issues: [{ id: 'child-99' }] } },
+        {
+          status: 'ok',
+          body: {
+            value: {
+              operationId: input.operationId,
+              clientTaskId: 'child-task-1',
+            },
+          },
+        },
+      ],
+      [{ status: 'rejected', body: {} }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        sourceJiraKey: 'ENG-42',
+        childTask: {
+          clientTaskId: 'child-task-1',
+          text: '하위 작업',
+          summary: '하위 작업 요약',
+          evidenceIds: [],
+          selected: true,
+        },
+        template: { issueTypeId: '10001', fields: {} },
+      }),
+    ).resolves.toEqual({ providerObjectId: 'child-99' });
+    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+  });
 });

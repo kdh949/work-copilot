@@ -149,7 +149,17 @@ export type ChildTasksPublicationPreview = {
   phase: "child_tasks";
   draftVersion: number;
   previewHash: string;
-  childTasks: Array<{ clientTaskId: string; summary: string }>;
+  configurationFingerprint: string;
+  childTasks: Array<{
+    clientTaskId: string;
+    summary: string;
+    payload: {
+      project: { key: string };
+      issueType: { id: string };
+      parent: { id: string; key: string };
+      fields: Record<string, unknown>;
+    };
+  }>;
 };
 
 export type PublicationPreview =

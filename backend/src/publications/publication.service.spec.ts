@@ -205,15 +205,23 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         }) as JiraPublicationPreview,
     ),
     childTasks: jest.fn(
-      (currentDraft: WorkBriefDraft, publication: BriefPublication) => ({
+      (
+        currentDraft: WorkBriefDraft,
+        publication: BriefPublication,
+        currentProfile: IntegrationProfile,
+      ) => ({
         phase: 'child_tasks',
         draftVersion: 3,
-        previewHash: `child-preview-${publication.confluenceContentId}`,
+        previewHash: `child-preview-${publication.confluenceContentId}-${JSON.stringify(currentProfile.policy.childTaskTemplate)}`,
+        configurationFingerprint: JSON.stringify(
+          currentProfile.policy.childTaskTemplate,
+        ),
         childTasks: currentDraft.maskedBrief.childTasks
           .filter((task) => task.selected)
           .map((task) => ({
             clientTaskId: task.clientTaskId,
             summary: task.summary,
+            payload: {},
           })),
       }),
     ),
@@ -704,6 +712,41 @@ describe('PublicationService', () => {
     expect(second.status).toBe('PUBLISHING');
     expect(firstResult.status).toBe('JIRA_PUBLISHED');
     expect(remoteLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a child-task approval when its template changes after preview', async () => {
+    const harness = createHarness();
+    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
+    const preview = await harness.service.previewChildTasks(
+      7,
+      DRAFT_ID,
+      jira.id,
+      'corr',
+    );
+    harness.profile.policy.childTaskTemplate = {
+      issueTypeId: '10001',
+      fields: { customfield_10100: 'changed-after-preview' },
+    };
+
+    await expect(
+      harness.service.publishChildTasks(
+        7,
+        DRAFT_ID,
+        jira.id,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'stale-child-task-preview-key',
+        },
+        'corr',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_PREVIEW_STALE' },
+    });
+    expect(childTask).not.toHaveBeenCalled();
   });
 
   it('does not start Confluence publication when approval, version, readiness, or parent configuration is invalid', async () => {

@@ -59,7 +59,10 @@ export function PublicationPanel({
   const needsReview = publication?.requiresReview ?? false;
 
   return (
-    <section className="work-brief-publication ds-card" aria-label="브리프 게시">
+    <section
+      className="work-brief-publication ds-card"
+      aria-label="브리프 게시"
+    >
       <header>
         <div>
           <p className="eyebrow">단계별 미리보기 · 명시적 승인</p>
@@ -78,8 +81,12 @@ export function PublicationPanel({
 
       {publication?.confluencePage?.url ? (
         <p className="work-brief-publication-link">
-          Confluence 페이지: {" "}
-          <a href={publication.confluencePage.url} target="_blank" rel="noreferrer">
+          Confluence 페이지:{" "}
+          <a
+            href={publication.confluencePage.url}
+            target="_blank"
+            rel="noreferrer"
+          >
             열기
           </a>
           {publication.confluencePage.version
@@ -88,7 +95,9 @@ export function PublicationPanel({
         </p>
       ) : null}
 
-      {publication?.steps.length ? <PublicationSteps publication={publication} /> : null}
+      {publication?.steps.length ? (
+        <PublicationSteps publication={publication} />
+      ) : null}
 
       {!publicationAllowed ? (
         <Alert tone="warning" className="work-brief-blocker">
@@ -138,7 +147,10 @@ function PublicationPhaseApproval({
   onExecute: (phase: PublicationPhase) => void;
 }) {
   return (
-    <section className="work-brief-publication-phase" aria-labelledby={`publication-phase-${phase}`}>
+    <section
+      className="work-brief-publication-phase"
+      aria-labelledby={`publication-phase-${phase}`}
+    >
       <div className="work-brief-publication-phase__heading">
         <div>
           <p className="eyebrow">다음 단계</p>
@@ -157,7 +169,9 @@ function PublicationPhaseApproval({
         ) : null}
       </div>
 
-      {preview ? renderPreview(preview) : (
+      {preview ? (
+        renderPreview(preview)
+      ) : (
         <p>승인 전에 이 단계에서 외부 도구에 반영될 내용을 확인하세요.</p>
       )}
 
@@ -177,7 +191,9 @@ function PublicationPhaseApproval({
             onClick={() => onPrepare(phase)}
             disabled={isLoadingPreview || isPublishing}
           >
-            {isLoadingPreview ? "미리보기 준비 중" : `${phaseLabel[phase]} 미리보기`}
+            {isLoadingPreview
+              ? "미리보기 준비 중"
+              : `${phaseLabel[phase]} 미리보기`}
           </Button>
         ) : (
           <Button
@@ -198,7 +214,10 @@ function PublicationPhaseApproval({
 }
 
 function renderPreview(
-  preview: ConfluencePublicationPreview | JiraPublicationPreview | ChildTasksPublicationPreview,
+  preview:
+    | ConfluencePublicationPreview
+    | JiraPublicationPreview
+    | ChildTasksPublicationPreview,
 ) {
   if (preview.phase === "confluence") {
     return <ConfluencePreview preview={preview} />;
@@ -209,20 +228,43 @@ function renderPreview(
   return <ChildTasksPreview preview={preview} />;
 }
 
-function ConfluencePreview({ preview }: { preview: ConfluencePublicationPreview }) {
+function ConfluencePreview({
+  preview,
+}: {
+  preview: ConfluencePublicationPreview;
+}) {
   return (
     <div className="work-brief-publication-preview">
       <dl>
-        <div><dt>Space</dt><dd>{preview.spaceKey}</dd></div>
-        <div><dt>부모 페이지</dt><dd><a href={preview.parentPage.url} target="_blank" rel="noreferrer">{preview.parentPage.title}</a> · v{preview.parentPage.version}</dd></div>
-        <div><dt>새 페이지 제목</dt><dd>{preview.pageTitle}</dd></div>
+        <div>
+          <dt>Space</dt>
+          <dd>{preview.spaceKey}</dd>
+        </div>
+        <div>
+          <dt>부모 페이지</dt>
+          <dd>
+            <a href={preview.parentPage.url} target="_blank" rel="noreferrer">
+              {preview.parentPage.title}
+            </a>{" "}
+            · v{preview.parentPage.version}
+          </dd>
+        </div>
+        <div>
+          <dt>새 페이지 제목</dt>
+          <dd>{preview.pageTitle}</dd>
+        </div>
       </dl>
       <h5>본문 미리보기</h5>
       <pre>{preview.bodyPreview}</pre>
       <h5>사용한 근거</h5>
       <ul>
         {preview.evidence.map((evidence) => (
-          <li key={evidence.id}><a href={evidence.url} target="_blank" rel="noreferrer">{evidence.title}</a> · v{evidence.version}</li>
+          <li key={evidence.id}>
+            <a href={evidence.url} target="_blank" rel="noreferrer">
+              {evidence.title}
+            </a>{" "}
+            · v{evidence.version}
+          </li>
         ))}
       </ul>
     </div>
@@ -233,21 +275,66 @@ function JiraPreview({ preview }: { preview: JiraPublicationPreview }) {
   return (
     <div className="work-brief-publication-preview">
       <dl>
-        <div><dt>Confluence 링크</dt><dd><a href={preview.remoteLink.url} target="_blank" rel="noreferrer">{preview.remoteLink.title}</a></dd></div>
-        <div><dt>중복 방지 키</dt><dd><code>{preview.remoteLink.globalId}</code></dd></div>
-        <div><dt>요약 댓글</dt><dd>{preview.summaryComment.summary}</dd></div>
+        <div>
+          <dt>Confluence 링크</dt>
+          <dd>
+            <a href={preview.remoteLink.url} target="_blank" rel="noreferrer">
+              {preview.remoteLink.title}
+            </a>
+          </dd>
+        </div>
+        <div>
+          <dt>중복 방지 키</dt>
+          <dd>
+            <code>{preview.remoteLink.globalId}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>요약 댓글</dt>
+          <dd>{preview.summaryComment.summary}</dd>
+        </div>
       </dl>
     </div>
   );
 }
 
-function ChildTasksPreview({ preview }: { preview: ChildTasksPublicationPreview }) {
+function ChildTasksPreview({
+  preview,
+}: {
+  preview: ChildTasksPublicationPreview;
+}) {
   return (
     <div className="work-brief-publication-preview">
       <p>선택한 항목만 Jira 하위 작업으로 생성합니다.</p>
+      <p>
+        생성 설정 확인값: <code>{preview.configurationFingerprint}</code>
+      </p>
       {preview.childTasks.length ? (
-        <ul>{preview.childTasks.map((task) => <li key={task.clientTaskId}>{task.summary}</li>)}</ul>
-      ) : <p>선택된 하위 작업이 없습니다.</p>}
+        <ul>
+          {preview.childTasks.map((task) => (
+            <li key={task.clientTaskId}>
+              <p>{task.summary}</p>
+              <dl>
+                <div>
+                  <dt>프로젝트</dt>
+                  <dd>{task.payload.project.key}</dd>
+                </div>
+                <div>
+                  <dt>이슈 유형</dt>
+                  <dd>{task.payload.issueType.id}</dd>
+                </div>
+                <div>
+                  <dt>상위 이슈</dt>
+                  <dd>{task.payload.parent.key}</dd>
+                </div>
+              </dl>
+              <pre>{JSON.stringify(task.payload.fields, null, 2)}</pre>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>선택된 하위 작업이 없습니다.</p>
+      )}
     </div>
   );
 }
@@ -258,7 +345,9 @@ function PublicationSteps({ publication }: { publication: BriefPublication }) {
       {publication.steps.map((step) => (
         <li key={step.key}>
           <strong>{stepLabel(step.key)}</strong>
-          <Badge tone={stepTone(step.status)}>{step.status} · 시도 {step.attempts}회</Badge>
+          <Badge tone={stepTone(step.status)}>
+            {step.status} · 시도 {step.attempts}회
+          </Badge>
           {step.errorCode ? <code>{step.errorCode}</code> : null}
         </li>
       ))}
@@ -266,24 +355,33 @@ function PublicationSteps({ publication }: { publication: BriefPublication }) {
   );
 }
 
-function nextPhase(publication: BriefPublication | null): PublicationPhase | null {
+function nextPhase(
+  publication: BriefPublication | null,
+): PublicationPhase | null {
   if (!publication) return "confluence";
   const succeeded = (phase: PublicationPhase) => {
     const steps = publication.steps.filter((step) => step.phase === phase);
-    return steps.length > 0 && steps.every((step) => step.status === "SUCCEEDED");
+    return (
+      steps.length > 0 && steps.every((step) => step.status === "SUCCEEDED")
+    );
   };
   if (!succeeded("confluence")) return "confluence";
   if (!succeeded("jira")) return "jira";
   return publication.status === "PUBLISHED" ? null : "child_tasks";
 }
 
-function publicationTone(status: BriefPublication["status"] | undefined): "neutral" | "success" | "warning" {
+function publicationTone(
+  status: BriefPublication["status"] | undefined,
+): "neutral" | "success" | "warning" {
   if (status === "PUBLISHED") return "success";
-  if (status === "PARTIALLY_PUBLISHED" || status === "NEEDS_REVIEW") return "warning";
+  if (status === "PARTIALLY_PUBLISHED" || status === "NEEDS_REVIEW")
+    return "warning";
   return "neutral";
 }
 
-function stepTone(status: BriefPublication["steps"][number]["status"]): "neutral" | "success" | "warning" | "danger" {
+function stepTone(
+  status: BriefPublication["steps"][number]["status"],
+): "neutral" | "success" | "warning" | "danger" {
   if (status === "SUCCEEDED") return "success";
   if (status === "FAILED") return "danger";
   if (status === "NEEDS_REVIEW") return "warning";

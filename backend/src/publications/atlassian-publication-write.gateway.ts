@@ -18,6 +18,10 @@ import {
   type PublicationWriteResult,
 } from './publication-write-gateway';
 import { PublicationRendererService } from './publication-renderer.service';
+import {
+  buildChildTaskCreatePayload,
+  normalizeJiraSummary,
+} from './child-task-create-payload';
 
 const CONFLUENCE_PROPERTY_KEY = 'work-copilot.publication';
 const JIRA_CHILD_PROPERTY_KEY = 'work-copilot.publication-task';
@@ -339,23 +343,33 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       return { providerObjectId: existing };
     }
 
-    const projectKey = input.sourceJiraKey.split('-', 1)[0]?.toUpperCase();
-    if (!projectKey) {
+    const payload = buildChildTaskCreatePayload({
+      sourceJiraId: input.sourceJiraId,
+      sourceJiraKey: input.sourceJiraKey,
+      childTask: input.childTask,
+      template: input.template,
+    });
+    if (!payload) {
       this.fail('JIRA_CHILD_TASK_FAILED', false);
     }
-    this.accessPolicy.assertAllowedProject(input.profile, projectKey);
+    this.accessPolicy.assertAllowedProject(input.profile, payload.project.key);
     const created = await this.writeClient.postJson(
       this.accessPolicy.providerUrl(input.profile, 'jira', 'rest/api/2/issue'),
       this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
       accessToken,
       {
-        fields: {
-          ...input.template.fields,
-          project: { key: projectKey },
-          issuetype: { id: input.template.issueTypeId },
-          parent: { id: input.sourceJiraId },
-          summary: this.plainText(input.childTask.summary, 512),
-        },
+        fields: payload.fields,
+        // Jira creates entity properties with the issue in this request. That
+        // makes the provider marker atomic with child-task creation.
+        properties: [
+          {
+            key: JIRA_CHILD_PROPERTY_KEY,
+            value: {
+              operationId: input.operationId,
+              clientTaskId: input.childTask.clientTaskId,
+            },
+          },
+        ],
       },
     );
     if (created.status !== 'ok') {
@@ -376,33 +390,6 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     if (!createdId) {
       this.fail('JIRA_CHILD_TASK_FAILED', false);
     }
-    const marker = await this.writeClient.putJson(
-      this.accessPolicy.providerUrl(
-        input.profile,
-        'jira',
-        `rest/api/2/issue/${encodeURIComponent(createdId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
-      ),
-      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
-      accessToken,
-      {
-        operationId: input.operationId,
-        clientTaskId: input.childTask.clientTaskId,
-      },
-    );
-    if (marker.status !== 'ok') {
-      const reconciled = await this.findChildTaskByOperation(
-        input.profile,
-        accessToken,
-        input.sourceJiraKey,
-        input.operationId,
-        input.childTask.clientTaskId,
-      );
-      if (reconciled) {
-        return { providerObjectId: reconciled };
-      }
-      this.fail('JIRA_CHILD_TASK_FAILED', false);
-    }
-
     return { providerObjectId: createdId };
   }
 
@@ -641,7 +628,10 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
   }
 
   private escapeJiraWiki(value: string): string {
-    return this.plainText(value, 8_000).replace(/([\\{}[\]*_#|])/g, '\\$1');
+    return normalizeJiraSummary(value, 8_000).replace(
+      /([\\{}[\]*_#|])/g,
+      '\\$1',
+    );
   }
 
   private identifier(value: unknown): string | null {

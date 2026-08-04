@@ -295,7 +295,12 @@ export class PublicationService {
     // irreversible child-task approval screen. It runs again immediately
     // before execution so a changed provider configuration cannot bypass it.
     await this.assertReadyForPublication(userId, draft, correlationId);
-    return this.previewService.childTasks(draft, recovered.publication);
+    const profile = await this.findActivePublishProfile(draft);
+    return this.previewService.childTasks(
+      draft,
+      recovered.publication,
+      profile,
+    );
   }
 
   async publishChildTasks(
@@ -327,7 +332,7 @@ export class PublicationService {
     await this.assertReadyForPublication(userId, draft, correlationId);
     const profile = await this.findActivePublishProfile(draft);
     this.assertSafeDraftContent(draft.maskedBrief);
-    const preview = this.previewService.childTasks(draft, publication);
+    const preview = this.previewService.childTasks(draft, publication, profile);
     this.assertPreview(input.previewHash, preview.previewHash);
     publication.childTasksIdempotencyKeyHash = idempotencyKeyHash;
     publication.childTasksPreviewHash = preview.previewHash;
