@@ -1,0 +1,677 @@
+import { Injectable } from '@nestjs/common';
+import { IntegrationsOAuthService } from '../integrations/oauth/integrations-oauth.service';
+import type {
+  ChildTaskTemplate,
+  IntegrationProfile,
+} from '../integrations/profiles/entities/integration-profile.entity';
+import { AtlassianReadClientService } from '../work-items/atlassian-read-client.service';
+import { AtlassianWriteClientService } from '../work-items/atlassian-write-client.service';
+import { IntegrationAccessPolicyService } from '../work-items/integration-access-policy.service';
+import type {
+  BriefChildTask,
+  BriefContent,
+  StoredBriefEvidence,
+} from '../work-briefs/brief-draft.types';
+import {
+  PublicationGatewayError,
+  type PublicationWriteGateway,
+  type PublicationWriteResult,
+} from './publication-write-gateway';
+import { PublicationRendererService } from './publication-renderer.service';
+
+const CONFLUENCE_PROPERTY_KEY = 'work-copilot.publication';
+const JIRA_CHILD_PROPERTY_KEY = 'work-copilot.publication-task';
+const MAX_RECONCILIATION_CANDIDATES = 100;
+
+type GatewayContext = {
+  userId: number;
+  correlationId: string;
+  profile: IntegrationProfile;
+};
+
+type ConfluencePage = {
+  id: string;
+  version: string;
+  url: string;
+};
+
+/**
+ * Real, user-context-only publication adapter for Jira and Confluence Data
+ * Center. It intentionally persists no provider response body and uses stable
+ * properties/markers for reconciliation after an ambiguous network failure.
+ */
+@Injectable()
+export class AtlassianPublicationWriteGateway implements PublicationWriteGateway {
+  readonly mode = 'real' as const;
+
+  constructor(
+    private readonly oauth: IntegrationsOAuthService,
+    private readonly accessPolicy: IntegrationAccessPolicyService,
+    private readonly readClient: AtlassianReadClientService,
+    private readonly writeClient: AtlassianWriteClientService,
+    private readonly renderer: PublicationRendererService,
+  ) {}
+
+  async upsertConfluenceBrief(
+    input: GatewayContext & {
+      operationId: string;
+      parentPageId: string;
+      existingContentId: string | null;
+      draftId: string;
+      sourceJiraKey: string;
+      content: BriefContent;
+      evidence: StoredBriefEvidence[];
+    },
+  ): Promise<PublicationWriteResult> {
+    const rendered = this.renderer.render(
+      input.sourceJiraKey,
+      input.content,
+      input.evidence,
+    );
+    const accessToken = await this.token(input, 'confluence');
+
+    if (input.existingContentId) {
+      const existing = await this.readConfluencePage(
+        input.profile,
+        accessToken,
+        input.existingContentId,
+      );
+      if (!existing) {
+        this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+      }
+      return {
+        providerObjectId: existing.id,
+        providerObjectVersion: existing.version,
+        providerUrl: existing.url,
+        contentHash: rendered.contentHash,
+      };
+    }
+
+    const parent = await this.readConfluenceParent(
+      input.profile,
+      accessToken,
+      input.parentPageId,
+    );
+    const reconciled = await this.findConfluencePageByOperation(
+      input.profile,
+      accessToken,
+      parent.id,
+      input.operationId,
+      rendered.pageTitle,
+    );
+    if (reconciled) {
+      return {
+        providerObjectId: reconciled.id,
+        providerObjectVersion: reconciled.version,
+        providerUrl: reconciled.url,
+        contentHash: rendered.contentHash,
+      };
+    }
+
+    const created = await this.writeClient.postJson(
+      this.accessPolicy.providerUrl(
+        input.profile,
+        'confluence',
+        'rest/api/content',
+      ),
+      this.accessPolicy.providerBaseUrl(input.profile, 'confluence'),
+      accessToken,
+      {
+        type: 'page',
+        title: rendered.pageTitle,
+        space: { key: parent.spaceKey },
+        ancestors: [{ id: parent.id }],
+        body: {
+          storage: {
+            value: rendered.storageBody,
+            representation: 'storage',
+          },
+        },
+      },
+    );
+    if (created.status === 'conflict') {
+      this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+    }
+    if (created.status !== 'ok') {
+      this.fail('CONFLUENCE_WRITE_FAILED', created.status === 'rejected');
+    }
+
+    const page = this.confluencePage(input.profile, created.body);
+    const property = await this.writeClient.postJson(
+      this.accessPolicy.providerUrl(
+        input.profile,
+        'confluence',
+        `rest/api/content/${encodeURIComponent(page.id)}/property`,
+      ),
+      this.accessPolicy.providerBaseUrl(input.profile, 'confluence'),
+      accessToken,
+      {
+        key: CONFLUENCE_PROPERTY_KEY,
+        value: {
+          operationId: input.operationId,
+          draftId: input.draftId,
+          contentHash: rendered.contentHash,
+        },
+      },
+    );
+    if (property.status !== 'ok') {
+      const recovered = await this.findConfluencePageByOperation(
+        input.profile,
+        accessToken,
+        parent.id,
+        input.operationId,
+        rendered.pageTitle,
+      );
+      if (recovered) {
+        return {
+          providerObjectId: recovered.id,
+          providerObjectVersion: recovered.version,
+          providerUrl: recovered.url,
+          contentHash: rendered.contentHash,
+        };
+      }
+      this.fail('CONFLUENCE_WRITE_FAILED', false);
+    }
+
+    return {
+      providerObjectId: page.id,
+      providerObjectVersion: page.version,
+      providerUrl: page.url,
+      contentHash: rendered.contentHash,
+    };
+  }
+
+  async upsertJiraRemoteLink(
+    input: GatewayContext & {
+      operationId: string;
+      sourceJiraId: string;
+      confluenceContentId: string;
+      confluenceUrl: string | null;
+      confluenceTitle: string;
+    },
+  ): Promise<PublicationWriteResult> {
+    const accessToken = await this.token(input, 'jira');
+    const globalId = this.remoteLinkGlobalId(input.operationId);
+    const linkUrl =
+      input.confluenceUrl ??
+      this.confluencePageUrl(input.profile, input.confluenceContentId);
+    const endpoint = this.accessPolicy.providerUrl(
+      input.profile,
+      'jira',
+      `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/remotelink?globalId=${encodeURIComponent(globalId)}`,
+    );
+    const existing = await this.readClient.getJson(
+      endpoint,
+      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+      accessToken,
+    );
+    if (existing.status === 'ok') {
+      const existingId = this.identifier(existing.body.id);
+      if (existingId) {
+        return { providerObjectId: existingId, providerUrl: linkUrl };
+      }
+    }
+    if (existing.status === 'access_limited') {
+      this.fail('JIRA_REMOTE_LINK_FAILED', false);
+    }
+
+    const created = await this.writeClient.postJson(
+      this.accessPolicy.providerUrl(
+        input.profile,
+        'jira',
+        `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/remotelink`,
+      ),
+      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+      accessToken,
+      {
+        globalId,
+        application: {
+          type: 'com.dh.work-copilot',
+          name: 'Work Copilot',
+        },
+        relationship: 'documents',
+        object: {
+          url: linkUrl,
+          title: this.plainText(input.confluenceTitle, 255),
+        },
+      },
+    );
+    if (created.status !== 'ok') {
+      const reconciled = await this.readClient.getJson(
+        endpoint,
+        this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+        accessToken,
+      );
+      if (reconciled.status === 'ok') {
+        const existingId = this.identifier(reconciled.body.id);
+        if (existingId) {
+          return { providerObjectId: existingId, providerUrl: linkUrl };
+        }
+      }
+      this.fail('JIRA_REMOTE_LINK_FAILED', created.status === 'rejected');
+    }
+
+    const id = this.identifier(created.body.id);
+    if (!id) {
+      this.fail('JIRA_REMOTE_LINK_FAILED', false);
+    }
+    return { providerObjectId: id, providerUrl: linkUrl };
+  }
+
+  async createJiraSummaryComment(
+    input: GatewayContext & {
+      operationId: string;
+      sourceJiraId: string;
+      summary: string;
+      confluenceContentId: string;
+      confluenceUrl: string | null;
+    },
+  ): Promise<PublicationWriteResult> {
+    const accessToken = await this.token(input, 'jira');
+    const marker = this.commentMarker(input.operationId);
+    const endpoint = this.accessPolicy.providerUrl(
+      input.profile,
+      'jira',
+      `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/comment?maxResults=${MAX_RECONCILIATION_CANDIDATES}`,
+    );
+    const existing = await this.findCommentByMarker(
+      endpoint,
+      input.profile,
+      accessToken,
+      marker,
+    );
+    if (existing) {
+      return { providerObjectId: existing };
+    }
+
+    const pageUrl =
+      input.confluenceUrl ??
+      this.confluencePageUrl(input.profile, input.confluenceContentId);
+    const created = await this.writeClient.postJson(
+      this.accessPolicy.providerUrl(
+        input.profile,
+        'jira',
+        `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/comment`,
+      ),
+      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+      accessToken,
+      {
+        body: `${this.escapeJiraWiki(input.summary)}\n\nConfluence: ${pageUrl}\n${marker}`,
+      },
+    );
+    if (created.status !== 'ok') {
+      const reconciled = await this.findCommentByMarker(
+        endpoint,
+        input.profile,
+        accessToken,
+        marker,
+      );
+      if (reconciled) {
+        return { providerObjectId: reconciled };
+      }
+      this.fail('JIRA_SUMMARY_COMMENT_FAILED', created.status === 'rejected');
+    }
+    const id = this.identifier(created.body.id);
+    if (!id) {
+      this.fail('JIRA_SUMMARY_COMMENT_FAILED', false);
+    }
+    return { providerObjectId: id };
+  }
+
+  async createJiraChildTask(
+    input: GatewayContext & {
+      operationId: string;
+      sourceJiraId: string;
+      sourceJiraKey: string;
+      childTask: BriefChildTask;
+      template: ChildTaskTemplate;
+    },
+  ): Promise<PublicationWriteResult> {
+    const accessToken = await this.token(input, 'jira');
+    const existing = await this.findChildTaskByOperation(
+      input.profile,
+      accessToken,
+      input.sourceJiraKey,
+      input.operationId,
+      input.childTask.clientTaskId,
+    );
+    if (existing) {
+      return { providerObjectId: existing };
+    }
+
+    const projectKey = input.sourceJiraKey.split('-', 1)[0]?.toUpperCase();
+    if (!projectKey) {
+      this.fail('JIRA_CHILD_TASK_FAILED', false);
+    }
+    this.accessPolicy.assertAllowedProject(input.profile, projectKey);
+    const created = await this.writeClient.postJson(
+      this.accessPolicy.providerUrl(input.profile, 'jira', 'rest/api/2/issue'),
+      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+      accessToken,
+      {
+        fields: {
+          ...input.template.fields,
+          project: { key: projectKey },
+          issuetype: { id: input.template.issueTypeId },
+          parent: { id: input.sourceJiraId },
+          summary: this.plainText(input.childTask.summary, 512),
+        },
+      },
+    );
+    if (created.status !== 'ok') {
+      const reconciled = await this.findChildTaskByOperation(
+        input.profile,
+        accessToken,
+        input.sourceJiraKey,
+        input.operationId,
+        input.childTask.clientTaskId,
+      );
+      if (reconciled) {
+        return { providerObjectId: reconciled };
+      }
+      this.fail('JIRA_CHILD_TASK_FAILED', created.status === 'rejected');
+    }
+
+    const createdId = this.identifier(created.body.id);
+    if (!createdId) {
+      this.fail('JIRA_CHILD_TASK_FAILED', false);
+    }
+    const marker = await this.writeClient.putJson(
+      this.accessPolicy.providerUrl(
+        input.profile,
+        'jira',
+        `rest/api/2/issue/${encodeURIComponent(createdId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+      ),
+      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+      accessToken,
+      {
+        operationId: input.operationId,
+        clientTaskId: input.childTask.clientTaskId,
+      },
+    );
+    if (marker.status !== 'ok') {
+      const reconciled = await this.findChildTaskByOperation(
+        input.profile,
+        accessToken,
+        input.sourceJiraKey,
+        input.operationId,
+        input.childTask.clientTaskId,
+      );
+      if (reconciled) {
+        return { providerObjectId: reconciled };
+      }
+      this.fail('JIRA_CHILD_TASK_FAILED', false);
+    }
+
+    return { providerObjectId: createdId };
+  }
+
+  private async token(
+    input: GatewayContext,
+    provider: 'jira' | 'confluence',
+  ): Promise<string> {
+    return this.oauth.getAccessToken(
+      input.userId,
+      provider,
+      input.correlationId,
+    );
+  }
+
+  private async readConfluenceParent(
+    profile: IntegrationProfile,
+    accessToken: string,
+    parentPageId: string,
+  ): Promise<{ id: string; spaceKey: string }> {
+    const result = await this.readClient.getJson(
+      this.accessPolicy.providerUrl(
+        profile,
+        'confluence',
+        `rest/api/content/${encodeURIComponent(parentPageId)}?expand=space,version`,
+      ),
+      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+      accessToken,
+    );
+    if (result.status !== 'ok') {
+      this.fail('CONFLUENCE_WRITE_FAILED', false);
+    }
+    const id = this.identifier(result.body.id);
+    const space = this.record(result.body.space);
+    const spaceKey = typeof space?.key === 'string' ? space.key.trim() : '';
+    if (!id || !spaceKey) {
+      this.fail('CONFLUENCE_WRITE_FAILED', false);
+    }
+    try {
+      this.accessPolicy.assertAllowedSpace(profile, spaceKey);
+    } catch {
+      this.fail('CONFLUENCE_WRITE_FAILED', false);
+    }
+    return { id, spaceKey };
+  }
+
+  private async readConfluencePage(
+    profile: IntegrationProfile,
+    accessToken: string,
+    pageId: string,
+  ): Promise<ConfluencePage | null> {
+    const result = await this.readClient.getJson(
+      this.accessPolicy.providerUrl(
+        profile,
+        'confluence',
+        `rest/api/content/${encodeURIComponent(pageId)}?expand=space,version`,
+      ),
+      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+      accessToken,
+    );
+    return result.status === 'ok'
+      ? this.confluencePage(profile, result.body)
+      : null;
+  }
+
+  private async findConfluencePageByOperation(
+    profile: IntegrationProfile,
+    accessToken: string,
+    parentPageId: string,
+    operationId: string,
+    expectedTitle: string,
+  ): Promise<ConfluencePage | null> {
+    const children = await this.readClient.getJson(
+      this.accessPolicy.providerUrl(
+        profile,
+        'confluence',
+        `rest/api/content/${encodeURIComponent(parentPageId)}/child/page?expand=version&limit=${MAX_RECONCILIATION_CANDIDATES}`,
+      ),
+      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+      accessToken,
+    );
+    if (children.status !== 'ok') {
+      return null;
+    }
+    const items = Array.isArray(children.body.results)
+      ? children.body.results
+      : [];
+    for (const item of items) {
+      const candidate = this.record(item);
+      if (!candidate || candidate.title !== expectedTitle) {
+        continue;
+      }
+      const page = this.confluencePage(profile, candidate);
+      const property = await this.readClient.getJson(
+        this.accessPolicy.providerUrl(
+          profile,
+          'confluence',
+          `rest/api/content/${encodeURIComponent(page.id)}/property/${CONFLUENCE_PROPERTY_KEY}`,
+        ),
+        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+        accessToken,
+      );
+      const value =
+        property.status === 'ok' ? this.record(property.body.value) : null;
+      if (value?.operationId === operationId) {
+        return page;
+      }
+    }
+    return null;
+  }
+
+  private async findCommentByMarker(
+    endpoint: URL,
+    profile: IntegrationProfile,
+    accessToken: string,
+    marker: string,
+  ): Promise<string | null> {
+    const result = await this.readClient.getJson(
+      endpoint,
+      this.accessPolicy.providerBaseUrl(profile, 'jira'),
+      accessToken,
+    );
+    if (result.status !== 'ok' || !Array.isArray(result.body.comments)) {
+      return null;
+    }
+    for (const comment of result.body.comments) {
+      const candidate = this.record(comment);
+      if (
+        candidate &&
+        typeof candidate.body === 'string' &&
+        candidate.body.includes(marker)
+      ) {
+        const id = this.identifier(candidate.id);
+        if (id) {
+          return id;
+        }
+      }
+    }
+    return null;
+  }
+
+  private async findChildTaskByOperation(
+    profile: IntegrationProfile,
+    accessToken: string,
+    parentIssueKey: string,
+    operationId: string,
+    clientTaskId: string,
+  ): Promise<string | null> {
+    const query = new URLSearchParams({
+      jql: `parent = ${parentIssueKey}`,
+      fields: 'summary',
+      maxResults: String(MAX_RECONCILIATION_CANDIDATES),
+    });
+    const search = await this.readClient.getJson(
+      this.accessPolicy.providerUrl(
+        profile,
+        'jira',
+        `rest/api/2/search?${query.toString()}`,
+      ),
+      this.accessPolicy.providerBaseUrl(profile, 'jira'),
+      accessToken,
+    );
+    if (search.status !== 'ok' || !Array.isArray(search.body.issues)) {
+      return null;
+    }
+    for (const issue of search.body.issues) {
+      const candidate = this.record(issue);
+      const issueId = candidate ? this.identifier(candidate.id) : null;
+      if (!issueId) {
+        continue;
+      }
+      const property = await this.readClient.getJson(
+        this.accessPolicy.providerUrl(
+          profile,
+          'jira',
+          `rest/api/2/issue/${encodeURIComponent(issueId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+        ),
+        this.accessPolicy.providerBaseUrl(profile, 'jira'),
+        accessToken,
+      );
+      const value =
+        property.status === 'ok' ? this.record(property.body.value) : null;
+      if (
+        value?.operationId === operationId &&
+        value.clientTaskId === clientTaskId
+      ) {
+        return issueId;
+      }
+    }
+    return null;
+  }
+
+  private confluencePage(
+    profile: IntegrationProfile,
+    body: Record<string, unknown>,
+  ): ConfluencePage {
+    const id = this.identifier(body.id);
+    const version = this.version(body.version);
+    if (!id || !version) {
+      this.fail('CONFLUENCE_WRITE_FAILED', false);
+    }
+    return {
+      id,
+      version,
+      url: this.confluencePageUrl(profile, id),
+    };
+  }
+
+  private confluencePageUrl(
+    profile: IntegrationProfile,
+    pageId: string,
+  ): string {
+    return this.accessPolicy
+      .providerUrl(
+        profile,
+        'confluence',
+        `pages/viewpage.action?pageId=${encodeURIComponent(pageId)}`,
+      )
+      .toString();
+  }
+
+  private remoteLinkGlobalId(operationId: string): string {
+    return `work-copilot:publication:${operationId}`;
+  }
+
+  private commentMarker(operationId: string): string {
+    return `[work-copilot-operation:${operationId}]`;
+  }
+
+  private plainText(value: string, maxLength: number): string {
+    return value
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLength);
+  }
+
+  private escapeJiraWiki(value: string): string {
+    return this.plainText(value, 8_000).replace(/([\\{}[\]*_#|])/g, '\\$1');
+  }
+
+  private identifier(value: unknown): string | null {
+    return typeof value === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(value)
+      ? value
+      : null;
+  }
+
+  private version(value: unknown): string | null {
+    const record = this.record(value);
+    const number = record?.number;
+    return typeof number === 'number' || typeof number === 'string'
+      ? String(number)
+      : null;
+  }
+
+  private record(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private fail(
+    code:
+      | 'CONFLUENCE_VERSION_CONFLICT'
+      | 'CONFLUENCE_WRITE_FAILED'
+      | 'JIRA_REMOTE_LINK_FAILED'
+      | 'JIRA_SUMMARY_COMMENT_FAILED'
+      | 'JIRA_CHILD_TASK_FAILED',
+    retryable: boolean,
+  ): never {
+    throw new PublicationGatewayError(code, retryable);
+  }
+}

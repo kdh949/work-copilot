@@ -8,7 +8,7 @@ export type PublicationStatus =
 export type PublicationStepStatus =
   'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'NEEDS_REVIEW';
 
-export type PublicationExecutionMode = 'mock';
+export type PublicationExecutionMode = 'mock' | 'real';
 
 export type PublicationErrorCode =
   | 'CONFLUENCE_VERSION_CONFLICT'

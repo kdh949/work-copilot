@@ -138,7 +138,7 @@ export class PublicationService {
     }
 
     const steps = await this.createInitialSteps(stored, draft);
-    return this.runSaga(stored, draft, profile, steps);
+    return this.runSaga(stored, draft, profile, steps, userId, correlationId);
   }
 
   async findLatest(
@@ -188,7 +188,14 @@ export class PublicationService {
     const profile = await this.findActivePublishProfile(draft);
     this.assertSafeDraftContent(draft.maskedBrief);
     const steps = await this.ensureSteps(publication, draft);
-    return this.runSaga(publication, draft, profile, steps);
+    return this.runSaga(
+      publication,
+      draft,
+      profile,
+      steps,
+      userId,
+      correlationId,
+    );
   }
 
   private async runSaga(
@@ -196,6 +203,8 @@ export class PublicationService {
     draft: WorkBriefDraft,
     profile: IntegrationProfile,
     steps: PublicationStep[],
+    userId: number,
+    correlationId: string,
   ): Promise<BriefPublicationView> {
     publication.status = 'PUBLISHING';
     publication.updatedAt = new Date();
@@ -206,11 +215,16 @@ export class PublicationService {
     const existingContentId = await this.knownConfluenceContentId(publication);
     const confluenceContentId = await this.executeStep(confluenceStep, () =>
       this.writeGateway.upsertConfluenceBrief({
+        userId,
+        correlationId,
+        profile,
         operationId: publication.operationId,
         parentPageId: profile.briefParentPageId as string,
         existingContentId,
         draftId: draft.id,
+        sourceJiraKey: draft.sourceJiraKey,
         content: draft.maskedBrief,
+        evidence: draft.evidence,
       }),
     );
     if (!confluenceContentId) {
@@ -225,9 +239,14 @@ export class PublicationService {
     const remoteLinkStep = this.requiredStep(stepByKey, REMOTE_LINK_STEP);
     const remoteLinkId = await this.executeStep(remoteLinkStep, () =>
       this.writeGateway.upsertJiraRemoteLink({
+        userId,
+        correlationId,
+        profile,
         operationId: publication.operationId,
         sourceJiraId: draft.sourceJiraId,
         confluenceContentId,
+        confluenceUrl: null,
+        confluenceTitle: draft.maskedBrief.title.text,
       }),
     );
     if (!remoteLinkId) {
@@ -245,9 +264,14 @@ export class PublicationService {
     );
     const summaryCommentId = await this.executeStep(summaryCommentStep, () =>
       this.writeGateway.createJiraSummaryComment({
+        userId,
+        correlationId,
+        profile,
         operationId: publication.operationId,
         sourceJiraId: draft.sourceJiraId,
         summary: draft.maskedBrief.summary.text,
+        confluenceContentId,
+        confluenceUrl: null,
       }),
     );
     if (!summaryCommentId) {
@@ -265,8 +289,12 @@ export class PublicationService {
       }
       await this.executeStep(childTaskStep, () =>
         this.writeGateway.createJiraChildTask({
+          userId,
+          correlationId,
+          profile,
           operationId: publication.operationId,
           sourceJiraId: draft.sourceJiraId,
+          sourceJiraKey: draft.sourceJiraKey,
           childTask,
           template,
         }),
