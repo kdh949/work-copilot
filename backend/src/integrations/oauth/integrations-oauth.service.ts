@@ -26,6 +26,7 @@ import {
   type OAuthTokenPair,
   ProviderAuthorizationCodeRejectedError,
   ProviderReauthorizationRequiredError,
+  ProviderScopeUpgradeRequiredError,
 } from './atlassian-oauth-client.service';
 import { IntegrationProfile } from '../profiles/entities/integration-profile.entity';
 import { SecurityAuditEvent } from '../profiles/entities/security-audit-event.entity';
@@ -41,6 +42,10 @@ const ACCESS_TOKEN_REFRESH_SKEW_MS = 30 * 1000;
 type StoredTokenPair = {
   accessToken: string;
   refreshToken: string | null;
+};
+
+export type AccessTokenOptions = {
+  requiredScopes?: readonly string[];
 };
 
 export type IntegrationConnectionResponse = {
@@ -108,6 +113,10 @@ export class IntegrationsOAuthService {
     const verifier = this.randomUrlSafeValue(48);
     const encryptedVerifier = this.cryptoService.encrypt(verifier);
     const configuration = this.configuration(profile, provider);
+    const scopeFingerprint = this.scopeFingerprint(
+      provider,
+      configuration.scopes,
+    );
     const authorizationUrl = await this.oauthClient.createAuthorizationUrl(
       configuration,
       state,
@@ -124,6 +133,7 @@ export class IntegrationsOAuthService {
         pkceVerifierIv: encryptedVerifier.iv,
         pkceVerifierTag: encryptedVerifier.authenticationTag,
         encryptionKeyVersion: encryptedVerifier.keyVersion,
+        scopeFingerprint,
         expiresAt: new Date(Date.now() + ATTEMPT_TTL_MS),
         consumedAt: null,
       });
@@ -179,8 +189,17 @@ export class IntegrationsOAuthService {
         authenticationTag: attempt.pkceVerifierTag,
         keyVersion: attempt.encryptionKeyVersion,
       });
+      const configuration = this.configuration(profile, provider);
+      const scopeFingerprint = this.scopeFingerprint(
+        provider,
+        configuration.scopes,
+      );
+      this.assertAuthorizationAttemptScopes(
+        attempt.scopeFingerprint,
+        scopeFingerprint,
+      );
       const tokenPair = await this.oauthClient.exchangeAuthorizationCode(
-        this.configuration(profile, provider),
+        configuration,
         code,
         verifier,
       );
@@ -189,6 +208,8 @@ export class IntegrationsOAuthService {
         profile.id,
         provider,
         tokenPair,
+        scopeFingerprint,
+        configuration.scopes,
         correlationId,
       );
     } catch (error) {
@@ -258,6 +279,7 @@ export class IntegrationsOAuthService {
     userId: number,
     providerValue: string,
     correlationId = 'missing-correlation-id',
+    options: AccessTokenOptions = {},
   ): Promise<string> {
     const provider = this.provider(providerValue);
     const profile = await this.findActiveProfile(undefined, true);
@@ -265,7 +287,9 @@ export class IntegrationsOAuthService {
     if (!profile) {
       throw new ConflictException('An active integration profile is required.');
     }
-
+    const configuration = this.configuration(profile, provider);
+    const requiredScopes = options.requiredScopes ?? [];
+    this.assertRequiredScopes(configuration.scopes, requiredScopes);
     try {
       return await this.dataSource.transaction(async (manager) => {
         await this.lockConnection(manager, userId, profile.id, provider);
@@ -277,8 +301,17 @@ export class IntegrationsOAuthService {
           true,
         );
 
-        if (!connection || connection.status === 'reauthorization_required') {
-          throw new ProviderReauthorizationRequiredError();
+        if (
+          !connection ||
+          connection.status === 'reauthorization_required' ||
+          this.requiresReauthorizationForScopes(
+            connection,
+            requiredScopes,
+          )
+        ) {
+          throw connection && connection.status !== 'reauthorization_required'
+            ? new ProviderScopeUpgradeRequiredError()
+            : new ProviderReauthorizationRequiredError();
         }
 
         const tokens = this.tokensFromConnection(connection);
@@ -299,7 +332,7 @@ export class IntegrationsOAuthService {
         }
 
         const refreshed = await this.oauthClient.refresh(
-          this.configuration(profile, provider),
+          configuration,
           tokens.refreshToken,
         );
         const nextPair: OAuthTokenPair = {
@@ -327,12 +360,14 @@ export class IntegrationsOAuthService {
         throw error;
       }
 
-      await this.markReauthorizationRequired(
-        userId,
-        profile.id,
-        provider,
-        correlationId,
-      );
+      if (error.invalidatesConnection) {
+        await this.markReauthorizationRequired(
+          userId,
+          profile.id,
+          provider,
+          correlationId,
+        );
+      }
       throw new ConflictException('Reconnect the integration to continue.');
     }
   }
@@ -425,6 +460,7 @@ export class IntegrationsOAuthService {
         pkceVerifierIv: true,
         pkceVerifierTag: true,
         encryptionKeyVersion: true,
+        scopeFingerprint: true,
         expiresAt: true,
         consumedAt: true,
       },
@@ -455,6 +491,8 @@ export class IntegrationsOAuthService {
     profileId: string,
     provider: IntegrationProvider,
     tokenPair: OAuthTokenPair,
+    scopeFingerprint: string,
+    grantedScopes: readonly string[],
     correlationId: string,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
@@ -479,6 +517,8 @@ export class IntegrationsOAuthService {
       this.assignTokenPair(connection, tokenPair);
       connection.tokenVersion += 1;
       connection.status = 'connected';
+      connection.scopeFingerprint = scopeFingerprint;
+      connection.grantedScopes = this.normalizedScopes(grantedScopes);
       const savedConnection = await manager.save(connection);
       await this.writeAudit(
         manager,
@@ -692,6 +732,73 @@ export class IntegrationsOAuthService {
         keyVersion: profile.encryptionKeyVersion,
       } as EncryptedProfileSecret),
     );
+  }
+
+  private assertAuthorizationAttemptScopes(
+    attemptScopeFingerprint: string | null,
+    expectedScopeFingerprint: string,
+  ): void {
+    if (attemptScopeFingerprint !== expectedScopeFingerprint) {
+      throw new ConflictException(
+        'Restart the integration authorization to continue.',
+      );
+    }
+  }
+
+  private assertRequiredScopes(
+    configuredScopes: readonly string[],
+    requiredScopes: readonly string[],
+  ): void {
+    const configured = new Set(
+      configuredScopes.map((scope) => scope.trim().toUpperCase()),
+    );
+    const missing = requiredScopes.some(
+      (scope) => !configured.has(scope.trim().toUpperCase()),
+    );
+
+    if (missing) {
+      throw new ConflictException(
+        'Integration write scopes are not configured.',
+      );
+    }
+  }
+
+  private requiresReauthorizationForScopes(
+    connection: AtlassianOAuthConnection,
+    requiredScopes: readonly string[],
+  ): boolean {
+    if (requiredScopes.length === 0) {
+      return false;
+    }
+
+    if (!connection.grantedScopes) {
+      // Pre-fingerprint grants retain read compatibility, but cannot be used
+      // to gain new write authority until the user consents again.
+      return true;
+    }
+
+    const granted = new Set(this.normalizedScopes(connection.grantedScopes));
+    return requiredScopes.some(
+      (scope) => !granted.has(scope.trim().toUpperCase()),
+    );
+  }
+
+  private scopeFingerprint(
+    provider: IntegrationProvider,
+    scopes: readonly string[],
+  ): string {
+    const normalized = this.normalizedScopes(scopes);
+    return createHash('sha256')
+      .update(`${provider}:${normalized.join(' ')}`)
+      .digest('hex');
+  }
+
+  private normalizedScopes(scopes: readonly string[]): string[] {
+    return [
+      ...new Set(
+        scopes.map((scope) => scope.trim().toUpperCase()).filter(Boolean),
+      ),
+    ].sort();
   }
 
   private async findConnection(

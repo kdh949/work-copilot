@@ -222,6 +222,94 @@
   background: var(--color-surface-selected);
 }
 
+.work-brief-publication-phase {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-4);
+  background: var(--color-surface-base);
+}
+
+.work-brief-publication-phase__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.work-brief-publication-phase h4,
+.work-brief-publication-phase h5,
+.work-brief-publication-phase p,
+.work-brief-publication-preview pre,
+.work-brief-publication-preview ul {
+  margin: var(--space-0);
+}
+
+.work-brief-publication-preview {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-3);
+  background: var(--color-surface-subtle);
+}
+
+.work-brief-publication-preview dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-0);
+}
+
+.work-brief-publication-preview dl > div {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.work-brief-publication-preview dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-semibold);
+}
+
+.work-brief-publication-preview dd {
+  min-width: 0;
+  margin: var(--space-0);
+  overflow-wrap: anywhere;
+}
+
+.work-brief-publication-preview pre {
+  max-height: 18rem;
+  overflow: auto;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-3);
+  background: var(--color-surface-base);
+  color: var(--color-text-strong);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.work-brief-publication-preview ul {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.work-brief-publication-link {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
+}
+
+.work-brief-recommendation {
+  color: var(--color-action-700) !important;
+  font-weight: var(--font-weight-semibold);
+}
+
 .work-brief-publication header,
 .work-brief-publication-steps li,
 .work-brief-readiness header,
@@ -338,10 +426,16 @@
   .work-brief-section-heading,
   .work-brief-evidence-list li,
   .work-brief-publication header,
+  .work-brief-publication-phase__heading,
   .work-brief-publication-steps li,
   .work-brief-readiness header,
   .work-brief-readiness li {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .work-brief-publication-preview dl > div {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
   }
 }

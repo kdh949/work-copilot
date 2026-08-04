@@ -2,13 +2,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('publication persistence boundary', () => {
-  it('uses the explicitly mock-only write gateway and stores no brief content', () => {
+  it('uses an explicit user-context adapter selection and stores no brief body', () => {
     const moduleSource = readFileSync(
       join(__dirname, 'publication.module.ts'),
       'utf8',
     );
     const gatewaySource = readFileSync(
       join(__dirname, 'mock-publication-write.gateway.ts'),
+      'utf8',
+    );
+    const realGatewaySource = readFileSync(
+      join(__dirname, 'atlassian-publication-write.gateway.ts'),
       'utf8',
     );
     const serviceSource = readFileSync(
@@ -21,11 +25,18 @@ describe('publication persistence boundary', () => {
     );
 
     expect(moduleSource).toContain('MockPublicationWriteGateway');
+    expect(moduleSource).toContain('AtlassianPublicationWriteGateway');
+    expect(moduleSource).toContain('PUBLICATION_WRITE_MODE');
+    expect(moduleSource).toContain('publicationWriteMode');
     expect(gatewaySource).toContain("readonly mode = 'mock'");
     expect(gatewaySource).not.toMatch(/\bfetch\b|AtlassianOAuth|Authorization/);
+    expect(realGatewaySource).toContain("readonly mode = 'real'");
+    expect(realGatewaySource).toContain('IntegrationsOAuthService');
     expect(serviceSource).not.toMatch(
       /PostsModule|AiModule|pgvector|wiki_document/,
     );
-    expect(entitySource).not.toMatch(/maskedBrief|content|summary|commentBody/);
+    expect(entitySource).not.toMatch(
+      /maskedBrief|bodyPreview|summaryText|commentBody|evidence/,
+    );
   });
 });

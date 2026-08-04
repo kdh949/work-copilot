@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 import type {
   PublicationErrorCode,
+  PublicationPhase,
   PublicationStepStatus,
 } from '../publication.types';
 
@@ -21,6 +22,9 @@ export class PublicationStep {
   @Column({ type: 'varchar', length: 64 })
   stepKey: string;
 
+  @Column({ type: 'varchar', length: 32, default: 'confluence' })
+  phase: PublicationPhase;
+
   @Column({ type: 'varchar', length: 32, default: 'PENDING' })
   status: PublicationStepStatus;
 
@@ -32,6 +36,21 @@ export class PublicationStep {
 
   @Column({ type: 'varchar', nullable: true })
   providerObjectId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  providerObjectVersion: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  providerUrl: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  contentHash: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  idempotencyKeyHash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  executionLeaseExpiresAt: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

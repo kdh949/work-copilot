@@ -36,11 +36,56 @@ export class BriefPublication {
   @Column({ type: 'varchar', nullable: true })
   jiraRemoteLinkId: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  jiraSummaryCommentId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  confluencePageVersion: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  confluencePageUrl: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  confluenceContentHash: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  requestedByUserId: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  requestedAt: Date | null;
+
   @Column({ type: 'int', nullable: true })
   approvedByUserId: number | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  jiraIdempotencyKeyHash: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  childTasksIdempotencyKeyHash: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  confluencePreviewHash: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  jiraPreviewHash: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  childTasksPreviewHash: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  jiraApprovedByUserId: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  jiraApprovedAt: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  childTasksApprovedByUserId: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  childTasksApprovedAt: Date | null;
 
   @Column({ type: 'varchar', length: 16, default: 'mock' })
   executionMode: PublicationExecutionMode;

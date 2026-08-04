@@ -1,10 +1,15 @@
 import { ConflictException } from '@nestjs/common';
 import type { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
 import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
-import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
-import { PublicationService } from './publication.service';
 import type { BriefPublication } from './entities/brief-publication.entity';
 import type { PublicationStep } from './entities/publication-step.entity';
+import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
+import type { PublicationWriteResult } from './publication-write-gateway';
+import type {
+  ConfluencePublicationPreview,
+  JiraPublicationPreview,
+} from './publication-preview.service';
+import { PublicationService } from './publication.service';
 
 const PROFILE_ID = 'bc4ed2ab-812a-4162-a7a7-e0ea1bd4b48e';
 const DRAFT_ID = '0e9a46da-cce1-4f35-a0ee-2488f8596391';
@@ -72,7 +77,7 @@ function createProfile(): IntegrationProfile {
         fields: { customfield_10100: 'configured' },
       },
     },
-  } as unknown as IntegrationProfile;
+  } as IntegrationProfile;
 }
 
 function matches(
@@ -91,6 +96,8 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   const steps: PublicationStep[] = [];
   let publicationCounter = 0;
   let stepCounter = 0;
+  let publicationSaveFailure:
+    ((publication: BriefPublication) => boolean) | null = null;
 
   const draftsRepository = {
     findOneBy: jest.fn(() => Promise.resolve(draft)),
@@ -106,11 +113,16 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
       ...values,
     })),
     save: jest.fn((publication: BriefPublication) => {
+      if (publicationSaveFailure?.(publication)) {
+        publicationSaveFailure = null;
+        return Promise.reject(new Error('publication aggregate save failed'));
+      }
       const existing = publications.find((item) => item.id === publication.id);
+      const persisted = { ...publication };
       if (existing) {
-        Object.assign(existing, publication);
+        Object.assign(existing, persisted);
       } else {
-        publications.push(publication);
+        publications.push(persisted);
       }
       return Promise.resolve(publication);
     }),
@@ -151,14 +163,89 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   const readinessService = {
     assertDraftPublishAllowed: jest.fn().mockResolvedValue(undefined),
   };
+  const confluencePreview: ConfluencePublicationPreview = {
+    phase: 'confluence',
+    draftVersion: 3,
+    previewHash: 'confluence-preview-hash',
+    spaceKey: 'DEMO',
+    parentPage: {
+      id: '98765',
+      title: '배포 브리프',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=98765',
+      version: '4',
+    },
+    pageTitle: '[DEMO-1] 마스킹된 배포 브리프',
+    bodyPreview: '<p>미리보기</p>',
+    contentHash: 'content-hash',
+    evidence: [
+      {
+        id: 'jira:100',
+        provider: 'jira',
+        title: '배포 근거',
+        url: 'https://jira.example.test/browse/DEMO-1',
+        version: '2026-08-02T00:00:00.000Z',
+      },
+    ],
+  };
+  const previewService = {
+    confluence: jest.fn(() => Promise.resolve(confluencePreview)),
+    jira: jest.fn(
+      (_draft: WorkBriefDraft, publication: BriefPublication) =>
+        ({
+          phase: 'jira',
+          draftVersion: 3,
+          previewHash: `jira-preview-${publication.confluenceContentId}`,
+          confluencePage: {
+            id: publication.confluenceContentId,
+            url: publication.confluencePageUrl,
+            title: '[DEMO-1] 마스킹된 배포 브리프',
+          },
+          remoteLink: {
+            globalId: `work-copilot:publication:${publication.operationId}`,
+            url: publication.confluencePageUrl,
+            title: '[DEMO-1] 마스킹된 배포 브리프',
+          },
+          summaryComment: {
+            summary: '마스킹된 요약 댓글',
+            url: publication.confluencePageUrl,
+          },
+        }) as JiraPublicationPreview,
+    ),
+    childTasks: jest.fn(
+      (
+        currentDraft: WorkBriefDraft,
+        publication: BriefPublication,
+        currentProfile: IntegrationProfile,
+      ) => ({
+        phase: 'child_tasks',
+        draftVersion: 3,
+        previewHash: `child-preview-${publication.confluenceContentId}-${JSON.stringify(currentProfile.policy.childTaskTemplate)}`,
+        configurationFingerprint: JSON.stringify(
+          currentProfile.policy.childTaskTemplate,
+        ),
+        childTasks: currentDraft.maskedBrief.childTasks
+          .filter((task) => task.selected)
+          .map((task) => ({
+            clientTaskId: task.clientTaskId,
+            summary: task.summary,
+            payload: {},
+          })),
+      }),
+    ),
+  };
   const gateway = new MockPublicationWriteGateway();
+  const stepClaimer = {
+    claim: jest.fn().mockResolvedValue(true),
+  };
   const service = new PublicationService(
     draftsRepository as never,
     profilesRepository as never,
     publicationsRepository as never,
     stepsRepository as never,
     readinessService as never,
+    previewService as never,
     gateway,
+    stepClaimer as never,
   );
 
   return {
@@ -169,40 +256,101 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     publications,
     steps,
     readinessService,
-    profilesRepository,
+    previewService,
+    stepClaimer,
+    failPublicationSaveWhen: (
+      predicate: (publication: BriefPublication) => boolean,
+    ) => {
+      publicationSaveFailure = predicate;
+    },
   };
 }
 
+async function publishConfluence(
+  harness: ReturnType<typeof createHarness>,
+  key = 'confluence-key',
+) {
+  const preview = await harness.service.previewConfluence(7, DRAFT_ID, 'corr');
+  return harness.service.publish(
+    7,
+    DRAFT_ID,
+    {
+      draftVersion: 3,
+      approved: true,
+      previewHash: preview.previewHash,
+      idempotencyKey: key,
+    },
+    'corr',
+  );
+}
+
+async function publishJira(
+  harness: ReturnType<typeof createHarness>,
+  publicationId: string,
+  key = 'jira-key',
+) {
+  const preview = await harness.service.previewJira(7, DRAFT_ID, publicationId);
+  return harness.service.publishJira(
+    7,
+    DRAFT_ID,
+    publicationId,
+    {
+      draftVersion: 3,
+      approved: true,
+      previewHash: preview.previewHash,
+      idempotencyKey: key,
+    },
+    'corr',
+  );
+}
+
+async function publishChildTasks(
+  harness: ReturnType<typeof createHarness>,
+  publicationId: string,
+  key = 'child-tasks-key',
+) {
+  const preview = await harness.service.previewChildTasks(
+    7,
+    DRAFT_ID,
+    publicationId,
+    'corr',
+  );
+  return harness.service.publishChildTasks(
+    7,
+    DRAFT_ID,
+    publicationId,
+    {
+      draftVersion: 3,
+      approved: true,
+      previewHash: preview.previewHash,
+      idempotencyKey: key,
+    },
+    'corr',
+  );
+}
+
 describe('PublicationService', () => {
-  it('publishes every configured mock step once and reuses the same idempotency key', async () => {
+  it('creates only the Confluence page after the first approved preview', async () => {
     const harness = createHarness();
     const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
     const remoteLink = jest.spyOn(harness.gateway, 'upsertJiraRemoteLink');
     const comment = jest.spyOn(harness.gateway, 'createJiraSummaryComment');
     const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
 
-    const first = await harness.service.publish(
-      7,
-      DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'retry-safe-key' },
-      'corr-1',
-    );
-    const second = await harness.service.publish(
-      7,
-      DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'retry-safe-key' },
-      'corr-2',
-    );
+    const first = await publishConfluence(harness, 'confluence-key');
+    const second = await publishConfluence(harness, 'confluence-key');
 
-    expect(first.status).toBe('PUBLISHED');
+    expect(first.status).toBe('CONFLUENCE_PUBLISHED');
     expect(first.executionMode).toBe('mock');
     expect(first.externalWritePerformed).toBe(false);
+    expect(first.confluencePage?.id).toContain('mock-confluence:');
+    expect(first.confluencePage?.version).toBe('1');
     expect(second).toEqual(first);
     expect(harness.publications).toHaveLength(1);
     expect(confluence).toHaveBeenCalledTimes(1);
-    expect(remoteLink).toHaveBeenCalledTimes(1);
-    expect(comment).toHaveBeenCalledTimes(1);
-    expect(childTask).toHaveBeenCalledTimes(1);
+    expect(remoteLink).not.toHaveBeenCalled();
+    expect(comment).not.toHaveBeenCalled();
+    expect(childTask).not.toHaveBeenCalled();
     expect(confluence).toHaveBeenCalledWith(
       expect.objectContaining({ parentPageId: '98765' }),
     );
@@ -212,103 +360,112 @@ describe('PublicationService', () => {
         steps: harness.steps,
       }),
     ).not.toContain('마스킹된 배포 브리프');
+  });
 
-    const newKey = await harness.service.publish(
+  it('skips an already completed Confluence retry without replacing page metadata', async () => {
+    const harness = createHarness();
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    const published = await publishConfluence(harness, 'confluence-key');
+    const retryPreview = await harness.service.previewConfluence(
       7,
       DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'accidental-new-key' },
-      'corr-3',
+      'corr',
     );
-    expect(newKey.id).toBe(first.id);
-    expect(harness.publications).toHaveLength(1);
+
+    const retried = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      published.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: retryPreview.previewHash,
+        idempotencyKey: 'new-browser-confluence-retry-key',
+      },
+      'corr',
+    );
+
+    expect(retried.status).toBe('CONFLUENCE_PUBLISHED');
+    expect(retried.confluencePage).toEqual(published.confluencePage);
     expect(confluence).toHaveBeenCalledTimes(1);
   });
 
-  it('records a Confluence version conflict as a recoverable review state', async () => {
+  it('runs Jira link and comment only after a separately approved Jira preview', async () => {
     const harness = createHarness();
-    harness.gateway.failNext(
-      'confluence_page',
-      'CONFLUENCE_VERSION_CONFLICT',
-      false,
-    );
     const remoteLink = jest.spyOn(harness.gateway, 'upsertJiraRemoteLink');
+    const comment = jest.spyOn(harness.gateway, 'createJiraSummaryComment');
+    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
 
-    const conflicted = await harness.service.publish(
-      7,
-      DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'conflict-key' },
-      'corr-1',
-    );
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
 
-    expect(conflicted.status).toBe('NEEDS_REVIEW');
-    expect(conflicted.requiresReview).toBe(true);
-    expect(conflicted.canRetry).toBe(true);
-    expect(conflicted.steps).toEqual(
+    expect(jira.status).toBe('JIRA_PUBLISHED');
+    expect(remoteLink).toHaveBeenCalledTimes(1);
+    expect(comment).toHaveBeenCalledTimes(1);
+    expect(childTask).not.toHaveBeenCalled();
+    expect(jira.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           key: 'confluence_page',
-          status: 'NEEDS_REVIEW',
-          errorCode: 'CONFLUENCE_VERSION_CONFLICT',
+          phase: 'confluence',
+          status: 'SUCCEEDED',
+        }),
+        expect.objectContaining({
+          key: 'jira_remote_link',
+          phase: 'jira',
+          status: 'SUCCEEDED',
+        }),
+        expect.objectContaining({
+          key: 'jira_summary_comment',
+          phase: 'jira',
+          status: 'SUCCEEDED',
         }),
       ]),
     );
-    expect(remoteLink).not.toHaveBeenCalled();
-
-    const recovered = await harness.service.retry(
-      7,
-      DRAFT_ID,
-      conflicted.id,
-      { draftVersion: 3, approved: true },
-      'corr-2',
-    );
-
-    expect(recovered.status).toBe('PUBLISHED');
-    expect(
-      recovered.steps.find((step) => step.key === 'confluence_page')?.attempts,
-    ).toBe(2);
-    expect(remoteLink).toHaveBeenCalledTimes(1);
   });
 
-  it('recovers a partial comment failure without repeating successful provider objects', async () => {
+  it('retries only the failed Jira comment and retains the existing remote link', async () => {
     const harness = createHarness();
     harness.gateway.failNext(
       'jira_summary_comment',
       'JIRA_SUMMARY_COMMENT_FAILED',
     );
-    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
     const remoteLink = jest.spyOn(harness.gateway, 'upsertJiraRemoteLink');
     const comment = jest.spyOn(harness.gateway, 'createJiraSummaryComment');
-    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
 
-    const partial = await harness.service.publish(
-      7,
-      DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'comment-key' },
-      'corr-1',
-    );
-
+    const confluence = await publishConfluence(harness);
+    const partial = await publishJira(harness, confluence.id, 'jira-key');
     expect(partial.status).toBe('PARTIALLY_PUBLISHED');
     expect(
       partial.steps.find((step) => step.key === 'jira_summary_comment'),
     ).toMatchObject({ status: 'FAILED', retryable: true });
-    expect(childTask).not.toHaveBeenCalled();
 
+    const retryPreview = await harness.service.previewJira(
+      7,
+      DRAFT_ID,
+      partial.id,
+    );
     const recovered = await harness.service.retry(
       7,
       DRAFT_ID,
       partial.id,
-      { draftVersion: 3, approved: true },
-      'corr-2',
+      {
+        phase: 'jira',
+        draftVersion: 3,
+        approved: true,
+        previewHash: retryPreview.previewHash,
+        idempotencyKey: 'new-browser-jira-retry-key',
+      },
+      'corr',
     );
 
-    expect(recovered.status).toBe('PUBLISHED');
-    expect(confluence).toHaveBeenCalledTimes(1);
+    expect(recovered.status).toBe('JIRA_PUBLISHED');
     expect(remoteLink).toHaveBeenCalledTimes(1);
     expect(comment).toHaveBeenCalledTimes(2);
-    expect(childTask).toHaveBeenCalledTimes(1);
   });
 
-  it('retries only a failed selected child task while retaining sibling task progress', async () => {
+  it('creates selected child tasks last and reconciles an individual failed task', async () => {
     const harness = createHarness([FIRST_TASK_ID, SECOND_TASK_ID]);
     harness.gateway.failNext(
       `jira_child_task:${FIRST_TASK_ID}`,
@@ -316,11 +473,12 @@ describe('PublicationService', () => {
     );
     const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
 
-    const partial = await harness.service.publish(
-      7,
-      DRAFT_ID,
-      { draftVersion: 3, approved: true, idempotencyKey: 'child-key' },
-      'corr-1',
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
+    const partial = await publishChildTasks(
+      harness,
+      jira.id,
+      'child-tasks-key',
     );
 
     expect(partial.status).toBe('PARTIALLY_PUBLISHED');
@@ -331,62 +489,323 @@ describe('PublicationService', () => {
     expect(
       partial.steps.find((step) => step.key.endsWith(SECOND_TASK_ID)),
     ).toMatchObject({ status: 'SUCCEEDED' });
+    expect(
+      harness.steps.find((step) => step.stepKey.endsWith(FIRST_TASK_ID))
+        ?.idempotencyKeyHash,
+    ).toMatch(/^[a-f0-9]{64}$/);
 
+    const retryPreview = await harness.service.previewChildTasks(
+      7,
+      DRAFT_ID,
+      partial.id,
+      'corr',
+    );
     const recovered = await harness.service.retry(
       7,
       DRAFT_ID,
       partial.id,
-      { draftVersion: 3, approved: true },
-      'corr-2',
+      {
+        phase: 'child_tasks',
+        draftVersion: 3,
+        approved: true,
+        previewHash: retryPreview.previewHash,
+        idempotencyKey: 'new-browser-child-tasks-retry-key',
+      },
+      'corr',
     );
 
     expect(recovered.status).toBe('PUBLISHED');
     expect(childTask).toHaveBeenCalledTimes(3);
   });
 
-  it('recreates missing pending step records before resuming a recoverable publication', async () => {
+  it('requires a fresh approved preview and accepts a new phase command key', async () => {
     const harness = createHarness();
-    harness.publications.push({
-      id: 'publication-recovery',
-      draftId: DRAFT_ID,
-      operationId: '33333333-3333-4333-8333-333333333333',
-      idempotencyKeyHash: 'safe-hash',
-      draftVersion: 3,
-      status: 'PENDING',
-      confluenceContentId: null,
-      jiraRemoteLinkId: null,
-      approvedByUserId: 7,
-      approvedAt: new Date(),
-      executionMode: 'mock',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const recovered = await harness.service.retry(
+    const preview = await harness.service.previewConfluence(
       7,
       DRAFT_ID,
-      'publication-recovery',
-      { draftVersion: 3, approved: true },
-      'corr-recovery',
+      'corr',
     );
-
-    expect(recovered.status).toBe('PUBLISHED');
-    expect(recovered.steps).toHaveLength(4);
-    expect(recovered.steps.every((step) => step.status === 'SUCCEEDED')).toBe(
-      true,
-    );
-  });
-
-  it('does not start the saga when approval, version, readiness, or parent configuration is invalid', async () => {
-    const harness = createHarness();
-    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
 
     await expect(
       harness.service.publish(
         7,
         DRAFT_ID,
-        { draftVersion: 3, approved: false, idempotencyKey: 'approval-key' },
-        'corr-1',
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: 'stale-preview',
+          idempotencyKey: 'confluence-key',
+        },
+        'corr',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const confluence = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        idempotencyKey: 'confluence-key',
+      },
+      'corr',
+    );
+    const jiraPreview = await harness.service.previewJira(
+      7,
+      DRAFT_ID,
+      confluence.id,
+    );
+    const jira = await harness.service.publishJira(
+      7,
+      DRAFT_ID,
+      confluence.id,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: jiraPreview.previewHash,
+        idempotencyKey: 'jira-key',
+      },
+      'corr',
+    );
+    const childPreview = await harness.service.previewChildTasks(
+      7,
+      DRAFT_ID,
+      jira.id,
+      'corr',
+    );
+
+    await expect(
+      harness.service.publishChildTasks(
+        7,
+        DRAFT_ID,
+        jira.id,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: childPreview.previewHash,
+          idempotencyKey: 'different-child-tasks-key',
+        },
+        'corr',
+      ),
+    ).resolves.toMatchObject({ status: 'PUBLISHED' });
+
+    await expect(
+      harness.service.publishChildTasks(
+        7,
+        DRAFT_ID,
+        jira.id,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: childPreview.previewHash,
+          idempotencyKey: 'other-child-tasks-key',
+        },
+        'corr',
+      ),
+    ).resolves.toMatchObject({ status: 'PUBLISHED' });
+  });
+
+  it('returns an already completed command before mutable readiness checks', async () => {
+    const harness = createHarness();
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+
+    const first = await publishConfluence(harness, 'lost-response-key');
+    harness.readinessService.assertDraftPublishAllowed.mockRejectedValueOnce(
+      new ConflictException({ code: 'DRAFT_NOT_READY_FOR_PUBLISH' }),
+    );
+
+    const replayed = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: 'not-recomputed-on-replay',
+        idempotencyKey: 'lost-response-key',
+      },
+      'corr',
+    );
+
+    expect(replayed).toEqual(first);
+    expect(confluence).toHaveBeenCalledTimes(1);
+    expect(
+      harness.readinessService.assertDraftPublishAllowed,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers Confluence aggregate metadata from a succeeded durable step', async () => {
+    const harness = createHarness();
+    harness.failPublicationSaveWhen(
+      (publication) => publication.confluenceContentId !== null,
+    );
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    await expect(
+      harness.service.publish(
+        7,
+        DRAFT_ID,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'confluence-key',
+        },
+        'corr',
+      ),
+    ).rejects.toThrow('publication aggregate save failed');
+    const persisted = harness.publications[0];
+    expect(persisted.confluenceContentId).toBeNull();
+    expect(harness.steps[0]).toMatchObject({
+      status: 'SUCCEEDED',
+      providerObjectId: expect.any(String),
+      providerUrl: expect.any(String),
+    });
+    const retryPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    const recovered = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      persisted.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: retryPreview.previewHash,
+        idempotencyKey: 'new-browser-recovery-key',
+      },
+      'corr',
+    );
+
+    expect(recovered.status).toBe('CONFLUENCE_PUBLISHED');
+    expect(recovered.confluencePage).toMatchObject({
+      id: harness.steps[0].providerObjectId,
+      url: harness.steps[0].providerUrl,
+    });
+    await expect(
+      harness.service.previewJira(7, DRAFT_ID, persisted.id),
+    ).resolves.toMatchObject({ phase: 'jira' });
+  });
+
+  it('lets only one concurrent retry call the provider for a step', async () => {
+    const harness = createHarness();
+    const confluence = await publishConfluence(harness);
+    const preview = await harness.service.previewJira(
+      7,
+      DRAFT_ID,
+      confluence.id,
+    );
+    harness.stepClaimer.claim.mockClear();
+    harness.stepClaimer.claim
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+
+    let resolveLink: (result: PublicationWriteResult) => void;
+    const pendingLink = new Promise<PublicationWriteResult>((resolve) => {
+      resolveLink = resolve;
+    });
+    const remoteLink = jest
+      .spyOn(harness.gateway, 'upsertJiraRemoteLink')
+      .mockImplementationOnce(() => pendingLink);
+
+    const first = harness.service.publishJira(
+      7,
+      DRAFT_ID,
+      confluence.id,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        idempotencyKey: 'concurrent-first-key',
+      },
+      'corr',
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const second = await harness.service.publishJira(
+      7,
+      DRAFT_ID,
+      confluence.id,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        idempotencyKey: 'concurrent-second-key',
+      },
+      'corr',
+    );
+    resolveLink!({ providerObjectId: 'remote-link-1' });
+    const firstResult = await first;
+
+    expect(second.status).toBe('PUBLISHING');
+    expect(firstResult.status).toBe('JIRA_PUBLISHED');
+    expect(remoteLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a child-task approval when its template changes after preview', async () => {
+    const harness = createHarness();
+    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
+    const preview = await harness.service.previewChildTasks(
+      7,
+      DRAFT_ID,
+      jira.id,
+      'corr',
+    );
+    harness.profile.policy.childTaskTemplate = {
+      issueTypeId: '10001',
+      fields: { customfield_10100: 'changed-after-preview' },
+    };
+
+    await expect(
+      harness.service.publishChildTasks(
+        7,
+        DRAFT_ID,
+        jira.id,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'stale-child-task-preview-key',
+        },
+        'corr',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_PREVIEW_STALE' },
+    });
+    expect(childTask).not.toHaveBeenCalled();
+  });
+
+  it('does not start Confluence publication when approval, version, readiness, or parent configuration is invalid', async () => {
+    const harness = createHarness();
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    await expect(
+      harness.service.publish(
+        7,
+        DRAFT_ID,
+        {
+          draftVersion: 3,
+          approved: false,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'approval-key',
+        },
+        'corr',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -394,8 +813,13 @@ describe('PublicationService', () => {
       harness.service.publish(
         7,
         DRAFT_ID,
-        { draftVersion: 2, approved: true, idempotencyKey: 'version-key' },
-        'corr-1',
+        {
+          draftVersion: 2,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'version-key',
+        },
+        'corr',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -406,8 +830,13 @@ describe('PublicationService', () => {
       harness.service.publish(
         7,
         DRAFT_ID,
-        { draftVersion: 3, approved: true, idempotencyKey: 'readiness-key' },
-        'corr-1',
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'readiness-key',
+        },
+        'corr',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -416,8 +845,13 @@ describe('PublicationService', () => {
       harness.service.publish(
         7,
         DRAFT_ID,
-        { draftVersion: 3, approved: true, idempotencyKey: 'parent-key' },
-        'corr-1',
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'parent-key',
+        },
+        'corr',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 

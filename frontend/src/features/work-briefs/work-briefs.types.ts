@@ -17,11 +17,16 @@ export type WorkEvidence = {
   location?: string;
   tags?: string[];
   state?: "current" | "review" | "restricted";
+  recommendationReasons?: Array<
+    "source_jira" | "linked_jira" | "jira_issue" | "jira_summary"
+  >;
 };
 
 export type EvidenceCollection = {
   accessStatus: "accessible" | "access_limited" | "not_found";
   evidence: WorkEvidence[];
+  recommendations?: WorkEvidence[];
+  recommendationAccessStatus?: "accessible" | "access_limited" | "not_found";
 };
 
 export type EvidenceCitation = {
@@ -98,6 +103,7 @@ export type ReadinessAssessment = {
 
 export type PublicationStep = {
   key: string;
+  phase: PublicationPhase;
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "NEEDS_REVIEW";
   attempts: number;
   errorCode:
@@ -110,6 +116,63 @@ export type PublicationStep = {
   retryable: boolean;
 };
 
+export type PublicationPhase = "confluence" | "jira" | "child_tasks";
+
+export type ConfluencePublicationPreview = {
+  phase: "confluence";
+  draftVersion: number;
+  previewHash: string;
+  spaceKey: string;
+  parentPage: { id: string; title: string; url: string; version: string };
+  pageTitle: string;
+  bodyPreview: string;
+  contentHash: string;
+  evidence: Array<{
+    id: string;
+    provider: "jira" | "confluence";
+    title: string;
+    url: string;
+    version: string;
+  }>;
+};
+
+export type JiraPublicationPreview = {
+  phase: "jira";
+  draftVersion: number;
+  previewHash: string;
+  confluencePage: { id: string; url: string; title: string };
+  remoteLink: { globalId: string; url: string; title: string };
+  summaryComment: { summary: string; url: string };
+};
+
+export type ChildTasksPublicationPreview = {
+  phase: "child_tasks";
+  draftVersion: number;
+  previewHash: string;
+  configurationFingerprint: string;
+  childTasks: Array<{
+    clientTaskId: string;
+    summary: string;
+    payload: {
+      project: { key: string };
+      issueType: { id: string };
+      parent: { id: string; key: string };
+      fields: Record<string, unknown>;
+    };
+  }>;
+};
+
+export type PublicationPreview =
+  | ConfluencePublicationPreview
+  | JiraPublicationPreview
+  | ChildTasksPublicationPreview;
+
+export type PublicationPreviews = Partial<{
+  confluence: ConfluencePublicationPreview;
+  jira: JiraPublicationPreview;
+  child_tasks: ChildTasksPublicationPreview;
+}>;
+
 export type BriefPublication = {
   id: string;
   draftId: string;
@@ -117,11 +180,19 @@ export type BriefPublication = {
   status:
     | "PENDING"
     | "PUBLISHING"
+    | "CONFLUENCE_PUBLISHED"
+    | "JIRA_PUBLISHED"
     | "PUBLISHED"
     | "PARTIALLY_PUBLISHED"
     | "NEEDS_REVIEW";
-  executionMode: "mock";
-  externalWritePerformed: false;
+  executionMode: "mock" | "real";
+  externalWritePerformed: boolean;
+  confluencePage: {
+    id: string;
+    version: string | null;
+    url: string | null;
+    contentHash: string | null;
+  } | null;
   canRetry: boolean;
   requiresReview: boolean;
   steps: PublicationStep[];

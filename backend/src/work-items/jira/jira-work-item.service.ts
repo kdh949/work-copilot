@@ -2,6 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { IntegrationsOAuthService } from '../../integrations/oauth/integrations-oauth.service';
 import { AtlassianReadClientService } from '../atlassian-read-client.service';
 import {
+  ConfluenceWorkItemService,
+  type EvidenceRecommendationReason,
+} from '../confluence/confluence-work-item.service';
+import {
   type EvidenceCollectionResponse,
   type NormalizedEvidence,
   normalizeEvidence,
@@ -28,6 +32,17 @@ export type JiraDraftContext = {
   sourceJiraKey: string;
   sourceJiraVersion: string | null;
   evidence: TransientJiraDraftEvidence[];
+};
+
+export type EvidenceRecommendation = NormalizedEvidence & {
+  recommendationReasons: Array<
+    'source_jira' | 'linked_jira' | EvidenceRecommendationReason
+  >;
+};
+
+export type JiraEvidenceCollectionResponse = EvidenceCollectionResponse & {
+  recommendations?: EvidenceRecommendation[];
+  recommendationAccessStatus?: EvidenceCollectionResponse['accessStatus'];
 };
 
 export type JiraReadinessEvidenceVersion = {
@@ -68,23 +83,63 @@ export class JiraWorkItemService {
     private readonly accessPolicy: IntegrationAccessPolicyService,
     private readonly readClient: AtlassianReadClientService,
     private readonly integrationsOAuthService: IntegrationsOAuthService,
+    private readonly confluenceWorkItemService?: ConfluenceWorkItemService,
   ) {}
 
   async collectIssueEvidence(
     userId: number,
     issueKeyValue: string,
     correlationId: string,
-  ): Promise<EvidenceCollectionResponse> {
+  ): Promise<JiraEvidenceCollectionResponse> {
     const context = await this.collectIssueDraftContext(
       userId,
       issueKeyValue,
       correlationId,
     );
 
-    return {
+    const response: JiraEvidenceCollectionResponse = {
       accessStatus: context.accessStatus,
       evidence: context.evidence.map((item) => item.evidence),
     };
+    if (
+      context.accessStatus !== 'accessible' ||
+      context.evidence.length === 0 ||
+      !this.confluenceWorkItemService
+    ) {
+      return response;
+    }
+
+    const jiraRecommendations: EvidenceRecommendation[] = context.evidence.map(
+      (item, index) => ({
+        ...item.evidence,
+        recommendationReasons: [index === 0 ? 'source_jira' : 'linked_jira'],
+      }),
+    );
+    try {
+      const confluence = await this.confluenceWorkItemService.recommendEvidence(
+        userId,
+        context.sourceJiraKey,
+        context.evidence[0].evidence.title,
+        correlationId,
+      );
+      return {
+        ...response,
+        recommendations: [
+          ...jiraRecommendations,
+          ...confluence.recommendations,
+        ],
+        recommendationAccessStatus: confluence.accessStatus,
+      };
+    } catch {
+      // A missing or expired Confluence user connection must not hide the Jira
+      // evidence the user already opened. Keep the recommendation failure
+      // generic and expose no provider-controlled detail.
+      return {
+        ...response,
+        recommendations: jiraRecommendations,
+        recommendationAccessStatus: 'access_limited',
+      };
+    }
   }
 
   async collectIssueDraftContext(

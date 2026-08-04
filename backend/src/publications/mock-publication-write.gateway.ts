@@ -5,6 +5,13 @@ import type {
 } from './publication-write-gateway';
 import { PublicationGatewayError } from './publication-write-gateway';
 import type { PublicationErrorCode } from './publication.types';
+import type { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
+import type {
+  BriefChildTask,
+  BriefContent,
+  StoredBriefEvidence,
+} from '../work-briefs/brief-draft.types';
+import type { ChildTaskTemplate } from '../integrations/profiles/entities/integration-profile.entity';
 
 type MockFailure = {
   code: PublicationErrorCode;
@@ -28,23 +35,36 @@ export class MockPublicationWriteGateway implements PublicationWriteGateway {
   }
 
   upsertConfluenceBrief(input: {
+    userId: number;
+    correlationId: string;
+    profile: IntegrationProfile;
     operationId: string;
     parentPageId: string;
     existingContentId: string | null;
     draftId: string;
-    content: unknown;
+    sourceJiraKey: string;
+    content: BriefContent;
+    evidence: StoredBriefEvidence[];
   }): Promise<PublicationWriteResult> {
     this.consumeFailure('confluence_page');
+    const providerObjectId =
+      input.existingContentId ?? `mock-confluence:${input.operationId}`;
     return Promise.resolve({
-      providerObjectId:
-        input.existingContentId ?? `mock-confluence:${input.operationId}`,
+      providerObjectId,
+      providerObjectVersion: '1',
+      providerUrl: `https://mock.example.invalid/confluence/${encodeURIComponent(providerObjectId)}`,
     });
   }
 
   upsertJiraRemoteLink(input: {
+    userId: number;
+    correlationId: string;
+    profile: IntegrationProfile;
     operationId: string;
     sourceJiraId: string;
     confluenceContentId: string;
+    confluenceUrl: string | null;
+    confluenceTitle: string;
   }): Promise<PublicationWriteResult> {
     this.consumeFailure('jira_remote_link');
     return Promise.resolve({
@@ -53,9 +73,14 @@ export class MockPublicationWriteGateway implements PublicationWriteGateway {
   }
 
   createJiraSummaryComment(input: {
+    userId: number;
+    correlationId: string;
+    profile: IntegrationProfile;
     operationId: string;
     sourceJiraId: string;
     summary: string;
+    confluenceContentId: string;
+    confluenceUrl: string | null;
   }): Promise<PublicationWriteResult> {
     this.consumeFailure('jira_summary_comment');
     return Promise.resolve({
@@ -64,10 +89,14 @@ export class MockPublicationWriteGateway implements PublicationWriteGateway {
   }
 
   createJiraChildTask(input: {
+    userId: number;
+    correlationId: string;
+    profile: IntegrationProfile;
     operationId: string;
     sourceJiraId: string;
-    childTask: { clientTaskId: string };
-    template: unknown;
+    sourceJiraKey: string;
+    childTask: BriefChildTask;
+    template: ChildTaskTemplate;
   }): Promise<PublicationWriteResult> {
     this.consumeFailure(`jira_child_task:${input.childTask.clientTaskId}`);
     return Promise.resolve({
