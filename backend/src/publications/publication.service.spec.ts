@@ -96,6 +96,8 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   const steps: PublicationStep[] = [];
   let publicationCounter = 0;
   let stepCounter = 0;
+  let publicationSaveFailure:
+    ((publication: BriefPublication) => boolean) | null = null;
 
   const draftsRepository = {
     findOneBy: jest.fn(() => Promise.resolve(draft)),
@@ -111,11 +113,16 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
       ...values,
     })),
     save: jest.fn((publication: BriefPublication) => {
+      if (publicationSaveFailure?.(publication)) {
+        publicationSaveFailure = null;
+        return Promise.reject(new Error('publication aggregate save failed'));
+      }
       const existing = publications.find((item) => item.id === publication.id);
+      const persisted = { ...publication };
       if (existing) {
-        Object.assign(existing, publication);
+        Object.assign(existing, persisted);
       } else {
-        publications.push(publication);
+        publications.push(persisted);
       }
       return Promise.resolve(publication);
     }),
@@ -251,6 +258,11 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     readinessService,
     previewService,
     stepClaimer,
+    failPublicationSaveWhen: (
+      predicate: (publication: BriefPublication) => boolean,
+    ) => {
+      publicationSaveFailure = predicate;
+    },
   };
 }
 
@@ -624,13 +636,35 @@ describe('PublicationService', () => {
 
   it('recovers Confluence aggregate metadata from a succeeded durable step', async () => {
     const harness = createHarness();
-    const published = await publishConfluence(harness, 'confluence-key');
+    harness.failPublicationSaveWhen(
+      (publication) => publication.confluenceContentId !== null,
+    );
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    await expect(
+      harness.service.publish(
+        7,
+        DRAFT_ID,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'confluence-key',
+        },
+        'corr',
+      ),
+    ).rejects.toThrow('publication aggregate save failed');
     const persisted = harness.publications[0];
-    persisted.status = 'PUBLISHING';
-    persisted.confluenceContentId = null;
-    persisted.confluencePageVersion = null;
-    persisted.confluencePageUrl = null;
-    persisted.confluenceContentHash = null;
+    expect(persisted.confluenceContentId).toBeNull();
+    expect(harness.steps[0]).toMatchObject({
+      status: 'SUCCEEDED',
+      providerObjectId: expect.any(String),
+      providerUrl: expect.any(String),
+    });
     const retryPreview = await harness.service.previewConfluence(
       7,
       DRAFT_ID,
@@ -640,7 +674,7 @@ describe('PublicationService', () => {
     const recovered = await harness.service.retry(
       7,
       DRAFT_ID,
-      published.id,
+      persisted.id,
       {
         phase: 'confluence',
         draftVersion: 3,
@@ -652,9 +686,12 @@ describe('PublicationService', () => {
     );
 
     expect(recovered.status).toBe('CONFLUENCE_PUBLISHED');
-    expect(recovered.confluencePage).toEqual(published.confluencePage);
+    expect(recovered.confluencePage).toMatchObject({
+      id: harness.steps[0].providerObjectId,
+      url: harness.steps[0].providerUrl,
+    });
     await expect(
-      harness.service.previewJira(7, DRAFT_ID, published.id),
+      harness.service.previewJira(7, DRAFT_ID, persisted.id),
     ).resolves.toMatchObject({ phase: 'jira' });
   });
 
