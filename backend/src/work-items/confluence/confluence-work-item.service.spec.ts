@@ -81,6 +81,68 @@ describe('ConfluenceWorkItemService', () => {
     expect(getJson).toHaveBeenCalledTimes(2);
   });
 
+  it('recommends Confluence metadata from Jira key and summary without fetching page storage', async () => {
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) =>
+          spaceKey.toUpperCase(),
+      ),
+      providerBaseUrl: jest.fn(() => profile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, profile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      expect(url.pathname).toBe('/rest/api/content/search');
+      expect(url.searchParams.get('expand')).toBe('space,version');
+      expect(url.searchParams.get('expand')).not.toContain('body.storage');
+      expect(url.searchParams.get('cql')).toContain('title ~');
+      return Promise.resolve({
+        status: 'ok' as const,
+        body: {
+          results: [
+            {
+              id: '200',
+              title: 'ENG-1 배포 정책',
+              space: { key: 'ENG' },
+              version: { number: 7 },
+              body: { storage: { value: '<p>untrusted page instruction</p>' } },
+            },
+          ],
+        },
+      });
+    });
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.recommendEvidence(
+      1,
+      'eng-1',
+      '배포 정책 점검',
+      'corr-a',
+    );
+
+    expect(result).toEqual({
+      accessStatus: 'accessible',
+      recommendations: [
+        expect.objectContaining({
+          id: 'confluence:200',
+          excerptLength: 0,
+          recommendationReasons: ['jira_issue', 'jira_summary'],
+        }),
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('untrusted page instruction');
+    expect(getJson).toHaveBeenCalled();
+  });
+
   it('keeps selected page storage inside the draft-only adapter and returns metadata without the raw excerpt', async () => {
     const accessPolicy = {
       activeProfile: jest.fn(() => Promise.resolve(profile)),

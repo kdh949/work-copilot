@@ -39,7 +39,7 @@ const linkedIssue = {
 };
 
 describe('JiraWorkItemService', () => {
-  function makeService() {
+  function makeService(confluenceWorkItemService?: unknown) {
     const activeProfile = jest.fn(() => Promise.resolve(profile));
     const assertAllowedProject = jest.fn(
       (_profile: IntegrationProfile, projectKey: string) => {
@@ -78,7 +78,12 @@ describe('JiraWorkItemService', () => {
     const readClient = { getJson } as unknown as AtlassianReadClientService;
 
     return {
-      service: new JiraWorkItemService(accessPolicy, readClient, oauth),
+      service: new JiraWorkItemService(
+        accessPolicy,
+        readClient,
+        oauth,
+        confluenceWorkItemService as never,
+      ),
       getAccessToken,
       getJson,
       assertAllowedProject,
@@ -118,6 +123,55 @@ describe('JiraWorkItemService', () => {
       profile.jiraBaseUrl,
       'token-user-a',
     );
+  });
+
+  it('adds metadata-only Jira and Confluence recommendations when both user connections are available', async () => {
+    const recommendEvidence = jest.fn(() =>
+      Promise.resolve({
+        accessStatus: 'accessible' as const,
+        recommendations: [
+          {
+            id: 'confluence:200',
+            provider: 'confluence' as const,
+            sourceId: '200',
+            url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+            title: 'ENG-1 배포 결정',
+            version: '7',
+            excerptLength: 0,
+            accessStatus: 'accessible' as const,
+            dlpStatus: 'not_evaluated' as const,
+            recommendationReasons: ['jira_issue' as const],
+          },
+        ],
+      }),
+    );
+    const { service } = makeService({ recommendEvidence });
+
+    const result = await service.collectIssueEvidence(1, 'ENG-1', 'corr-a');
+
+    expect(result.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'jira:100',
+          recommendationReasons: ['source_jira'],
+        }),
+        expect.objectContaining({
+          id: 'jira:101',
+          recommendationReasons: ['linked_jira'],
+        }),
+        expect.objectContaining({
+          id: 'confluence:200',
+          excerptLength: 0,
+        }),
+      ]),
+    );
+    expect(recommendEvidence).toHaveBeenCalledWith(
+      1,
+      'ENG-1',
+      'Root issue',
+      'corr-a',
+    );
+    expect(JSON.stringify(result)).not.toContain('private root description');
   });
 
   it('rejects a non-allowlisted project before obtaining a user OAuth token', async () => {
