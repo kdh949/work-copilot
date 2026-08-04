@@ -51,6 +51,14 @@ export class AtlassianOAuthConnection {
   @Column({ type: 'varchar', length: 32, default: 'connected' })
   status: OAuthConnectionStatus;
 
+  /**
+   * Hash of the normalized scope set used in the user consent flow. It lets
+   * us distinguish an old read-only grant from a later profile change that
+   * requests write authority.
+   */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  scopeFingerprint: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

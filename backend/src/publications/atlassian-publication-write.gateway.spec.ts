@@ -102,6 +102,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       7,
       'confluence',
       'correlation-1',
+      { requiredScopes: ['WRITE'] },
     );
     expect(harness.accessPolicy.assertAllowedSpace).toHaveBeenCalledWith(
       PROFILE,

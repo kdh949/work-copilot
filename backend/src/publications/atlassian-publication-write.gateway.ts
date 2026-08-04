@@ -414,6 +414,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       input.userId,
       provider,
       input.correlationId,
+      { requiredScopes: ['WRITE'] },
     );
   }
 

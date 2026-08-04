@@ -666,4 +666,82 @@ describe('IntegrationsOAuthService', () => {
     );
     expect(JSON.stringify(auditEvents)).not.toContain('old-refresh');
   });
+
+  it('binds write access to the consented scope fingerprint and reconnects after a scope change', async () => {
+    const { service, connections, oauthClient } = harness;
+    const oauthClientMock = oauthClient as unknown as {
+      configurationFromProfile: jest.Mock;
+    };
+    const writeConfiguration = {
+      provider: 'jira' as const,
+      baseUrl: 'https://jira.example.test/',
+      clientId: 'jira-client',
+      clientSecret: 'client-secret',
+      scopes: ['READ', 'WRITE'],
+      redirectUri: 'https://api.example.test/integrations/jira/callback',
+    };
+    oauthClientMock.configurationFromProfile.mockReturnValue(
+      writeConfiguration,
+    );
+
+    const started = await service.createAuthorizationUrl('jira', 101, 'corr-a');
+    const state = new URL(started.authorizationUrl).searchParams.get('state');
+    await service.completeAuthorization(
+      'jira',
+      'authorization-code',
+      state as string,
+      101,
+      'corr-b',
+    );
+
+    expect(connections[0]?.scopeFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    await expect(
+      service.getAccessToken(101, 'jira', 'corr-c', {
+        requiredScopes: ['WRITE'],
+      }),
+    ).resolves.toBe('access-token-user-a');
+
+    oauthClientMock.configurationFromProfile.mockReturnValue({
+      ...writeConfiguration,
+      scopes: ['READ', 'WRITE', 'WRITE_ADMIN'],
+    });
+    await expect(
+      service.getAccessToken(101, 'jira', 'corr-d', {
+        requiredScopes: ['WRITE'],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.list(101)).resolves.toEqual([
+      { provider: 'jira', status: 'reauthorization_required' },
+      { provider: 'confluence', status: 'authorization_required' },
+    ]);
+  });
+
+  it('rejects a callback when the profile scope changed after the user opened consent', async () => {
+    const { service, exchangeAuthorizationCode, oauthClient } = harness;
+    const oauthClientMock = oauthClient as unknown as {
+      configurationFromProfile: jest.Mock;
+    };
+    const started = await service.createAuthorizationUrl('jira', 101, 'corr-a');
+    const state = new URL(started.authorizationUrl).searchParams.get('state');
+
+    oauthClientMock.configurationFromProfile.mockReturnValue({
+      provider: 'jira',
+      baseUrl: 'https://jira.example.test/',
+      clientId: 'jira-client',
+      clientSecret: 'client-secret',
+      scopes: ['READ', 'WRITE'],
+      redirectUri: 'https://api.example.test/integrations/jira/callback',
+    });
+
+    await expect(
+      service.completeAuthorization(
+        'jira',
+        'authorization-code',
+        state as string,
+        101,
+        'corr-b',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+  });
 });

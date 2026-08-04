@@ -38,6 +38,10 @@ export class OAuthAuthorizationAttempt {
   @Column({ type: 'int' })
   encryptionKeyVersion: number;
 
+  /** Binds the callback to the exact scopes shown to the user at consent. */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  scopeFingerprint: string | null;
+
   @Column({ type: 'timestamptz' })
   expiresAt: Date;
 
