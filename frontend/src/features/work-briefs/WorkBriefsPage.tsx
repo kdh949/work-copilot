@@ -123,7 +123,7 @@ export function WorkBriefsPage({
   const [publicationApprovals, setPublicationApprovals] = useState<Record<PublicationPhase, boolean>>(
     emptyPublicationApprovals,
   );
-  const idempotencyKeyRef = useRef<Partial<Record<PublicationPhase, string>>>({});
+  const inFlightCommandKeyRef = useRef<Partial<Record<PublicationPhase, string>>>({});
 
   const evidence = useMemo(
     () => [...jiraEvidence, ...confluenceEvidence],
@@ -161,7 +161,7 @@ export function WorkBriefsPage({
     setPublication(null);
     setPublicationPreviews({});
     setPublicationApprovals(emptyPublicationApprovals());
-    idempotencyKeyRef.current = {};
+    inFlightCommandKeyRef.current = {};
     void loadPublication(nextDraft.id);
   }
 
@@ -436,9 +436,12 @@ export function WorkBriefsPage({
       return;
     }
 
+    // This key deduplicates only the in-flight HTTP command. Durable retry
+    // identity is the server-side publication + phase, so a refreshed page
+    // can safely issue a new command key for an incomplete step.
     const idempotencyKey =
-      idempotencyKeyRef.current[phase] ?? createIdempotencyKey();
-    idempotencyKeyRef.current[phase] = idempotencyKey;
+      inFlightCommandKeyRef.current[phase] ?? createIdempotencyKey();
+    inFlightCommandKeyRef.current[phase] = idempotencyKey;
     const shouldRetry = Boolean(
       publication?.steps.some((step) => step.phase === phase),
     );
@@ -481,6 +484,7 @@ export function WorkBriefsPage({
         setMessage(`${publicationPhaseLabel(phase)} 단계를 완료하지 못했습니다.`);
       }
     } finally {
+      delete inFlightCommandKeyRef.current[phase];
       setIsPublishing(false);
     }
   }
