@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('publication persistence boundary', () => {
-  it('uses the real user-context adapter by default and stores no brief body', () => {
+  it('uses an explicit user-context adapter selection and stores no brief body', () => {
     const moduleSource = readFileSync(
       join(__dirname, 'publication.module.ts'),
       'utf8',
@@ -27,7 +27,7 @@ describe('publication persistence boundary', () => {
     expect(moduleSource).toContain('MockPublicationWriteGateway');
     expect(moduleSource).toContain('AtlassianPublicationWriteGateway');
     expect(moduleSource).toContain('PUBLICATION_WRITE_MODE');
-    expect(moduleSource).toContain('? mockGateway');
+    expect(moduleSource).toContain('publicationWriteMode');
     expect(gatewaySource).toContain("readonly mode = 'mock'");
     expect(gatewaySource).not.toMatch(/\bfetch\b|AtlassianOAuth|Authorization/);
     expect(realGatewaySource).toContain("readonly mode = 'real'");

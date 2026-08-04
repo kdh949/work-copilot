@@ -88,8 +88,9 @@ INTEGRATION_CONFLUENCE_SCOPE_ALLOWLIST=READ,WRITE
 PUBLICATION_WRITE_MODE=real
 ```
 
-`PUBLICATION_WRITE_MODE=mock`은 로컬 데모와 테스트에만 사용합니다. 값을 생략하거나
-`real`로 설정하면 실제 어댑터를 사용합니다.
+`PUBLICATION_WRITE_MODE`를 생략하면 쓰기를 수행하지 않는 `mock` 어댑터를 사용합니다.
+실제 외부 쓰기는 `real`을 명시했을 때만 활성화되며, `mokc` 같은 알 수 없는 값은
+애플리케이션 시작을 실패시킵니다.
 
 각 외부 쓰기 단계는 별도의 미리보기와 사용자 승인을 요구하며, 모든 `POST` 요청에는
 `Idempotency-Key`가 필요합니다. 같은 키로 재시도하면 성공한 단계는 건너뜁니다.

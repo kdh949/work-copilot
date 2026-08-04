@@ -17,6 +17,19 @@ import { PublicationPreviewService } from './publication-preview.service';
 import { PublicationStepClaimerService } from './publication-step-claimer.service';
 import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
 
+export function publicationWriteMode(
+  configured: string | undefined,
+): 'mock' | 'real' {
+  if (configured === undefined) {
+    return 'mock';
+  }
+  const normalized = configured.trim().toLowerCase();
+  if (normalized === 'mock' || normalized === 'real') {
+    return normalized;
+  }
+  throw new Error('PUBLICATION_WRITE_MODE must be either "mock" or "real".');
+}
+
 @Module({
   imports: [
     ReadinessModule,
@@ -48,10 +61,9 @@ import { PUBLICATION_WRITE_GATEWAY } from './publication-write-gateway';
         mockGateway: MockPublicationWriteGateway,
         realGateway: AtlassianPublicationWriteGateway,
       ) =>
-        configService
-          .get<string>('PUBLICATION_WRITE_MODE')
-          ?.trim()
-          .toLowerCase() === 'mock'
+        publicationWriteMode(
+          configService.get<string>('PUBLICATION_WRITE_MODE'),
+        ) === 'mock'
           ? mockGateway
           : realGateway,
     },
