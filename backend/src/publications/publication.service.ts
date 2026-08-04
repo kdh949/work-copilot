@@ -395,6 +395,17 @@ export class PublicationService {
     this.assertDraftVersion(draft, input.draftVersion);
     const publication = await this.findPublication(draft, publicationId);
     this.assertPublicationDraftVersion(publication, draft);
+    const idempotencyKeyHash = this.idempotencyKeyHash(
+      userId,
+      this.idempotencyKey(input.idempotencyKey),
+    );
+    if (publication.idempotencyKeyHash !== idempotencyKeyHash) {
+      throw new ConflictException({ code: 'PUBLICATION_PHASE_KEY_REUSED' });
+    }
+    const existingSteps = await this.stepsFor(publication.id);
+    if (this.phaseSucceeded(existingSteps, 'confluence')) {
+      return this.present(publication, existingSteps);
+    }
     await this.assertReadyForPublication(userId, draft, correlationId);
     const profile = await this.findActivePublishProfile(draft);
     this.assertSafeDraftContent(draft.maskedBrief);
@@ -405,17 +416,10 @@ export class PublicationService {
       correlationId,
     );
     this.assertPreview(input.previewHash, preview.previewHash);
-    const idempotencyKeyHash = this.idempotencyKeyHash(
-      userId,
-      this.idempotencyKey(input.idempotencyKey),
-    );
-    if (publication.idempotencyKeyHash !== idempotencyKeyHash) {
-      throw new ConflictException({ code: 'PUBLICATION_PHASE_KEY_REUSED' });
-    }
     const steps = await this.ensureSteps(
       publication,
       'confluence',
-      await this.stepsFor(publication.id),
+      existingSteps,
     );
     return this.runConfluence(
       publication,

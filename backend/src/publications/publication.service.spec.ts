@@ -336,6 +336,35 @@ describe('PublicationService', () => {
     ).not.toContain('마스킹된 배포 브리프');
   });
 
+  it('skips an already completed Confluence retry without replacing page metadata', async () => {
+    const harness = createHarness();
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    const published = await publishConfluence(harness, 'confluence-key');
+    const retryPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    const retried = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      published.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: retryPreview.previewHash,
+        idempotencyKey: 'confluence-key',
+      },
+      'corr',
+    );
+
+    expect(retried.status).toBe('CONFLUENCE_PUBLISHED');
+    expect(retried.confluencePage).toEqual(published.confluencePage);
+    expect(confluence).toHaveBeenCalledTimes(1);
+  });
+
   it('runs Jira link and comment only after a separately approved Jira preview', async () => {
     const harness = createHarness();
     const remoteLink = jest.spyOn(harness.gateway, 'upsertJiraRemoteLink');
