@@ -181,7 +181,7 @@ export class PublicationStepClaimerService {
     if (!Array.isArray(raw)) {
       return null;
     }
-    const row = raw.at(0);
+    const row = (raw as unknown[]).at(0);
     return typeof row === 'object' && row !== null
       ? (row as Record<string, unknown>)
       : null;

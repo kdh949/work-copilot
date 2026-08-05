@@ -4,7 +4,10 @@ import type {
   ChildTaskTemplate,
   IntegrationProfile,
 } from '../integrations/profiles/entities/integration-profile.entity';
-import { AtlassianReadClientService } from '../work-items/atlassian-read-client.service';
+import {
+  AtlassianReadClientService,
+  type ProviderReadResult,
+} from '../work-items/atlassian-read-client.service';
 import {
   AtlassianWriteClientService,
   type ProviderWriteResult,
@@ -509,7 +512,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     accessToken: string,
     parentPageId: string,
   ): Promise<{ id: string; spaceKey: string }> {
-    let result;
+    let result: ProviderReadResult;
     try {
       result = await this.readClient.getJson(
         this.accessPolicy.providerUrl(
@@ -545,7 +548,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     accessToken: string,
     pageId: string,
   ): Promise<ReconciliationResult<ConfluencePage>> {
-    let result;
+    let result: ProviderReadResult;
     try {
       result = await this.readClient.getJson(
         this.accessPolicy.providerUrl(
@@ -565,6 +568,9 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     if (result.status === 'access_limited') {
       return this.indeterminate('access_limited');
     }
+    if (result.status !== 'ok') {
+      return this.indeterminate('invalid_response');
+    }
     const page = this.confluencePageFromBody(profile, result.body);
     return page
       ? { status: 'found', value: page }
@@ -579,7 +585,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
   ): Promise<ReconciliationResult<ConfluencePage>> {
     let start = 0;
     for (let pageIndex = 0; pageIndex < MAX_RECONCILIATION_PAGES; pageIndex += 1) {
-      let children;
+      let children: ProviderReadResult;
       try {
         children = await this.readClient.getJson(
           this.accessPolicy.providerUrl(
@@ -634,7 +640,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     profile: IntegrationProfile,
     accessToken: string,
   ): Promise<ReconciliationResult<string>> {
-    let result;
+    let result: ProviderReadResult;
     try {
       result = await this.readClient.getJson(
         endpoint,
@@ -649,6 +655,9 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     }
     if (result.status === 'access_limited') {
       return this.indeterminate('access_limited');
+    }
+    if (result.status !== 'ok') {
+      return this.indeterminate('invalid_response');
     }
     const id = this.identifier(result.body.id);
     if (id) {
@@ -665,7 +674,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
   ): Promise<ReconciliationResult<string>> {
     let startAt = 0;
     for (let pageIndex = 0; pageIndex < MAX_RECONCILIATION_PAGES; pageIndex += 1) {
-      let page;
+      let page: ProviderReadResult;
       try {
         const url = new URL(endpoint);
         url.searchParams.set('startAt', String(startAt));
@@ -733,7 +742,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         maxResults: String(RECONCILIATION_PAGE_SIZE),
         startAt: String(startAt),
       });
-      let search;
+      let search: ProviderReadResult;
       try {
         search = await this.readClient.getJson(
           this.accessPolicy.providerUrl(
@@ -769,7 +778,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
             return this.indeterminate('budget_exhausted');
           }
           propertyLookups += 1;
-          let property;
+          let property: ProviderReadResult;
           try {
             property = await this.readClient.getJson(
               this.accessPolicy.providerUrl(
