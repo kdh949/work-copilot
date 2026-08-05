@@ -185,6 +185,7 @@ const confluencePreview: ConfluencePublicationPreview = {
   phase: "confluence",
   draftVersion: previewDraft.optimisticVersion,
   previewHash: "a".repeat(64),
+  approvalRevision: 1,
   spaceKey: "PAY",
   parentPage: {
     id: "preview-parent-page",
@@ -215,6 +216,7 @@ const jiraPreview: JiraPublicationPreview = {
   phase: "jira",
   draftVersion: previewDraft.optimisticVersion,
   previewHash: "c".repeat(64),
+  approvalRevision: 2,
   confluencePage,
   remoteLink: {
     globalId: "work-copilot:publication:preview-1",
@@ -231,6 +233,7 @@ const childTasksPreview: ChildTasksPublicationPreview = {
   phase: "child_tasks",
   draftVersion: previewDraft.optimisticVersion,
   previewHash: "d".repeat(64),
+  approvalRevision: 3,
   configurationFingerprint: "e".repeat(64),
   childTasks:
     previewDraft.content?.childTasks

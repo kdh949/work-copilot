@@ -377,17 +377,42 @@ export function WorkBriefsPage({
 
   async function loadPublication(draftId: string) {
     try {
-      setPublication(
-        await request<BriefPublication>(`/brief-drafts/${draftId}/publication`),
+      const nextPublication = await request<BriefPublication>(
+        `/brief-drafts/${draftId}/publication`,
       );
+      setPublication(nextPublication);
+      resetNeedsReviewState(nextPublication);
     } catch {
       setPublication(null);
     }
   }
 
+  function resetNeedsReviewState(nextPublication: BriefPublication) {
+    const reviewPhases = new Set(
+      nextPublication.steps
+        .filter((step) => step.status === "NEEDS_REVIEW")
+        .map((step) => step.phase),
+    );
+    if (reviewPhases.size === 0) return;
+    setPublicationPreviews((current) => {
+      const next = { ...current };
+      for (const phase of reviewPhases) delete next[phase];
+      return next;
+    });
+    setPublicationApprovals((current) => {
+      const next = { ...current };
+      for (const phase of reviewPhases) next[phase] = false;
+      return next;
+    });
+  }
+
   async function preparePublicationPhase(phase: PublicationPhase) {
     if (!draft || !readiness?.publishAllowed) {
       setMessage("준비성 점검을 통과한 초안만 게시 미리보기를 열 수 있습니다.");
+      return;
+    }
+    if (publication?.status === "PUBLISHING") {
+      setMessage("다른 요청이 게시를 처리 중입니다. 완료 상태가 갱신될 때까지 기다리세요.");
       return;
     }
     if (phase !== "confluence" && !publication) {
@@ -426,6 +451,10 @@ export function WorkBriefsPage({
       setMessage("준비성 점검을 통과한 초안만 게시할 수 있습니다.");
       return;
     }
+    if (publication?.status === "PUBLISHING") {
+      setMessage("다른 요청이 게시를 처리 중입니다. 현재 상태가 갱신될 때까지 기다리세요.");
+      return;
+    }
     const preview = publicationPreviews[phase];
     if (!preview) {
       setMessage("승인 전에 현재 단계의 미리보기를 열어야 합니다.");
@@ -449,6 +478,7 @@ export function WorkBriefsPage({
       draftVersion: draft.optimisticVersion,
       approved: true,
       previewHash: preview.previewHash,
+      approvalRevision: preview.approvalRevision,
     };
     const path = shouldRetry && publication
       ? `/brief-drafts/${draft.id}/publication/${publication.id}/retry`
@@ -469,6 +499,13 @@ export function WorkBriefsPage({
       });
       setPublication(nextPublication);
       setPublicationApprovals((current) => ({ ...current, [phase]: false }));
+      if (nextPublication.status === "NEEDS_REVIEW") {
+        setPublicationPreviews((current) => ({
+          ...current,
+          [phase]: undefined,
+        }));
+        resetNeedsReviewState(nextPublication);
+      }
       setMessage(
         nextPublication.status === "PARTIALLY_PUBLISHED" || nextPublication.status === "NEEDS_REVIEW"
           ? `${publicationPhaseLabel(phase)} 단계가 일부 완료되었습니다. 미리보기를 다시 검토한 뒤 복구하세요.`
@@ -479,9 +516,9 @@ export function WorkBriefsPage({
     } catch (error) {
       if ((error as HttpError).status === 409) {
         setConflict(true);
-        setMessage("미리보기, 초안 버전 또는 연결 권한이 바뀌었습니다. 최신 상태를 다시 검토하세요.");
+        setMessage("현재 승인으로는 게시할 수 없습니다. 해당 단계의 미리보기를 다시 열고 새로 승인하세요.");
       } else {
-        setMessage(`${publicationPhaseLabel(phase)} 단계를 완료하지 못했습니다.`);
+        setMessage(`${publicationPhaseLabel(phase)} 반영을 확인하지 못했습니다. 중복 생성을 막기 위해 미리보기를 다시 열어 상태를 확인한 뒤 재시도하세요.`);
       }
     } finally {
       delete inFlightCommandKeyRef.current[phase];
