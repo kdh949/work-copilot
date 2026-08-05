@@ -744,7 +744,8 @@ export class PublicationService {
     }
     if (reconciliation.status === 'indeterminate') {
       const step = steps.find(
-        (candidate) => candidate.status !== 'SUCCEEDED',
+        (candidate) =>
+          candidate.phase === 'child_tasks' && candidate.status !== 'SUCCEEDED',
       );
       if (step) {
         const execution = await this.executeStep(step, () =>
