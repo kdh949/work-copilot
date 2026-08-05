@@ -362,6 +362,27 @@ describe('AtlassianPublicationWriteGateway', () => {
     expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
+  it('treats a malformed remote-link lookup as indeterminate', async () => {
+    const harness = createGateway(
+      [{ status: 'ok', body: {} }],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertJiraRemoteLink({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        confluenceContentId: '99',
+        confluenceUrl: 'https://confluence.example.test/pages/99',
+        confluenceTitle: '배포 브리프',
+      }),
+    ).rejects.toThrow('PUBLICATION_RECONCILIATION_INDETERMINATE');
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
   it('creates the child-task operation marker atomically in issue creation', async () => {
     const harness = createGateway(
       [{ status: 'ok', body: { issues: [] } }],

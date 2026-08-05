@@ -85,5 +85,31 @@ describe('PublicationStepClaimerService', () => {
       '"status" = :status AND "reviewRevision" = :reviewRevision',
       { status: 'NEEDS_REVIEW', reviewRevision: 4 },
     );
+    expect(queryBuilder.set).toHaveBeenCalledWith(
+      expect.objectContaining({ approvedRevision: 4 }),
+    );
+  });
+
+  it('reports a lost fencing token when terminal persistence affects no row', async () => {
+    const { service, queryBuilder } = createHarness(0);
+
+    await expect(
+      service.markSucceeded('step-1', 'stale-token', {
+        providerObjectId: 'provider-1',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      service.markFailed(
+        'step-1',
+        'stale-token',
+        'FAILED',
+        'CONFLUENCE_WRITE_FAILED',
+      ),
+    ).resolves.toBe(false);
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      '"executionToken" = :executionToken',
+      { executionToken: 'stale-token' },
+    );
   });
 });

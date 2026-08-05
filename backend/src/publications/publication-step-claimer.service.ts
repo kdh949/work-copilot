@@ -110,6 +110,7 @@ export class PublicationStepClaimerService {
         errorCode: null,
         executionToken: null,
         executionLeaseExpiresAt: null,
+        approvedRevision: approvalRevision,
         updatedAt: new Date(),
       })
       .where('"id" = :id', { id: stepId })

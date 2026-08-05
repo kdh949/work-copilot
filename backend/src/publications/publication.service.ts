@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
@@ -86,8 +86,8 @@ export class PublicationService {
     @Inject(PUBLICATION_WRITE_GATEWAY)
     private readonly writeGateway: PublicationWriteGateway,
     private readonly stepClaimer: PublicationStepClaimerService,
+    @InjectDataSource() private readonly dataSource: DataSource,
     @Optional() private readonly metrics?: WorkCopilotMetricsService,
-    @Optional() private readonly dataSource?: DataSource,
   ) {}
 
   async previewConfluence(
@@ -930,15 +930,6 @@ export class PublicationService {
         idempotencyKeyHash: null,
       });
 
-    if (!this.dataSource) {
-      const stored = await this.publicationsRepository.save(publication);
-      await this.stepsRepository.upsert(
-        [createStep(this.stepsRepository)],
-        ['publicationId', 'stepKey'],
-      );
-      return { publication: stored, steps: await this.stepsFor(stored.id) };
-    }
-
     return this.dataSource.transaction(async (manager: EntityManager) => {
       const publications = manager.getRepository(BriefPublication);
       const steps = manager.getRepository(PublicationStep);
@@ -1225,7 +1216,13 @@ export class PublicationService {
             : null,
       }),
     );
-    await this.stepsRepository.upsert(values, ['publicationId', 'stepKey']);
+    await this.stepsRepository
+      .createQueryBuilder()
+      .insert()
+      .into(PublicationStep)
+      .values(values)
+      .orIgnore()
+      .execute();
     return this.stepsFor(publication.id);
   }
 
@@ -1267,9 +1264,16 @@ export class PublicationService {
     }
 
     const phase = this.latestPhase(steps);
-    const recoveredStatus = this.statusFor(steps, phase, draft);
+    const invalidPhaseOrder = this.hasInvalidPhaseOrder(steps);
+    const recoveredStatus = invalidPhaseOrder
+      ? 'NEEDS_REVIEW'
+      : this.statusFor(steps, phase, draft);
     if (publication.status !== recoveredStatus) {
       publication.status = recoveredStatus;
+      changed = true;
+    }
+    if (invalidPhaseOrder && !publication.reviewRequiredAt) {
+      publication.reviewRequiredAt = new Date();
       changed = true;
     }
 
@@ -1292,6 +1296,17 @@ export class PublicationService {
       return 'jira';
     }
     return 'confluence';
+  }
+
+  private hasInvalidPhaseOrder(steps: readonly PublicationStep[]): boolean {
+    const hasJira = steps.some((step) => step.phase === 'jira');
+    const hasChildTasks = steps.some((step) => step.phase === 'child_tasks');
+    return (
+      (hasJira && !this.phaseSucceeded(steps, 'confluence')) ||
+      (hasChildTasks &&
+        (!this.phaseSucceeded(steps, 'confluence') ||
+          !this.phaseSucceeded(steps, 'jira')))
+    );
   }
 
   private applyStepResult(
@@ -1621,6 +1636,7 @@ export class PublicationService {
     const steps = loadedSteps ?? (await this.stepsFor(publication.id));
     const requiresReview =
       Boolean(publication.reviewRequiredAt) ||
+      publication.status === 'NEEDS_REVIEW' ||
       steps.some((step) => step.status === 'NEEDS_REVIEW');
     return {
       id: publication.id,

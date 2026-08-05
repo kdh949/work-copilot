@@ -651,9 +651,10 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       return this.indeterminate('access_limited');
     }
     const id = this.identifier(result.body.id);
-    return id
-      ? { status: 'found', value: id }
-      : { status: 'absent' };
+    if (id) {
+      return { status: 'found', value: id };
+    }
+    return this.indeterminate('invalid_response');
   }
 
   private async findCommentByMarker(
