@@ -738,6 +738,62 @@ describe('AtlassianPublicationWriteGateway', () => {
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
   });
 
+  it('refuses to reuse a stored page whose title no longer matches the content', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            id: '99',
+            title: '[ENG-42] 이전 내용',
+            space: { key: 'ENG' },
+            version: { number: 7 },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief({
+        ...input,
+        existingContentId: '99',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLUENCE_VERSION_CONFLICT',
+      retryable: false,
+    });
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reuses a stored page that still carries this revision title marker', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            id: '99',
+            title: expectedConfluenceTitle(),
+            space: { key: 'ENG' },
+            version: { number: 7 },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief({
+        ...input,
+        existingContentId: '99',
+      }),
+    ).resolves.toMatchObject({
+      providerObjectId: '99',
+      providerObjectVersion: '7',
+    });
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
   it('treats a 5xx child-task create as an ambiguous write and reconciles it', async () => {
     const harness = createGateway(
       [

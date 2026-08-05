@@ -49,6 +49,8 @@ type ConfluencePage = {
   id: string;
   version: string;
   url: string;
+  /** Null when the provider response carried no usable title. */
+  title: string | null;
 };
 
 type PageContinuation = 'yes' | 'no' | 'invalid';
@@ -105,6 +107,15 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         input.existingContentId,
       );
       if (existing.status === 'found') {
+        // The title carries this revision's content marker. A different title
+        // means the stored page does not hold what we are about to record, so
+        // reporting success would attach a content hash the page never had.
+        if (
+          existing.value.title !== null &&
+          existing.value.title !== pageTitle
+        ) {
+          this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+        }
         return this.confluenceResult(existing.value, rendered.contentHash);
       }
       if (existing.status === 'indeterminate') {
@@ -1045,6 +1056,8 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       id,
       version,
       url: this.confluencePageUrl(profile, id),
+      title:
+        typeof body.title === 'string' && body.title.trim() ? body.title : null,
     };
   }
 
