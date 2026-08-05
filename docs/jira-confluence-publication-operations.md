@@ -37,12 +37,18 @@ transaction이 완료되지 않은 비정상 상태다. 같은 draft version의 
 외부 객체가 만들어졌을 가능성이 있다. 이 경우 같은 요청에서 create를 다시
 보내지 않는다.
 
+create 요청이 전송된 뒤 5xx가 오는 경우도 같다. 4xx는 확정 거절이지만 5xx는
+쓰기가 이미 반영된 뒤에 반환될 수 있으므로 "없음"으로 보지 않는다.
+
 - Confluence page title marker, Jira remote-link global ID, comment marker,
   child-task property를 먼저 reconciliation한다.
 - 객체를 찾으면 해당 step을 성공으로 복구한다.
-- 검색 범위를 다 확인하지 못하면 retryable
-  `PUBLICATION_RECONCILIATION_INDETERMINATE`로 남긴다.
-- 다음 retry도 create보다 reconciliation을 먼저 수행한다.
+- 검색 범위를 다 확인하지 못하면 non-retryable
+  `PUBLICATION_RECONCILIATION_INDETERMINATE`로 남기고 step은 `NEEDS_REVIEW`가
+  된다. 자동 retry는 create를 다시 보내지 않는다.
+- 특히 child task는 JQL search index로 조회하므로 방금 만든 이슈가 즉시
+  보이지 않을 수 있다. 여기서 `absent`를 믿고 재생성하면 이슈가 중복된다.
+- 운영자가 외부 목록을 확인한 뒤 "정상 재승인" 절차로만 다시 실행한다.
 
 운영자는 ambiguous 오류 뒤에 외부 목록을 확인하지 않은 채 수동 create를
 수행하지 않는다. provider access 제한, pagination 예산 소진, timeout은
@@ -58,6 +64,12 @@ stale worker가 provider write를 마친 뒤 token을 잃었을 수 있으므로
 실행은 반드시 operation marker를 다시 조회한다. `providerObjectId`가 없는
 RUNNING step은 lease 만료 여부와 마지막 시도 시각을 확인하고, 외부 객체
 중복 여부가 확인된 뒤에만 복구한다.
+
+이 규칙은 코드에서 강제된다. claim은 `PENDING`/`FAILED` 인수와 만료된
+`RUNNING` 인수를 서로 다른 조건부 update로 분리하고, 후자를 가져간 실행은
+provider를 호출하지 않는다. 중단된 worker가 write를 이미 보냈는지 알 수
+없기 때문에 해당 step은 `PUBLICATION_RECONCILIATION_INDETERMINATE`와 함께
+`NEEDS_REVIEW`로 두고, 운영자가 외부 상태를 확인한 뒤 재승인해야 실행된다.
 
 ## 배포와 관찰
 
