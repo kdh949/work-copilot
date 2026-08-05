@@ -702,6 +702,20 @@ describe('PublicationService', () => {
     ).not.toContain('마스킹된 배포 브리프');
   });
 
+  it('starts a new draft version with a fresh approval revision', async () => {
+    const harness = createHarness();
+    await publishConfluence(harness, 'old-draft-version-key');
+    harness.draft.optimisticVersion = 4;
+
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    expect(preview.approvalRevision).toBe(1);
+  });
+
   it('skips an already completed Confluence retry without replacing page metadata', async () => {
     const harness = createHarness();
     const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
@@ -728,6 +742,7 @@ describe('PublicationService', () => {
 
     expect(retried.status).toBe('CONFLUENCE_PUBLISHED');
     expect(retried.confluencePage).toEqual(published.confluencePage);
+    expect(retried.requiresReview).toBe(false);
     expect(confluence).toHaveBeenCalledTimes(1);
   });
 

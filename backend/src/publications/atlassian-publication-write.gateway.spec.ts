@@ -387,7 +387,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     const harness = createGateway(
       [
         { status: 'not_found' },
-        { status: 'ok', body: { id: 'remote-link-99' } },
+        { status: 'ok', body: { id: 99 } },
       ],
       [{ status: 'ok_empty' }],
     );
@@ -404,7 +404,7 @@ describe('AtlassianPublicationWriteGateway', () => {
         confluenceTitle: '배포 브리프',
       }),
     ).resolves.toEqual({
-      providerObjectId: 'remote-link-99',
+      providerObjectId: '99',
       providerUrl: 'https://confluence.example.test/pages/99',
     });
     expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);

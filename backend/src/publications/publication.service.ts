@@ -99,8 +99,12 @@ export class PublicationService {
     const profile = await this.findActivePublishProfile(draft);
     this.assertSafeDraftContent(draft.maskedBrief);
     const publication = await this.latestPublicationForDraft(draft.id);
-    const approvalRevision = publication
-      ? await this.advanceApprovalRevision(publication, 'confluence')
+    const sameVersionPublication =
+      publication?.draftVersion === draft.optimisticVersion
+        ? publication
+        : null;
+    const approvalRevision = sameVersionPublication
+      ? await this.advanceApprovalRevision(sameVersionPublication, 'confluence')
       : 1;
     const preview = await this.previewService.confluence(
       userId,
@@ -902,6 +906,12 @@ export class PublicationService {
   ): Promise<BriefPublicationView> {
     const currentSteps = await this.stepsFor(publication.id);
     publication.status = this.statusFor(currentSteps, phase, draft);
+    if (
+      publication.status !== 'NEEDS_REVIEW' &&
+      !currentSteps.some((step) => step.status === 'NEEDS_REVIEW')
+    ) {
+      publication.reviewRequiredAt = null;
+    }
     publication.updatedAt = new Date();
     const saved = await this.publicationsRepository.save(publication);
     return this.present(saved, currentSteps);
@@ -1274,6 +1284,15 @@ export class PublicationService {
     }
     if (invalidPhaseOrder && !publication.reviewRequiredAt) {
       publication.reviewRequiredAt = new Date();
+      changed = true;
+    }
+    if (
+      !invalidPhaseOrder &&
+      recoveredStatus !== 'NEEDS_REVIEW' &&
+      !steps.some((step) => step.status === 'NEEDS_REVIEW') &&
+      publication.reviewRequiredAt
+    ) {
+      publication.reviewRequiredAt = null;
       changed = true;
     }
 

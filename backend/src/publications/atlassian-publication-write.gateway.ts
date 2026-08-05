@@ -1051,8 +1051,12 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
   }
 
   private identifier(value: unknown): string | null {
-    return typeof value === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(value)
-      ? value
+    const normalized =
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+        ? String(value)
+        : value;
+    return typeof normalized === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(normalized)
+      ? normalized
       : null;
   }
 
