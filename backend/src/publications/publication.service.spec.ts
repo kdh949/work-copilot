@@ -1626,6 +1626,57 @@ describe('PublicationService', () => {
     });
   });
 
+  it('does not auto-retry a step whose provider write outcome is unknown', async () => {
+    const harness = createHarness();
+    harness.gateway.failNext(
+      'confluence_page',
+      'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      false,
+    );
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const first = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        approvalRevision: preview.approvalRevision,
+        idempotencyKey: 'ambiguous-write-key',
+      },
+      'corr',
+    );
+
+    expect(first.status).toBe('NEEDS_REVIEW');
+    expect(
+      harness.steps.find((step) => step.stepKey === 'confluence_page'),
+    ).toMatchObject({ status: 'NEEDS_REVIEW' });
+
+    await expect(
+      harness.service.retry(
+        7,
+        DRAFT_ID,
+        first.id,
+        {
+          phase: 'confluence',
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          idempotencyKey: 'ambiguous-retry-key',
+        },
+        'corr',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED' },
+    });
+    expect(confluence).toHaveBeenCalledTimes(1);
+  });
+
   it('does not start Confluence publication when approval, version, readiness, or parent configuration is invalid', async () => {
     const harness = createHarness();
     const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');

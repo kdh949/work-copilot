@@ -89,6 +89,27 @@ describe('AtlassianWriteClientService', () => {
     },
   );
 
+  it('separates a definitive 4xx refusal from an ambiguous 5xx outcome', async () => {
+    const post = () =>
+      service.postJsonExpectObject(
+        new URL('https://jira.example.test/rest/api/2/issue'),
+        'https://jira.example.test/',
+        'user-token',
+        { fields: {} },
+      );
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 400 }))
+      // A 5xx can be returned after the write already landed, so the caller
+      // must reconcile rather than treat it as "not created".
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 502 }));
+
+    await expect(post()).resolves.toEqual({ status: 'rejected' });
+    await expect(post()).resolves.toEqual({ status: 'unavailable' });
+    await expect(post()).resolves.toEqual({ status: 'unavailable' });
+  });
+
   it('rejects malformed or oversized successful response bodies', async () => {
     jest
       .spyOn(global, 'fetch')

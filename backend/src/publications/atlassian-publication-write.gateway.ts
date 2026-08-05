@@ -168,7 +168,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       return this.confluenceResult(createdPage, rendered.contentHash);
     }
 
-    if (created.status === 'ok_empty' || created.status === 'ok') {
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
       return this.reconcileAfterUncertainConfluenceCreate(
         input.profile,
         accessToken,
@@ -265,7 +269,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         return { providerObjectId: id, providerUrl: linkUrl };
       }
     }
-    if (created.status === 'ok_empty' || created.status === 'ok') {
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
       return this.reconcileAfterUncertainRemoteLinkCreate(
         endpoint,
         input.profile,
@@ -345,7 +353,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         return { providerObjectId: id };
       }
     }
-    if (created.status === 'ok_empty' || created.status === 'ok') {
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
       return this.reconcileAfterUncertainCommentCreate(
         endpoint,
         input.profile,
@@ -467,7 +479,11 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         return { providerObjectId: createdId };
       }
     }
-    if (created.status === 'ok_empty' || created.status === 'ok') {
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
       return this.reconcileAfterUncertainChildCreate(input, accessToken);
     }
 
@@ -925,7 +941,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     if (recovered.status === 'found') {
       return this.confluenceResult(recovered.value, contentHash) as never;
     }
-    this.failReconciliation();
+    this.failUncertainWrite();
   }
 
   private async reconcileAfterUncertainRemoteLinkCreate(
@@ -938,7 +954,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     if (recovered.status === 'found') {
       return { providerObjectId: recovered.value, providerUrl: linkUrl } as never;
     }
-    this.failReconciliation();
+    this.failUncertainWrite();
   }
 
   private async reconcileAfterUncertainCommentCreate(
@@ -956,7 +972,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     if (recovered.status === 'found') {
       return { providerObjectId: recovered.value } as never;
     }
-    this.failReconciliation();
+    this.failUncertainWrite();
   }
 
   private async reconcileAfterUncertainChildCreate(
@@ -983,7 +999,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         return { providerObjectId: marker.issueId } as never;
       }
     }
-    this.failReconciliation();
+    this.failUncertainWrite();
   }
 
   private confluenceResult(
@@ -1084,8 +1100,22 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     return { status: 'indeterminate', reason };
   }
 
+  /**
+   * No create request was dispatched, so retrying cannot duplicate anything.
+   */
   private failReconciliation(): never {
     this.fail('PUBLICATION_RECONCILIATION_INDETERMINATE', true);
+  }
+
+  /**
+   * A create request was dispatched and reconciliation could not prove whether
+   * it landed. Marked non-retryable so the step becomes NEEDS_REVIEW: the next
+   * create needs an operator who has checked the provider, because a plain
+   * retry would create a second object whenever the marker search missed a
+   * write that actually succeeded.
+   */
+  private failUncertainWrite(): never {
+    this.fail('PUBLICATION_RECONCILIATION_INDETERMINATE', false);
   }
 
   private fail(

@@ -236,9 +236,13 @@ describe('AtlassianPublicationWriteGateway', () => {
       [{ status: 'ok_empty' }],
     );
 
-    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
-      'PUBLICATION_RECONCILIATION_INDETERMINATE',
-    );
+    // The create was dispatched, so a plain retry could create a second page.
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: false,
+    });
     expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
@@ -283,9 +287,13 @@ describe('AtlassianPublicationWriteGateway', () => {
       [],
     );
 
-    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
-      'PUBLICATION_RECONCILIATION_INDETERMINATE',
-    );
+    // Nothing was dispatched, so this stays a safe retry.
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: true,
+    });
     expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
@@ -633,6 +641,73 @@ describe('AtlassianPublicationWriteGateway', () => {
         template: { issueTypeId: '10001', fields: {} },
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  const childTaskInput = {
+    userId: 7,
+    correlationId: 'correlation-1',
+    profile: PROFILE,
+    operationId: input.operationId,
+    sourceJiraId: '42',
+    sourceJiraKey: 'ENG-42',
+    childTask: {
+      clientTaskId: 'child-task-1',
+      text: '하위 작업',
+      summary: '하위 작업 요약',
+      evidenceIds: [],
+      selected: true,
+    },
+    template: { issueTypeId: '10001', fields: {} },
+    reconciliationCompleted: true,
+  };
+
+  it('treats a 5xx child-task create as an ambiguous write and reconciles it', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-77',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 1,
+          },
+        },
+      ],
+      [{ status: 'unavailable' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask(childTaskInput),
+    ).resolves.toEqual({ providerObjectId: 'child-77' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks an unconfirmed child-task write non-retryable so a retry cannot duplicate it', async () => {
+    // The Jira issue search is index-backed, so an empty result right after a
+    // dispatched create is not proof that the issue is absent.
+    const harness = createGateway(
+      [{ status: 'ok', body: { issues: [], total: 0 } }],
+      [{ status: 'unavailable' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask(childTaskInput),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: false,
+    });
     expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 

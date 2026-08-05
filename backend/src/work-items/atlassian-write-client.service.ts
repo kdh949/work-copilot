@@ -11,7 +11,19 @@ const REQUEST_TIMEOUT_MS = 5_000;
 export type ProviderWriteResult =
   | { status: 'ok'; body: Record<string, unknown> }
   | { status: 'ok_empty' }
-  | { status: 'access_limited' | 'not_found' | 'conflict' | 'rejected' };
+  /**
+   * `rejected` is a definitive refusal by the provider (4xx): the object was
+   * not created. `unavailable` is a 5xx, which the provider may have returned
+   * after the write already landed, so callers must treat it as ambiguous.
+   */
+  | {
+      status:
+        | 'access_limited'
+        | 'not_found'
+        | 'conflict'
+        | 'rejected'
+        | 'unavailable';
+    };
 
 /**
  * Narrow write-only counterpart to the read adapter.  It keeps provider URLs,
@@ -97,6 +109,9 @@ export class AtlassianWriteClientService {
     }
     if (response.status >= 300 && response.status < 400) {
       throw new BadRequestException('Integration redirect is invalid.');
+    }
+    if (response.status >= 500) {
+      return { status: 'unavailable' };
     }
     if (!response.ok) {
       return { status: 'rejected' };
