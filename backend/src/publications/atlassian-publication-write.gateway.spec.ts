@@ -662,6 +662,82 @@ describe('AtlassianPublicationWriteGateway', () => {
     reconciliationCompleted: true,
   };
 
+  it('does not spend property lookups on children the search proved are not ours', async () => {
+    // 50 unrelated children whose property set came back empty: the search
+    // already answered for them, so no per-issue lookup may be issued.
+    const unrelated = Array.from({ length: 50 }, (_, index) => ({
+      id: `child-${index}`,
+      properties: {},
+    }));
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: unrelated, total: 51 } },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-99',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 51,
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.reconcileJiraChildTasks({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraKey: 'ENG-42',
+        clientTaskIds: ['child-task-1'],
+      }),
+    ).resolves.toMatchObject({ status: 'found' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('still looks up a property the search response never carried', async () => {
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: [{ id: 'child-99' }], total: 1 } },
+        {
+          status: 'ok',
+          body: {
+            value: {
+              operationId: input.operationId,
+              clientTaskId: 'child-task-1',
+            },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.reconcileJiraChildTasks({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraKey: 'ENG-42',
+        clientTaskIds: ['child-task-1'],
+      }),
+    ).resolves.toMatchObject({ status: 'found' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+  });
+
   it('treats a 5xx child-task create as an ambiguous write and reconciles it', async () => {
     const harness = createGateway(
       [

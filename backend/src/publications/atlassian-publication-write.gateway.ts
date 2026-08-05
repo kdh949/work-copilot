@@ -53,6 +53,11 @@ type ConfluencePage = {
 
 type PageContinuation = 'yes' | 'no' | 'invalid';
 
+type IssueProperty =
+  | { state: 'found'; value: Record<string, unknown> }
+  | { state: 'absent' }
+  | { state: 'unknown' };
+
 /**
  * Real, user-context-only publication adapter for Jira and Confluence Data
  * Center. It persists only stable provider identifiers and uses deterministic
@@ -785,10 +790,15 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         if (!candidate || !issueId) {
           return this.indeterminate('invalid_response');
         }
-        let marker = this.issuePropertyValue(
+        const inline = this.issuePropertyValue(
           candidate,
           JIRA_CHILD_PROPERTY_KEY,
         );
+        if (inline.state === 'absent') {
+          continue;
+        }
+        let marker: Record<string, unknown> | null =
+          inline.state === 'found' ? inline.value : null;
         if (marker === null) {
           if (propertyLookups >= maxPropertyLookups) {
             return this.indeterminate('budget_exhausted');
@@ -894,35 +904,43 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     return received >= RECONCILIATION_PAGE_SIZE ? 'yes' : 'no';
   }
 
+  /**
+   * `absent` means the search returned this issue's property set and our key
+   * is not in it, so the issue is provably not ours and needs no follow-up
+   * request. `unknown` means the response carried no property container at
+   * all, which is the only case worth spending a per-issue lookup on.
+   */
   private issuePropertyValue(
     issue: Record<string, unknown>,
     propertyKey: string,
-  ): Record<string, unknown> | null {
+  ): IssueProperty {
     const properties = issue.properties;
     if (Array.isArray(properties)) {
       for (const property of properties) {
         const candidate = this.record(property);
         if (candidate?.key === propertyKey) {
-          return this.record(candidate.value);
+          const value = this.record(candidate.value);
+          return value ? { state: 'found', value } : { state: 'absent' };
         }
       }
-      return null;
+      return { state: 'absent' };
     }
     const record = this.record(properties);
     if (!record) {
-      return null;
+      return { state: 'unknown' };
     }
     const direct = this.record(record[propertyKey]);
     if (direct) {
-      return this.record(direct.value) ?? direct;
+      return { state: 'found', value: this.record(direct.value) ?? direct };
     }
     for (const property of Object.values(record)) {
       const candidate = this.record(property);
       if (candidate?.key === propertyKey) {
-        return this.record(candidate.value);
+        const value = this.record(candidate.value);
+        return value ? { state: 'found', value } : { state: 'absent' };
       }
     }
-    return null;
+    return { state: 'absent' };
   }
 
   private async reconcileAfterUncertainConfluenceCreate(
