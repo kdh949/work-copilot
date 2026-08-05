@@ -54,7 +54,7 @@ export class PublicationStepClaimerService {
       })
       .where('"id" = :id', { id: stepId })
       .andWhere(
-        '("status" IN (:...claimable) OR ("status" = :running AND "executionLeaseExpiresAt" < :now))',
+        '("status" IN (:...claimable) OR ("status" = :running AND ("executionLeaseExpiresAt" IS NULL OR "executionLeaseExpiresAt" < :now)))',
         {
           claimable: ['PENDING', 'FAILED'],
           running: 'RUNNING',

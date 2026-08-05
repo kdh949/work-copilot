@@ -51,6 +51,10 @@ describe('PublicationStepClaimerService', () => {
       expect.stringContaining('"status" IN (:...claimable)'),
       expect.objectContaining({ claimable: ['PENDING', 'FAILED'] }),
     );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('"executionLeaseExpiresAt" IS NULL'),
+      expect.anything(),
+    );
     expect(queryBuilder.returning).toHaveBeenCalled();
   });
 
