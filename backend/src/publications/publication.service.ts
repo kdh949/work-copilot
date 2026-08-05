@@ -62,6 +62,11 @@ type PhaseInput = {
 
 type RetryInput = PhaseInput & { phase: PublicationPhase };
 
+type InitialPublication = {
+  publication: BriefPublication;
+  steps: PublicationStep[];
+};
+
 type StepExecution =
   | { outcome: 'succeeded'; result: PublicationWriteResult }
   | { outcome: 'failed' }
@@ -216,21 +221,14 @@ export class PublicationService {
       executionMode: this.writeGateway.mode,
       reviewRequiredAt: null,
     });
-    let stored: BriefPublication;
+    // Only the aggregate insert may lose the unique-index race. Keeping
+    // runConfluence outside the catch stops a duplicate-key error raised after
+    // an external write from being reported as a concurrent publication.
+    let transaction: InitialPublication;
     try {
-      const transaction = await this.createInitialPublication(
+      transaction = await this.createInitialPublication(
         publication,
         approvalRevision,
-      );
-      stored = transaction.publication;
-      return this.runConfluence(
-        stored,
-        draft,
-        profile,
-        transaction.steps,
-        userId,
-        correlationId,
-        { ...preview, approvalRevision },
       );
     } catch (error) {
       if (!this.isDuplicateKeyError(error)) {
@@ -253,6 +251,15 @@ export class PublicationService {
       );
       return this.present(recovered.publication, recovered.steps);
     }
+    return this.runConfluence(
+      transaction.publication,
+      draft,
+      profile,
+      transaction.steps,
+      userId,
+      correlationId,
+      { ...preview, approvalRevision },
+    );
   }
 
   async previewJira(
@@ -960,7 +967,7 @@ export class PublicationService {
   private async createInitialPublication(
     publication: BriefPublication,
     approvalRevision: number,
-  ): Promise<{ publication: BriefPublication; steps: PublicationStep[] }> {
+  ): Promise<InitialPublication> {
     const createStep = (repository: Repository<PublicationStep>) =>
       repository.create({
         publicationId: publication.id,
