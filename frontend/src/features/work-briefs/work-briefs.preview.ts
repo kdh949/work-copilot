@@ -31,10 +31,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     excerptLength: 428,
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
-    updatedAt: "2026-07-29T09:00:00Z",
     location: "결제 플랫폼 / 개선",
     tags: ["결제", "정책"],
-    state: "current",
   },
   {
     id: "jira:PROJ-271",
@@ -46,10 +44,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     excerptLength: 366,
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
-    updatedAt: "2026-07-27T09:00:00Z",
     location: "결제 플랫폼 / 백엔드",
     tags: ["API", "오류 코드"],
-    state: "current",
   },
   {
     id: "jira:PROJ-263",
@@ -61,10 +57,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     excerptLength: 312,
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
-    updatedAt: "2026-07-25T09:00:00Z",
     location: "운영 / 장애 대응",
     tags: ["운영", "체크리스트"],
-    state: "review",
   },
   {
     id: "confluence:PAY-42",
@@ -76,10 +70,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     excerptLength: 582,
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
-    updatedAt: "2026-07-28T09:00:00Z",
     location: "PAY / 정책 문서",
     tags: ["정책", "예외 처리"],
-    state: "current",
   },
   {
     id: "confluence:PAY-31",
@@ -91,10 +83,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     excerptLength: 730,
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
-    updatedAt: "2026-07-24T09:00:00Z",
     location: "PAY / 운영 가이드",
     tags: ["운영", "PG"],
-    state: "current",
   },
   {
     id: "confluence:CS-18",
@@ -107,10 +97,8 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     accessStatus: "accessible",
     dlpStatus: "not_evaluated",
     aiStatus: "excluded",
-    updatedAt: "2026-07-21T09:00:00Z",
     location: "CS / 응대 기준",
     tags: ["고객 응대"],
-    state: "review",
   },
 ];
 

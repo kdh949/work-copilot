@@ -9,6 +9,7 @@ import type {
   PublicationPreviews,
   ReadinessAssessment,
 } from "./work-briefs.types";
+import { canUsePublication } from "./work-brief-guards";
 import { stepErrorDescription, stepStatusLabel } from "./publication-copy";
 
 type PublicationPanelProps = {
@@ -55,10 +56,11 @@ export function PublicationPanel({
   onPrepare,
   onExecute,
 }: PublicationPanelProps) {
-  const publicationAllowed =
-    readiness.publishAllowed &&
-    draft.freshnessStatus === "current" &&
-    !readinessStale;
+  const publicationAllowed = canUsePublication(
+    draft,
+    readiness,
+    readinessStale,
+  );
   const phase = nextPhase(publication);
   const preview = phase ? previews[phase] : undefined;
   const status = publication?.status;
@@ -364,16 +366,19 @@ function ChildTasksPreview({
 }
 
 /**
- * Progress-only view for when the full approval panel is gated off — after a
- * save, readiness is intentionally cleared, but the steps that already ran
- * against Confluence and Jira still exist. Hiding them made a published page
- * look like it had disappeared.
+ * Progress-only view for steps that have already run. A saved edit can make
+ * this record a prior-version history item, but hiding it would make an
+ * externally published page look as if it had disappeared.
  */
 export function PublicationProgress({
   publication,
+  currentDraftVersion,
 }: {
   publication: BriefPublication;
+  currentDraftVersion: number;
 }) {
+  const isCurrentDraft = publication.draftVersion === currentDraftVersion;
+
   return (
     <section className="work-brief-publication ds-card" aria-label="게시 진행 상황">
       <header>
@@ -403,8 +408,9 @@ export function PublicationProgress({
       ) : null}
 
       <Alert tone="warning" className="work-brief-blocker">
-        완료된 단계는 그대로 유지됩니다. 남은 단계를 이어서 진행하려면 준비성
-        점검을 다시 실행하세요.
+        {isCurrentDraft
+          ? "현재 초안 버전의 게시 이력입니다. 남은 단계를 진행하려면 준비성 점검을 다시 실행하세요."
+          : `이 기록은 초안 v${publication.draftVersion}의 게시 이력입니다. 현재 초안 v${currentDraftVersion}에서는 남은 단계를 이어서 진행할 수 없습니다. 준비성 점검 후 Confluence 게시부터 새 버전으로 시작하세요.`}
       </Alert>
     </section>
   );

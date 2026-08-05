@@ -33,6 +33,13 @@ import type {
 } from "./work-briefs.types";
 import { PublicationPanel, PublicationProgress } from "./PublicationPanel";
 import {
+  canRunReadinessAssessment,
+  canUsePublication,
+  isReadinessAssessmentCurrent,
+  publicationForCurrentDraft,
+  withConnectionStatusRefresh,
+} from "./work-brief-guards";
+import {
   connectionTone,
   providerLabel,
   statusCopy,
@@ -141,11 +148,9 @@ export function WorkBriefsPage({
   );
   const [query, setQuery] = useState("");
   const [documentType, setDocumentType] = useState("all");
-  const [updatedWithin, setUpdatedWithin] = useState("30");
   const [showJira, setShowJira] = useState(true);
   const [showConfluence, setShowConfluence] = useState(true);
   const [showSourceOptions, setShowSourceOptions] = useState(false);
-  const [filterReferenceTime] = useState(() => Date.now());
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [editingContent, setEditingContent] = useState<BriefContent | null>(
     null,
@@ -169,6 +174,9 @@ export function WorkBriefsPage({
     emptyPublicationApprovals,
   );
   const inFlightCommandKeyRef = useRef<Partial<Record<PublicationPhase, string>>>({});
+  const editingRevisionRef = useRef(0);
+  const publicationRequestRevisionRef = useRef(0);
+  const connectionRequestRevisionRef = useRef(0);
   const [connections, setConnections] = useState<ConnectionSnapshot>({
     state: "loading",
   });
@@ -186,33 +194,30 @@ export function WorkBriefsPage({
   });
 
   const loadConnections = useCallback(
-    () =>
-      requestRef.current<IntegrationConnection[]>("/integrations").then(
-        (loaded) => setConnections(toConnectionSnapshot(loaded)),
+    () => {
+      const requestRevision = ++connectionRequestRevisionRef.current;
+      return requestRef.current<IntegrationConnection[]>("/integrations").then(
+        (loaded) => {
+          if (requestRevision === connectionRequestRevisionRef.current) {
+            setConnections(toConnectionSnapshot(loaded));
+          }
+        },
         // An unverified connection is reported as unknown. This screen must
         // never fall back to a healthy-looking state, because a stale
         // "connected" badge is exactly what hides an expired token.
-        () => setConnections({ state: "unavailable" }),
-      ),
+        () => {
+          if (requestRevision === connectionRequestRevisionRef.current) {
+            setConnections({ state: "unavailable" });
+          }
+        },
+      );
+    },
     [],
   );
 
   useEffect(() => {
-    let isCurrent = true;
-
-    void requestRef.current<IntegrationConnection[]>("/integrations").then(
-      (loaded) => {
-        if (isCurrent) setConnections(toConnectionSnapshot(loaded));
-      },
-      () => {
-        if (isCurrent) setConnections({ state: "unavailable" });
-      },
-    );
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
+    void loadConnections();
+  }, [loadConnections]);
 
   const evidence = useMemo(
     () => [...jiraEvidence, ...confluenceEvidence],
@@ -230,14 +235,10 @@ export function WorkBriefsPage({
       if (item.provider === "jira" && !showJira) return false;
       if (item.provider === "confluence" && !showConfluence) return false;
       if (documentType !== "all" && item.provider !== documentType) return false;
-      if (item.updatedAt) {
-        const ageInDays = (filterReferenceTime - new Date(item.updatedAt).getTime()) / 86_400_000;
-        if (ageInDays > Number(updatedWithin)) return false;
-      }
       return normalizedQuery.length === 0 ||
         `${item.title} ${item.sourceId} ${item.location ?? ""}`.toLocaleLowerCase("ko").includes(normalizedQuery);
     });
-  }, [documentType, evidence, filterReferenceTime, query, showConfluence, showJira, updatedWithin]);
+  }, [documentType, evidence, query, showConfluence, showJira]);
 
   const jiraSelectedCount = selectedEvidence.filter((item) => item.provider === "jira").length;
   const confluenceSelectedCount = selectedEvidence.length - jiraSelectedCount;
@@ -255,6 +256,8 @@ export function WorkBriefsPage({
   );
 
   function applyDraft(nextDraft: BriefDraft) {
+    editingRevisionRef.current += 1;
+    const publicationRequestRevision = ++publicationRequestRevisionRef.current;
     setDraft(nextDraft);
     setEditingContent(nextDraft.content);
     setConflict(false);
@@ -267,7 +270,7 @@ export function WorkBriefsPage({
     setPublicationPreviews({});
     setPublicationApprovals(emptyPublicationApprovals());
     inFlightCommandKeyRef.current = {};
-    void loadPublication(nextDraft.id);
+    void loadPublication(nextDraft.id, publicationRequestRevision);
   }
 
   async function collectEvidence() {
@@ -280,8 +283,12 @@ export function WorkBriefsPage({
     try {
       setIsLoadingEvidence(true);
       clearMessage();
-      const result = await request<EvidenceCollection>(
-        `/work-items/jira/${encodeURIComponent(normalizedKey)}/context`,
+      const result = await withConnectionStatusRefresh(
+        () =>
+          request<EvidenceCollection>(
+            `/work-items/jira/${encodeURIComponent(normalizedKey)}/context`,
+          ),
+        loadConnections,
       );
       if (result.accessStatus !== "accessible") {
         setJiraEvidence([]);
@@ -311,9 +318,6 @@ export function WorkBriefsPage({
       notifyFailure(
         "이슈 근거를 불러오지 못했습니다. 연결 상태와 권한을 확인하세요.",
       );
-      // An expired token usually surfaces here first, so re-read the connection
-      // state instead of leaving a stale badge next to the failure.
-      void loadConnections();
     } finally {
       setIsLoadingEvidence(false);
     }
@@ -335,8 +339,12 @@ export function WorkBriefsPage({
     try {
       setIsLoadingConfluenceEvidence(true);
       clearMessage();
-      const result = await request<EvidenceCollection>(
-        `/work-items/confluence/spaces/${encodeURIComponent(spaceKey)}/search?q=${encodeURIComponent(query)}`,
+      const result = await withConnectionStatusRefresh(
+        () =>
+          request<EvidenceCollection>(
+            `/work-items/confluence/spaces/${encodeURIComponent(spaceKey)}/search?q=${encodeURIComponent(query)}`,
+          ),
+        loadConnections,
       );
       if (result.accessStatus !== "accessible") {
         setConfluenceEvidence([]);
@@ -378,14 +386,18 @@ export function WorkBriefsPage({
       setIsSaving(true);
       clearMessage();
       applyDraft(
-        await request<BriefDraft>("/brief-drafts", {
-          method: "POST",
-          body: JSON.stringify({
-            sourceJiraKey: issueKey,
-            selectedEvidenceIds,
-            instruction,
-          }),
-        }),
+        await withConnectionStatusRefresh(
+          () =>
+            request<BriefDraft>("/brief-drafts", {
+              method: "POST",
+              body: JSON.stringify({
+                sourceJiraKey: issueKey,
+                selectedEvidenceIds,
+                instruction,
+              }),
+            }),
+          loadConnections,
+        ),
       );
     } catch {
       notifyFailure(
@@ -437,10 +449,14 @@ export function WorkBriefsPage({
       setIsSaving(true);
       clearMessage();
       applyDraft(
-        await request<BriefDraft>(`/brief-drafts/${draft.id}/refresh`, {
-          method: "POST",
-          body: JSON.stringify({ optimisticVersion: draft.optimisticVersion }),
-        }),
+        await withConnectionStatusRefresh(
+          () =>
+            request<BriefDraft>(`/brief-drafts/${draft.id}/refresh`, {
+              method: "POST",
+              body: JSON.stringify({ optimisticVersion: draft.optimisticVersion }),
+            }),
+          loadConnections,
+        ),
       );
     } catch (error) {
       if ((error as HttpError).status === 409) {
@@ -468,15 +484,32 @@ export function WorkBriefsPage({
 
   async function assessReadiness() {
     if (!draft) return;
+    if (!canRunReadinessAssessment(readinessStale)) {
+      notifyWarning("편집한 내용을 저장한 뒤 준비성 점검을 다시 실행하세요.");
+      return;
+    }
+
+    const requestedEditRevision = editingRevisionRef.current;
 
     try {
       setIsAssessingReadiness(true);
       clearMessage();
-      setReadiness(
-        await request<ReadinessAssessment>(
-          `/brief-drafts/${draft.id}/readiness`,
-        ),
+      const nextReadiness = await withConnectionStatusRefresh(
+        () =>
+          request<ReadinessAssessment>(
+            `/brief-drafts/${draft.id}/readiness`,
+          ),
+        loadConnections,
       );
+      if (
+        !isReadinessAssessmentCurrent(
+          requestedEditRevision,
+          editingRevisionRef.current,
+        )
+      ) {
+        return;
+      }
+      setReadiness(nextReadiness);
       setReadinessStale(false);
     } catch {
       notifyFailure(
@@ -487,14 +520,19 @@ export function WorkBriefsPage({
     }
   }
 
-  async function loadPublication(draftId: string) {
+  async function loadPublication(
+    draftId: string,
+    requestRevision: number,
+  ) {
     try {
       const nextPublication = await request<BriefPublication>(
         `/brief-drafts/${draftId}/publication`,
       );
+      if (requestRevision !== publicationRequestRevisionRef.current) return;
       setPublication(nextPublication);
       resetNeedsReviewState(nextPublication);
     } catch {
+      if (requestRevision !== publicationRequestRevisionRef.current) return;
       setPublication(null);
     }
   }
@@ -519,31 +557,39 @@ export function WorkBriefsPage({
   }
 
   async function preparePublicationPhase(phase: PublicationPhase) {
-    if (!draft || !readiness?.publishAllowed) {
-      notifyWarning("준비성 점검을 통과한 초안만 게시 미리보기를 열 수 있습니다.");
+    if (!draft || !canUsePublication(draft, readiness, readinessStale)) {
+      notifyWarning(
+        readinessStale
+          ? "편집한 내용을 저장하고 준비성 점검을 다시 실행한 뒤 미리보기를 열 수 있습니다."
+          : "준비성 점검을 통과한 초안만 게시 미리보기를 열 수 있습니다.",
+      );
       return;
     }
-    if (publication?.status === "PUBLISHING") {
+    const currentPublication = publicationForCurrentDraft(publication, draft);
+    if (currentPublication?.status === "PUBLISHING") {
       notifyWarning("다른 요청이 게시를 처리 중입니다. 완료 상태가 갱신될 때까지 기다리세요.");
       return;
     }
-    if (phase !== "confluence" && !publication) {
+    if (phase !== "confluence" && !currentPublication) {
       notifyWarning("Confluence 게시가 완료된 후 다음 단계 미리보기를 열 수 있습니다.");
       return;
     }
 
-    const path = publication
+    const path = currentPublication
       ? phase === "jira"
-        ? `/brief-drafts/${draft.id}/publication/${publication.id}/jira-preview`
+        ? `/brief-drafts/${draft.id}/publication/${currentPublication.id}/jira-preview`
         : phase === "child_tasks"
-          ? `/brief-drafts/${draft.id}/publication/${publication.id}/child-tasks-preview`
+          ? `/brief-drafts/${draft.id}/publication/${currentPublication.id}/child-tasks-preview`
           : `/brief-drafts/${draft.id}/publication-preview`
       : `/brief-drafts/${draft.id}/publication-preview`;
 
     try {
       setIsLoadingPublicationPreview(true);
       clearMessage();
-      const preview = await request<PublicationPreview>(path);
+      const preview = await withConnectionStatusRefresh(
+        () => request<PublicationPreview>(path),
+        loadConnections,
+      );
       setPublicationPreviews((current) => ({ ...current, [phase]: preview }));
       setPublicationApprovals((current) => ({ ...current, [phase]: false }));
     } catch (error) {
@@ -559,12 +605,21 @@ export function WorkBriefsPage({
   }
 
   async function executePublicationPhase(phase: PublicationPhase) {
-    if (!draft || !readiness?.publishAllowed) {
-      notifyWarning("준비성 점검을 통과한 초안만 게시할 수 있습니다.");
+    if (!draft || !canUsePublication(draft, readiness, readinessStale)) {
+      notifyWarning(
+        readinessStale
+          ? "편집한 내용을 저장하고 준비성 점검을 다시 실행한 뒤 게시할 수 있습니다."
+          : "준비성 점검을 통과한 초안만 게시할 수 있습니다.",
+      );
       return;
     }
-    if (publication?.status === "PUBLISHING") {
+    const currentPublication = publicationForCurrentDraft(publication, draft);
+    if (currentPublication?.status === "PUBLISHING") {
       notifyWarning("다른 요청이 게시를 처리 중입니다. 현재 상태가 갱신될 때까지 기다리세요.");
+      return;
+    }
+    if (phase !== "confluence" && !currentPublication) {
+      notifyWarning("Confluence 게시가 완료된 후 다음 단계를 실행할 수 있습니다.");
       return;
     }
     const preview = publicationPreviews[phase];
@@ -584,7 +639,7 @@ export function WorkBriefsPage({
       inFlightCommandKeyRef.current[phase] ?? createIdempotencyKey();
     inFlightCommandKeyRef.current[phase] = idempotencyKey;
     const shouldRetry = Boolean(
-      publication?.steps.some((step) => step.phase === phase),
+      currentPublication?.steps.some((step) => step.phase === phase),
     );
     const base = {
       draftVersion: draft.optimisticVersion,
@@ -592,23 +647,28 @@ export function WorkBriefsPage({
       previewHash: preview.previewHash,
       approvalRevision: preview.approvalRevision,
     };
-    const path = shouldRetry && publication
-      ? `/brief-drafts/${draft.id}/publication/${publication.id}/retry`
+    const path = shouldRetry && currentPublication
+      ? `/brief-drafts/${draft.id}/publication/${currentPublication.id}/retry`
       : phase === "confluence"
         ? `/brief-drafts/${draft.id}/publish`
         : phase === "jira"
-          ? `/brief-drafts/${draft.id}/publication/${publication?.id}/jira`
-          : `/brief-drafts/${draft.id}/publication/${publication?.id}/child-tasks`;
+          ? `/brief-drafts/${draft.id}/publication/${currentPublication?.id}/jira`
+          : `/brief-drafts/${draft.id}/publication/${currentPublication?.id}/child-tasks`;
     const body = shouldRetry ? { ...base, phase } : base;
 
     try {
       setIsPublishing(true);
       clearMessage();
-      const nextPublication = await request<BriefPublication>(path, {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify(body),
-      });
+      const nextPublication = await withConnectionStatusRefresh(
+        () =>
+          request<BriefPublication>(path, {
+            method: "POST",
+            headers: { "Idempotency-Key": idempotencyKey },
+            body: JSON.stringify(body),
+          }),
+        loadConnections,
+      );
+      publicationRequestRevisionRef.current += 1;
       setPublication(nextPublication);
       setPublicationApprovals((current) => ({ ...current, [phase]: false }));
       if (nextPublication.status === "NEEDS_REVIEW") {
@@ -650,11 +710,14 @@ export function WorkBriefsPage({
   }
 
   function updateContent(updater: (current: BriefContent) => BriefContent) {
+    editingRevisionRef.current += 1;
     setEditingContent((current) => (current ? updater(current) : current));
     setReadinessStale(true);
   }
 
   const editingEvidence = draft?.evidence ?? selectedEvidence;
+  const currentPublication = publicationForCurrentDraft(publication, draft);
+  const hasHistoricalPublication = Boolean(publication && !currentPublication);
 
   return (
     <section className="work-brief-page" aria-labelledby="work-brief-title">
@@ -702,7 +765,6 @@ export function WorkBriefsPage({
 
           <div className="work-brief-filters">
             <label><span>문서 유형</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}><option value="all">전체</option><option value="jira">Jira</option><option value="confluence">Confluence</option></select></label>
-            <label><span>업데이트</span><select value={updatedWithin} onChange={(event) => setUpdatedWithin(event.target.value)}><option value="7">최근 7일</option><option value="30">최근 30일</option><option value="90">최근 90일</option></select></label>
             <label className="work-brief-search"><span className="sr-only">근거 검색</span><IconSearch size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 키 검색" /></label>
             <IconButton label="추가 검색 조건" onClick={() => setShowSourceOptions((current) => !current)} aria-pressed={showSourceOptions}><IconAdjustmentsHorizontal size={18} /></IconButton>
           </div>
@@ -725,7 +787,6 @@ export function WorkBriefsPage({
               onChange={(event) => setSelectedEvidenceIds((current) => event.target.checked ? Array.from(new Set([...current, ...filteredEvidence.map((item) => item.id)])) : current.filter((id) => !filteredEvidence.some((item) => item.id === id)))}
               label={`${filteredEvidence.length}개 근거`}
             />
-            <span>업데이트</span><span>상태</span>
           </div>
 
           {filteredEvidence.length > 0 ? (["jira", "confluence"] as const).map((provider) => {
@@ -837,8 +898,11 @@ export function WorkBriefsPage({
 
           {/* Approval UI stays gated on a fresh readiness pass, but progress
               that already happened is always visible. */}
-          {!readiness && publication && (
-            <PublicationProgress publication={publication} />
+          {publication && (!readiness || hasHistoricalPublication) && (
+            <PublicationProgress
+              publication={publication}
+              currentDraftVersion={draft.optimisticVersion}
+            />
           )}
 
           {readiness && (
@@ -846,7 +910,7 @@ export function WorkBriefsPage({
               draft={draft}
               readiness={readiness}
               readinessStale={readinessStale}
-              publication={publication}
+              publication={currentPublication}
               previews={publicationPreviews}
               approvals={publicationApprovals}
               isPublishing={isPublishing}
@@ -1017,16 +1081,6 @@ function EvidenceWorkspaceGroup({
                 ) : null}
               </div>
             </div>
-            {/* Absent metadata is shown as absent. Deriving a plausible date or
-                review state here would put facts on screen that no source
-                asserted. */}
-            <div className="work-brief-evidence-date">
-              <strong>{item.updatedAt ? new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit" }).format(new Date(item.updatedAt)) : "—"}</strong>
-              <span>v{item.version}</span>
-            </div>
-            {item.state ? (
-              <StatusIndicator tone={item.state === "current" ? "success" : item.state === "review" ? "warning" : "neutral"}>{item.state === "current" ? "최신" : item.state === "review" ? "확인 필요" : "제한"}</StatusIndicator>
-            ) : null}
           </li>
         ))}
       </ul>
@@ -1244,7 +1298,7 @@ function EvidenceList({
                 AI 제외
               </Badge>
               <small>
-                발췌가 비었거나 DLP 규칙에 걸려 AI 요청에 포함하지 않았습니다.
+                AI가 생성한 초안에서 인용되지 않았습니다.
               </small>
             </span>
           )}
