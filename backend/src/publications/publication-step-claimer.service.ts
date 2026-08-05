@@ -13,6 +13,12 @@ export type StepClaim =
       claimed: true;
       executionToken: string;
       leaseExpiresAt: Date;
+      /**
+       * True when this claim took over a RUNNING row instead of a cleanly
+       * terminated one. The previous worker died while a provider write may
+       * have been in flight, so the external outcome is unknown.
+       */
+      reclaimedInterrupted: boolean;
     }
   | { claimed: false };
 
@@ -34,8 +40,36 @@ export class PublicationStepClaimerService {
    * Claims only PENDING/FAILED work or a RUNNING row whose lease expired.
    * NEEDS_REVIEW is intentionally excluded; it must first pass the separate
    * revision-gated reopen operation.
+   *
+   * The two states are claimed by two separate conditional updates so the
+   * caller learns which one it won. A RUNNING row can only mean a previous
+   * execution was interrupted mid-flight, and that fact is not recoverable
+   * from the row afterwards because the claim overwrites the status.
    */
   async claim(stepId: string): Promise<StepClaim> {
+    const clean = await this.claimWhere(
+      stepId,
+      '"status" IN (:...claimable)',
+      { claimable: ['PENDING', 'FAILED'] },
+      false,
+    );
+    if (clean.claimed) {
+      return clean;
+    }
+    return this.claimWhere(
+      stepId,
+      '"status" = :running AND ("executionLeaseExpiresAt" IS NULL OR "executionLeaseExpiresAt" < :now)',
+      { running: 'RUNNING', now: new Date() },
+      true,
+    );
+  }
+
+  private async claimWhere(
+    stepId: string,
+    condition: string,
+    parameters: Record<string, unknown>,
+    reclaimedInterrupted: boolean,
+  ): Promise<StepClaim> {
     const now = new Date();
     const leaseExpiresAt = new Date(
       now.getTime() + PUBLICATION_STEP_LEASE_DURATION_MS,
@@ -53,14 +87,7 @@ export class PublicationStepClaimerService {
         attempts: () => '"attempts" + 1',
       })
       .where('"id" = :id', { id: stepId })
-      .andWhere(
-        '("status" IN (:...claimable) OR ("status" = :running AND ("executionLeaseExpiresAt" IS NULL OR "executionLeaseExpiresAt" < :now)))',
-        {
-          claimable: ['PENDING', 'FAILED'],
-          running: 'RUNNING',
-          now,
-        },
-      )
+      .andWhere(`(${condition})`, parameters)
       .returning(['executionToken', 'executionLeaseExpiresAt'])
       .execute();
 
@@ -71,6 +98,7 @@ export class PublicationStepClaimerService {
     const row = this.firstRawRow(result.raw);
     return {
       claimed: true,
+      reclaimedInterrupted,
       executionToken:
         this.stringValue(row?.executionToken) ?? executionToken,
       leaseExpiresAt:

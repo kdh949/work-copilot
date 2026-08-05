@@ -1519,6 +1519,113 @@ describe('PublicationService', () => {
     expect(childTask).not.toHaveBeenCalled();
   });
 
+  it('parks an interrupted child-task execution instead of re-issuing the create', async () => {
+    const harness = createHarness();
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
+    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
+    // The worker that owned this step was killed while the Jira create may
+    // already have been dispatched; a later caller takes over its lapsed lease.
+    harness.stepClaimer.claim.mockResolvedValueOnce({
+      claimed: true,
+      executionToken: 'reclaimed-token',
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+      reclaimedInterrupted: true,
+    });
+
+    const result = await publishChildTasks(harness, jira.id);
+
+    expect(childTask).not.toHaveBeenCalled();
+    expect(result.requiresReview).toBe(true);
+    expect(
+      harness.steps.find((step) => step.phase === 'child_tasks'),
+    ).toMatchObject({
+      status: 'NEEDS_REVIEW',
+      errorCode: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    });
+  });
+
+  it('creates the child task only once the parked execution is re-approved', async () => {
+    const harness = createHarness();
+    const confluence = await publishConfluence(harness);
+    const jira = await publishJira(harness, confluence.id);
+    const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
+    harness.stepClaimer.claim.mockResolvedValueOnce({
+      claimed: true,
+      executionToken: 'reclaimed-token',
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+      reclaimedInterrupted: true,
+    });
+    const parked = await publishChildTasks(harness, jira.id, 'parked-key');
+    expect(parked.requiresReview).toBe(true);
+
+    // A plain retry carrying the same approval must not reach the provider.
+    await expect(
+      harness.service.retry(
+        7,
+        DRAFT_ID,
+        jira.id,
+        {
+          phase: 'child_tasks',
+          draftVersion: 3,
+          approved: true,
+          previewHash: `child-preview-${confluence.confluencePage?.id}-${JSON.stringify(harness.profile.policy.childTaskTemplate)}`,
+          idempotencyKey: 'parked-retry-key',
+        },
+        'corr',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED' },
+    });
+    expect(childTask).not.toHaveBeenCalled();
+
+    const freshPreview = await harness.service.previewChildTasks(
+      7,
+      DRAFT_ID,
+      jira.id,
+      'corr',
+    );
+    const reapproved = await harness.service.publishChildTasks(
+      7,
+      DRAFT_ID,
+      jira.id,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: freshPreview.previewHash,
+        approvalRevision: freshPreview.approvalRevision,
+        idempotencyKey: 'reapproved-key',
+      },
+      'corr',
+    );
+
+    expect(reapproved.status).toBe('PUBLISHED');
+    expect(childTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('parks an interrupted Confluence execution without a second page write', async () => {
+    const harness = createHarness();
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    harness.stepClaimer.claim.mockResolvedValueOnce({
+      claimed: true,
+      executionToken: 'reclaimed-token',
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+      reclaimedInterrupted: true,
+    });
+
+    const result = await publishConfluence(harness, 'interrupted-key');
+
+    expect(confluence).not.toHaveBeenCalled();
+    expect(result.status).toBe('NEEDS_REVIEW');
+    expect(result.confluencePage).toBeNull();
+    expect(
+      harness.steps.find((step) => step.stepKey === 'confluence_page'),
+    ).toMatchObject({
+      status: 'NEEDS_REVIEW',
+      errorCode: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    });
+  });
+
   it('does not start Confluence publication when approval, version, readiness, or parent configuration is invalid', async () => {
     const harness = createHarness();
     const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');

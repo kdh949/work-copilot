@@ -3,7 +3,7 @@ import { PublicationStepClaimerService } from './publication-step-claimer.servic
 
 describe('PublicationStepClaimerService', () => {
   function createHarness(
-    affected: number,
+    affected: number | number[],
     raw: Array<Record<string, unknown>> = [
       {
         executionToken: 'execution-token-1',
@@ -11,13 +11,21 @@ describe('PublicationStepClaimerService', () => {
       },
     ],
   ) {
+    // A single number answers every statement; an array answers them in order
+    // so a two-phase claim can be driven call by call.
+    const results = Array.isArray(affected) ? affected : [affected];
+    let call = 0;
     const queryBuilder = {
       update: jest.fn().mockReturnThis(),
       set: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       returning: jest.fn().mockReturnThis(),
-      execute: jest.fn().mockResolvedValue({ affected, raw }),
+      execute: jest.fn(() => {
+        const result = results[Math.min(call, results.length - 1)];
+        call += 1;
+        return Promise.resolve({ affected: result, raw });
+      }),
     };
     const repository = {
       createQueryBuilder: jest.fn(() => queryBuilder),
@@ -36,6 +44,7 @@ describe('PublicationStepClaimerService', () => {
       claimed: true,
       executionToken: 'execution-token-1',
       leaseExpiresAt: expect.any(Date),
+      reclaimedInterrupted: false,
     });
 
     expect(queryBuilder.update).toHaveBeenCalledWith(PublicationStep);
@@ -51,17 +60,37 @@ describe('PublicationStepClaimerService', () => {
       expect.stringContaining('"status" IN (:...claimable)'),
       expect.objectContaining({ claimable: ['PENDING', 'FAILED'] }),
     );
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+    // Cleanly terminated work must not be confused with an interrupted one,
+    // so the expired-lease takeover statement is never reached here.
+    expect(queryBuilder.execute).toHaveBeenCalledTimes(1);
+    expect(queryBuilder.andWhere).not.toHaveBeenCalledWith(
       expect.stringContaining('"executionLeaseExpiresAt" IS NULL'),
       expect.anything(),
     );
     expect(queryBuilder.returning).toHaveBeenCalled();
   });
 
+  it('reports an expired-lease takeover as an interrupted execution', async () => {
+    const { service, queryBuilder } = createHarness([0, 1]);
+
+    await expect(service.claim('step-1')).resolves.toMatchObject({
+      claimed: true,
+      executionToken: 'execution-token-1',
+      reclaimedInterrupted: true,
+    });
+
+    expect(queryBuilder.execute).toHaveBeenCalledTimes(2);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('"executionLeaseExpiresAt" IS NULL'),
+      expect.objectContaining({ running: 'RUNNING' }),
+    );
+  });
+
   it('does not grant execution to a concurrent caller', async () => {
-    const { service } = createHarness(0);
+    const { service, queryBuilder } = createHarness(0);
 
     await expect(service.claim('step-1')).resolves.toEqual({ claimed: false });
+    expect(queryBuilder.execute).toHaveBeenCalledTimes(2);
   });
 
   it('heartbeats only the worker holding the execution token', async () => {

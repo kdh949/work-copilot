@@ -819,6 +819,10 @@ export class PublicationService {
     step.executionLeaseExpiresAt = claim.leaseExpiresAt;
     step.updatedAt = new Date();
 
+    if (claim.reclaimedInterrupted) {
+      return this.parkInterruptedExecution(step, claim.executionToken);
+    }
+
     let heartbeatLost = false;
     const heartbeatTimer = setInterval(() => {
       void this.stepClaimer
@@ -896,6 +900,41 @@ export class PublicationService {
       outcome: 'success',
     });
     return { outcome: 'succeeded', result };
+  }
+
+  /**
+   * A previous worker was killed while the provider write may already have
+   * been dispatched, and nothing durable records how it ended. Re-issuing the
+   * create here would rely on provider search to prove absence, which is not
+   * read-your-write consistent (Jira child tasks are found through a JQL
+   * index), so a fresh create can duplicate an object that already exists.
+   * Park the step for the revision-gated review flow instead.
+   */
+  private async parkInterruptedExecution(
+    step: PublicationStep,
+    executionToken: string,
+  ): Promise<StepExecution> {
+    const errorCode: PublicationErrorCode =
+      'PUBLICATION_RECONCILIATION_INDETERMINATE';
+    const fenced = await this.stepClaimer.markFailed(
+      step.id,
+      executionToken,
+      'NEEDS_REVIEW',
+      errorCode,
+    );
+    if (!fenced) {
+      return { outcome: 'stale' };
+    }
+    step.status = 'NEEDS_REVIEW';
+    step.errorCode = errorCode;
+    step.executionToken = null;
+    step.executionLeaseExpiresAt = null;
+    step.updatedAt = new Date();
+    this.metrics?.increment('publication_stage_total', {
+      stage: this.metricStage(step.stepKey),
+      outcome: 'failure',
+    });
+    return { outcome: 'failed' };
   }
 
   private async finalize(
