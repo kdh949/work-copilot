@@ -52,6 +52,15 @@ export class PublicationStep {
   @Column({ type: 'timestamptz', nullable: true })
   executionLeaseExpiresAt: Date | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  executionToken: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  reviewRevision: number;
+
+  @Column({ type: 'int', nullable: true })
+  approvedRevision: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

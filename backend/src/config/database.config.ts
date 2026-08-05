@@ -4,6 +4,10 @@ import { WorkCopilotFoundation1785510000000 } from '../database/migrations/20260
 import { KeycloakOidcSession1785596400000 } from '../database/migrations/2026080101000-keycloak-oidc-session';
 import { PublicationSagaState1785609800000 } from '../database/migrations/2026080200000-publication-saga-state';
 import { WebhookFreshnessState1785613400000 } from '../database/migrations/2026080201000-webhook-freshness-state';
+import { RealPublicationStages1785782400000 } from '../database/migrations/2026080400000-real-publication-stages';
+import { OAuthWriteScopeFingerprint1785786000000 } from '../database/migrations/2026080401000-oauth-write-scope-fingerprint';
+import { PublicationStepRecovery1785789600000 } from '../database/migrations/2026080402000-publication-step-recovery';
+import { PublicationExecutionFencing1785873600000 } from '../database/migrations/2026080500000-publication-execution-fencing';
 
 type Environment = NodeJS.ProcessEnv;
 
@@ -51,6 +55,10 @@ export const createDatabaseOptions = (
       KeycloakOidcSession1785596400000,
       PublicationSagaState1785609800000,
       WebhookFreshnessState1785613400000,
+      RealPublicationStages1785782400000,
+      OAuthWriteScopeFingerprint1785786000000,
+      PublicationStepRecovery1785789600000,
+      PublicationExecutionFencing1785873600000,
     ],
   };
 };

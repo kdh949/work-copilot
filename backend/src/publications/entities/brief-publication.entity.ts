@@ -30,6 +30,9 @@ export class BriefPublication {
   @Column({ type: 'varchar', length: 32, default: 'PENDING' })
   status: PublicationStatus;
 
+  @Column({ type: 'int', default: 0 })
+  approvalRevision: number;
+
   @Column({ type: 'varchar', nullable: true })
   confluenceContentId: string | null;
 
