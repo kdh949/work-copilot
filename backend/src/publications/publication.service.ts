@@ -1071,16 +1071,17 @@ export class PublicationService {
     phase: PublicationPhase,
   ): Promise<number> {
     const currentRevision = Math.max(publication.approvalRevision ?? 0, 0);
-    await this.publicationsRepository.increment(
-      { id: publication.id },
-      'approvalRevision',
-      1,
-    );
-    const refreshed = await this.publicationsRepository.findOneBy({
-      id: publication.id,
-    });
+    // Increment and read in one statement. A separate read-back can observe a
+    // concurrent preview's value and hand two callers the same revision.
+    const allocated = await this.publicationsRepository
+      .createQueryBuilder()
+      .update(BriefPublication)
+      .set({ approvalRevision: () => '"approvalRevision" + 1' })
+      .where('"id" = :id', { id: publication.id })
+      .returning(['approvalRevision'])
+      .execute();
     const revision = Math.max(
-      refreshed?.approvalRevision ?? 0,
+      this.revisionValue(allocated.raw) ?? 0,
       currentRevision + 1,
     );
     publication.approvalRevision = revision;
@@ -1093,6 +1094,20 @@ export class PublicationService {
       step.reviewRevision = revision;
     }
     return revision;
+  }
+
+  private revisionValue(raw: unknown): number | null {
+    const row = Array.isArray(raw) ? (raw as unknown[]).at(0) : null;
+    const value =
+      typeof row === 'object' && row !== null
+        ? (row as { approvalRevision?: unknown }).approvalRevision
+        : null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    // Postgres returns integer columns as strings through some drivers.
+    const parsed = typeof value === 'string' ? Number(value) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private approvalRevisionForInput(

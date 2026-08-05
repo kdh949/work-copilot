@@ -138,16 +138,47 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         publications.filter((item) => matches(item as never, where)),
       ),
     ),
-    increment: jest.fn(
-      (where: Record<string, unknown>, property: string, amount: number) => {
-        const publication = publications.find((item) => matches(item as never, where));
-        if (publication) {
-          const current = Number(publication[property as keyof BriefPublication] ?? 0);
-          (publication as unknown as Record<string, unknown>)[property] = current + amount;
-        }
-        return Promise.resolve();
-      },
-    ),
+    createQueryBuilder: jest.fn(() => {
+      let assignments: Record<string, unknown> = {};
+      let parameters: Record<string, unknown> = {};
+      const builder: Record<string, jest.Mock> = {
+        update: jest.fn(() => builder),
+        set: jest.fn((values: Record<string, unknown>) => {
+          assignments = values;
+          return builder;
+        }),
+        where: jest.fn((_clause: string, values: Record<string, unknown>) => {
+          parameters = values;
+          return builder;
+        }),
+        returning: jest.fn(() => builder),
+        execute: jest.fn(() => {
+          const publication = publications.find(
+            (item) => item.id === parameters.id,
+          );
+          if (!publication) {
+            return Promise.resolve({ affected: 0, raw: [] });
+          }
+          const record = publication as unknown as Record<string, unknown>;
+          for (const [key, value] of Object.entries(assignments)) {
+            if (typeof value !== 'function') {
+              record[key] = value;
+              continue;
+            }
+            const expression = (value as () => string)();
+            const increment = /^"(\w+)" \+ 1$/.exec(expression);
+            if (increment) {
+              record[increment[1]] = Number(record[increment[1]] ?? 0) + 1;
+            }
+          }
+          return Promise.resolve({
+            affected: 1,
+            raw: [{ approvalRevision: publication.approvalRevision }],
+          });
+        }),
+      };
+      return builder;
+    }),
   };
   const stepsRepository = {
     create: jest.fn((values: Partial<PublicationStep>) => ({
