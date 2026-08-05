@@ -28,8 +28,10 @@ function createGateway(readResponses: unknown[], writeResponses: unknown[]) {
     getJson: jest.fn(() => Promise.resolve(readResponses.shift())),
   };
   const writeClient = {
-    postJson: jest.fn(() => Promise.resolve(writeResponses.shift())),
-    putJson: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    postJsonExpectObject: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    postJsonAllowEmpty: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    putJsonExpectObject: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    putJsonAllowEmpty: jest.fn(() => Promise.resolve(writeResponses.shift())),
   };
   const gateway = new AtlassianPublicationWriteGateway(
     oauth as never,
@@ -119,7 +121,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       PROFILE,
       'ENG',
     );
-    expect(harness.writeClient.postJson).toHaveBeenNthCalledWith(
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenNthCalledWith(
       1,
       expect.any(URL),
       'https://confluence.example.test/',
@@ -130,7 +132,7 @@ describe('AtlassianPublicationWriteGateway', () => {
         title: expectedConfluenceTitle(),
       }),
     );
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
   it('reuses a page carrying the same deterministic title without another write', async () => {
@@ -161,7 +163,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     ).resolves.toMatchObject({
       providerObjectId: '99',
     });
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('reconciles a page after an ambiguous create response without a property write', async () => {
@@ -191,8 +193,100 @@ describe('AtlassianPublicationWriteGateway', () => {
     await expect(
       harness.gateway.upsertConfluenceBrief(input),
     ).resolves.toMatchObject({ providerObjectId: '99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a 201 empty Confluence create response before accepting success', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: [] } },
+        {
+          status: 'ok',
+          body: {
+            results: [
+              { id: '99', title: expectedConfluenceTitle(), version: { number: 1 } },
+            ],
+          },
+        },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).resolves.toMatchObject({ providerObjectId: '99' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send another create when an empty response cannot be reconciled', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: [] } },
+        { status: 'ok', body: { results: [] } },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
+      'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    );
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create when the Confluence listing is access limited', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'access_limited' },
+      ],
+      [],
+    );
+
+    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
+      'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    );
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('does not create when the marker is beyond the reconciliation page budget', async () => {
+    const pages = Array.from({ length: 5 }, () => ({
+      status: 'ok',
+      body: {
+        results: Array.from({ length: 50 }, (_, index) => ({
+          id: `unrelated-${index}`,
+          title: 'different title',
+          version: { number: 1 },
+        })),
+        total: 300,
+      },
+    }));
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        ...pages,
+      ],
+      [],
+    );
+
+    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
+      'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    );
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('finds a Confluence title marker on a later child-page page', async () => {
@@ -229,7 +323,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       harness.gateway.upsertConfluenceBrief(input),
     ).resolves.toMatchObject({ providerObjectId: '99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(3);
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('finds a summary comment marker on a later result page', async () => {
@@ -265,7 +359,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       }),
     ).resolves.toEqual({ providerObjectId: 'comment-99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('creates the child-task operation marker atomically in issue creation', async () => {
@@ -295,7 +389,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     });
 
     expect(result).toEqual({ providerObjectId: 'child-99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledWith(
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledWith(
       expect.any(URL),
       'https://jira.example.test/',
       'user-token',
@@ -316,7 +410,70 @@ describe('AtlassianPublicationWriteGateway', () => {
         ],
       }),
     );
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('collects child-task markers for a phase in one paginated reconciliation', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-1',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 2,
+          },
+        },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-2',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-2',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 2,
+          },
+        },
+      ],
+      [],
+    );
+
+    const result = await harness.gateway.reconcileJiraChildTasks({
+      userId: 7,
+      correlationId: 'correlation-1',
+      profile: PROFILE,
+      operationId: input.operationId,
+      sourceJiraKey: 'ENG-42',
+      clientTaskIds: ['child-task-1', 'child-task-2'],
+    });
+
+    expect(result).toMatchObject({ status: 'found' });
+    if (result.status === 'found') {
+      expect(result.value.get('child-task-1')?.issueId).toBe('child-1');
+      expect(result.value.get('child-task-2')?.issueId).toBe('child-2');
+    }
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('reconciles an ambiguous child-task create through its atomic marker', async () => {
@@ -355,7 +512,7 @@ describe('AtlassianPublicationWriteGateway', () => {
         template: { issueTypeId: '10001', fields: {} },
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
   it('finds a child-task marker on the second Jira search page without property N+1', async () => {
@@ -412,7 +569,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 });

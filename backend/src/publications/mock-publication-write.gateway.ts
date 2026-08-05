@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import type {
   PublicationWriteGateway,
   PublicationWriteResult,
+  ChildTaskReconciliationEntry,
+  ReconciliationResult,
 } from './publication-write-gateway';
 import { PublicationGatewayError } from './publication-write-gateway';
 import type { PublicationErrorCode } from './publication.types';
@@ -97,11 +99,23 @@ export class MockPublicationWriteGateway implements PublicationWriteGateway {
     sourceJiraKey: string;
     childTask: BriefChildTask;
     template: ChildTaskTemplate;
+    reconciledProviderObjectId?: string;
   }): Promise<PublicationWriteResult> {
     this.consumeFailure(`jira_child_task:${input.childTask.clientTaskId}`);
     return Promise.resolve({
       providerObjectId: `mock-jira-child:${input.operationId}:${input.childTask.clientTaskId}`,
     });
+  }
+
+  reconcileJiraChildTasks(input: {
+    userId: number;
+    correlationId: string;
+    profile: IntegrationProfile;
+    operationId: string;
+    sourceJiraKey: string;
+    clientTaskIds: readonly string[];
+  }): Promise<ReconciliationResult<Map<string, ChildTaskReconciliationEntry>>> {
+    return Promise.resolve({ status: 'absent' });
   }
 
   private consumeFailure(stepKey: string): void {

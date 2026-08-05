@@ -21,7 +21,7 @@ describe('AtlassianWriteClientService', () => {
     );
 
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',
@@ -38,6 +38,21 @@ describe('AtlassianWriteClientService', () => {
     );
   });
 
+  it('returns an explicit empty-success result for an object-creation contract', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(null, { status: 201 }),
+    );
+
+    await expect(
+      service.postJsonExpectObject(
+        new URL('https://jira.example.test/rest/api/2/issue'),
+        'https://jira.example.test/',
+        'user-token',
+        { fields: {} },
+      ),
+    ).resolves.toEqual({ status: 'ok_empty' });
+  });
+
   it('rejects a redirect instead of forwarding a bearer token', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(null, {
@@ -47,7 +62,7 @@ describe('AtlassianWriteClientService', () => {
     );
 
     await expect(
-      service.putJson(
+      service.putJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue/1'),
         'https://jira.example.test/',
         'user-token',
@@ -64,13 +79,13 @@ describe('AtlassianWriteClientService', () => {
       );
 
       await expect(
-        service.putJson(
+        service.putJsonAllowEmpty(
           new URL('https://jira.example.test/rest/api/2/issue/1/properties/key'),
           'https://jira.example.test/',
           'user-token',
           { value: 'safe' },
         ),
-      ).resolves.toEqual({ status: 'ok', body: {} });
+      ).resolves.toEqual({ status: 'ok_empty' });
     },
   );
 
@@ -88,7 +103,7 @@ describe('AtlassianWriteClientService', () => {
       );
 
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',
@@ -96,7 +111,7 @@ describe('AtlassianWriteClientService', () => {
       ),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',

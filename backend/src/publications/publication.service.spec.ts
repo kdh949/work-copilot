@@ -908,6 +908,10 @@ describe('PublicationService', () => {
       'JIRA_CHILD_TASK_FAILED',
     );
     const childTask = jest.spyOn(harness.gateway, 'createJiraChildTask');
+    const childTaskReconciliation = jest.spyOn(
+      harness.gateway,
+      'reconcileJiraChildTasks',
+    );
 
     const confluence = await publishConfluence(harness);
     const jira = await publishJira(harness, confluence.id);
@@ -919,6 +923,7 @@ describe('PublicationService', () => {
 
     expect(partial.status).toBe('PARTIALLY_PUBLISHED');
     expect(childTask).toHaveBeenCalledTimes(2);
+    expect(childTaskReconciliation).toHaveBeenCalledTimes(1);
     expect(
       partial.steps.find((step) => step.key.endsWith(FIRST_TASK_ID)),
     ).toMatchObject({ status: 'FAILED' });

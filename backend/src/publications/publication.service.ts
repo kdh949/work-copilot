@@ -30,6 +30,8 @@ import {
   PUBLICATION_WRITE_GATEWAY,
   type PublicationWriteGateway,
   type PublicationWriteResult,
+  type ReconciliationResult,
+  type ChildTaskReconciliationEntry,
 } from './publication-write-gateway';
 import {
   type ChildTasksPublicationPreview,
@@ -717,8 +719,51 @@ export class PublicationService {
     if (!template && preview.childTasks.length > 0) {
       throw new ConflictException({ code: 'CHILD_TASK_TEMPLATE_REQUIRED' });
     }
-    for (const childTask of this.selectedChildTasks(draft)) {
+    const selectedTasks = this.selectedChildTasks(draft);
+    let reconciliation: ReconciliationResult<
+      Map<string, ChildTaskReconciliationEntry>
+    >;
+    try {
+      reconciliation = await this.writeGateway.reconcileJiraChildTasks({
+        userId,
+        correlationId,
+        profile,
+        operationId: publication.operationId,
+        sourceJiraKey: draft.sourceJiraKey,
+        clientTaskIds: selectedTasks.map((task) => task.clientTaskId),
+      });
+    } catch {
+      reconciliation = {
+        status: 'indeterminate',
+        reason: 'provider_unavailable',
+      };
+    }
+    if (reconciliation.status === 'indeterminate') {
+      const step = steps.find(
+        (candidate) => candidate.status !== 'SUCCEEDED',
+      );
+      if (step) {
+        const execution = await this.executeStep(step, () =>
+          Promise.reject(
+            new PublicationGatewayError(
+              'PUBLICATION_RECONCILIATION_INDETERMINATE',
+              true,
+            ),
+          ),
+        );
+        if (execution.outcome === 'stale') {
+          return this.presentLatestPublication(publication.id);
+        }
+      }
+      return this.finalize(publication, steps, 'child_tasks', draft);
+    }
+    const existingTasks =
+      reconciliation.status === 'found'
+        ? reconciliation.value
+        : new Map<string, ChildTaskReconciliationEntry>();
+    for (const childTask of selectedTasks) {
       const step = this.requiredStep(steps, this.childTaskStepKey(childTask));
+      const existing = existingTasks.get(childTask.clientTaskId);
       const execution = await this.executeStep(step, () =>
         this.writeGateway.createJiraChildTask({
           userId,
@@ -729,6 +774,8 @@ export class PublicationService {
           sourceJiraKey: draft.sourceJiraKey,
           childTask,
           template: template as NonNullable<typeof template>,
+          reconciledProviderObjectId: existing?.issueId,
+          reconciliationCompleted: true,
         }),
       );
       if (execution.outcome === 'in_progress') {
@@ -736,6 +783,12 @@ export class PublicationService {
       }
       if (execution.outcome === 'stale') {
         return this.presentLatestPublication(publication.id);
+      }
+      if (execution.outcome === 'succeeded') {
+        existingTasks.set(childTask.clientTaskId, {
+          issueId: execution.result.providerObjectId,
+          operationId: publication.operationId,
+        });
       }
     }
     return this.finalize(publication, steps, 'child_tasks', draft);

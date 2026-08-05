@@ -10,6 +10,7 @@ const REQUEST_TIMEOUT_MS = 5_000;
 
 export type ProviderWriteResult =
   | { status: 'ok'; body: Record<string, unknown> }
+  | { status: 'ok_empty' }
   | { status: 'access_limited' | 'not_found' | 'conflict' | 'rejected' };
 
 /**
@@ -21,7 +22,7 @@ export type ProviderWriteResult =
 export class AtlassianWriteClientService {
   constructor(private readonly urlPolicy: IntegrationProfileUrlPolicy) {}
 
-  async postJson(
+  async postJsonExpectObject(
     url: URL,
     baseUrl: string,
     accessToken: string,
@@ -30,7 +31,25 @@ export class AtlassianWriteClientService {
     return this.writeJson(url, baseUrl, accessToken, 'POST', body);
   }
 
-  async putJson(
+  async postJsonAllowEmpty(
+    url: URL,
+    baseUrl: string,
+    accessToken: string,
+    body: Record<string, unknown>,
+  ): Promise<ProviderWriteResult> {
+    return this.writeJson(url, baseUrl, accessToken, 'POST', body);
+  }
+
+  async putJsonExpectObject(
+    url: URL,
+    baseUrl: string,
+    accessToken: string,
+    body: Record<string, unknown>,
+  ): Promise<ProviderWriteResult> {
+    return this.writeJson(url, baseUrl, accessToken, 'PUT', body);
+  }
+
+  async putJsonAllowEmpty(
     url: URL,
     baseUrl: string,
     accessToken: string,
@@ -83,10 +102,10 @@ export class AtlassianWriteClientService {
       return { status: 'rejected' };
     }
 
-    return { status: 'ok', body: await this.readJson(response) };
+    return this.readJson(response);
   }
 
-  private async readJson(response: Response): Promise<Record<string, unknown>> {
+  private async readJson(response: Response): Promise<ProviderWriteResult> {
     const contentLength = Number(response.headers.get('content-length'));
     if (
       Number.isFinite(contentLength) &&
@@ -109,12 +128,8 @@ export class AtlassianWriteClientService {
       );
     }
 
-    // Several Jira write resources acknowledge a successful mutation with an
-    // empty 200/201/204 response.  The caller still validates fields required
-    // for its own operation, but an empty success body must not turn a
-    // completed provider write into a retryable local failure.
     if (text.trim().length === 0) {
-      return {};
+      return { status: 'ok_empty' };
     }
 
     try {
@@ -122,7 +137,7 @@ export class AtlassianWriteClientService {
       if (!this.isRecord(body)) {
         throw new Error('not a JSON object');
       }
-      return body;
+      return { status: 'ok', body };
     } catch {
       throw new ServiceUnavailableException('Integration response is invalid.');
     }
