@@ -169,9 +169,7 @@ main {
 }
 
 .header-actions { flex: 0 0 auto; gap: var(--space-1); }
-.header-notification { position: relative; }
-.header-notification::after { position: absolute; top: var(--space-2); right: var(--space-2); width: var(--notification-indicator-size); height: var(--notification-indicator-size); border-radius: var(--radius-full); background: var(--color-notice-500); content: ""; }
-.header-profile { position: relative; margin-left: var(--space-2); }
+.header-profile { position: relative; }
 .header-profile-trigger { gap: var(--space-2); padding: var(--space-1) var(--space-1-5) var(--space-1) var(--space-1); background: var(--color-transparent); color: var(--color-text-inverse); }
 .header-avatar { display: grid; width: var(--header-avatar-size); height: var(--header-avatar-size); place-items: center; border-radius: var(--radius-full); background: var(--color-action-100); color: var(--color-action-700); font-size: var(--font-size-13); font-weight: var(--font-weight-bold); }
 .header-profile-name { max-width: var(--header-profile-name-max-width); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-13); }
@@ -189,15 +187,6 @@ main {
   .header { gap: var(--space-2); }
   .header nav { min-width: 0; justify-content: flex-start; overflow-x: auto; }
   .header nav button { padding-inline: var(--space-3); white-space: nowrap; }
-  .header-actions { display: none; }
-}
-
-.message {
-  padding: var(--space-3) var(--space-3-5);
-  border: var(--border-width) solid var(--color-border-warning);
-  border-radius: var(--radius-3);
-  background: var(--color-surface-warning);
-  color: var(--color-text-warning);
 }
 
 .app-message {
@@ -872,10 +861,9 @@ main {
 }
 
 @media (max-width: 820px) {
-  .header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+  /* The header keeps its row layout at every width. Stacking it into a column
+     while `height` stays fixed pushed the profile menu outside the header box,
+     which is what made logout unreachable on small screens. */
 
   .grid {
     grid-template-columns: 1fr;

@@ -336,6 +336,12 @@ export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
 ) => {
   const method = options?.method?.toUpperCase() ?? "GET";
 
+  if (path === "/integrations") {
+    return [
+      { provider: "jira", status: "connected" },
+      { provider: "confluence", status: "connected" },
+    ] as T;
+  }
   if (path === "/brief-drafts" && method === "POST") {
     publication = null;
     return previewDraft as T;

@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  IconBell,
-  IconBrandJira,
-  IconChevronDown,
-  IconHelpCircle,
-  IconLogout,
-} from "@tabler/icons-react";
-import { IconButton } from "../design-system/components";
+import { IconBrandJira, IconChevronDown, IconLogout } from "@tabler/icons-react";
 
 type User = {
   id: number;
@@ -92,8 +85,6 @@ export function Header(props: HeaderProps) {
           </nav>
 
           <div className="header-actions">
-            <IconButton label="도움말" inverse><IconHelpCircle size={20} /></IconButton>
-            <IconButton label="알림" inverse className="header-notification"><IconBell size={20} /></IconButton>
             <div className="header-profile" ref={profileRef}>
               <button
                 type="button"

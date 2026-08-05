@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useState,
   type ChangeEvent,
@@ -19,7 +20,7 @@ import {
 } from "./design-system/components";
 import { IntegrationProfilesPage } from "./features/admin/IntegrationProfilesPage";
 import { IntegrationConnectionsPage } from "./features/integrations/IntegrationConnectionsPage";
-import { WorkBriefsPage } from "./features/work-briefs/WorkBriefsPage";
+import { WorkBriefsPage, type Notice } from "./features/work-briefs/WorkBriefsPage";
 import {
   previewWorkBriefRequest,
   WORK_BRIEF_PREVIEW_EVIDENCE,
@@ -162,7 +163,21 @@ function integrationCallbackErrorMessage(
 function App() {
   const [menu, setMenu] = useState<MenuName>(IS_WORK_BRIEF_PREVIEW ? "workBriefs" : "login");
   const [user, setUser] = useState<User | null>(IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_USER : null);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<Notice>(null);
+  // Kept stable so effect dependency inference still treats `showError` and the
+  // other handlers that call them as stable.
+  const notifySuccess = useCallback(
+    (text: string) => setMessage({ tone: "success", text }),
+    [],
+  );
+  const notifyWarning = useCallback(
+    (text: string) => setMessage({ tone: "warning", text }),
+    [],
+  );
+  const notifyFailure = useCallback(
+    (text: string) => setMessage({ tone: "danger", text }),
+    [],
+  );
 
   const [wikiPosts, setWikiPosts] = useState<BoardPost[]>([]);
   const [wikiTreeNodes, setWikiTreeNodes] = useState<WikiTreeNode[]>([]);
@@ -288,14 +303,14 @@ function App() {
     setMenu("login");
   }
 
-  function showError(error: unknown) {
-    if (error instanceof Error) {
-      setMessage(error.message);
-      return;
-    }
-
-    setMessage("오류가 발생했습니다.");
-  }
+  const showError = useCallback(
+    (error: unknown) => {
+      notifyFailure(
+        error instanceof Error ? error.message : "오류가 발생했습니다.",
+      );
+    },
+    [notifyFailure],
+  );
 
   async function loadWikiPosts() {
     try {
@@ -446,7 +461,7 @@ function App() {
     return () => {
       isCurrent = false;
     };
-  }, [menu, selectedWikiPath.length]);
+  }, [menu, selectedWikiPath.length, showError]);
 
   useEffect(() => {
     if (menu !== "posts") return;
@@ -493,7 +508,7 @@ function App() {
     return () => {
       isCurrent = false;
     };
-  }, [menu, keyword, tagFilter, selectedWikiPath, wikiPage]);
+  }, [menu, keyword, tagFilter, selectedWikiPath, wikiPage, showError]);
 
   useEffect(() => {
     if (menu !== "notes" && !isChatOpen) return;
@@ -567,6 +582,7 @@ function App() {
     keyword,
     menu,
     selectedNoteId,
+    showError,
     tagFilter,
     user,
   ]);
@@ -623,12 +639,12 @@ function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMenu("integrations");
     const message = integrationCallbackErrorMessage(provider, status);
-    if (message) setMessage(message);
+    if (message) notifyFailure(message);
 
     url.searchParams.delete("integration");
     url.searchParams.delete("integration_status");
     window.history.replaceState({}, document.title, url);
-  }, []);
+  }, [notifyFailure]);
 
   function startKeycloakLogin() {
     window.location.assign(`${API_BASE_URL}/auth/oidc/login`);
@@ -642,7 +658,7 @@ function App() {
     }
 
     clearClientSession();
-    setMessage("로그아웃되었습니다.");
+    notifySuccess("로그아웃되었습니다.");
   }
 
   async function handlePostSubmit(event: FormEvent<HTMLFormElement>) {
@@ -661,13 +677,13 @@ function App() {
           method: "PATCH",
           body,
         });
-        setMessage("회사 위키 문서가 수정되었습니다.");
+        notifySuccess("회사 위키 문서가 수정되었습니다.");
       } else {
         await request("/posts", {
           method: "POST",
           body,
         });
-        setMessage("회사 위키 문서가 작성되었습니다.");
+        notifySuccess("회사 위키 문서가 작성되었습니다.");
       }
 
       resetPostForm();
@@ -697,7 +713,7 @@ function App() {
           },
         );
         setSelectedNoteViewId(updatedNote.id);
-        setMessage("내 노트가 수정되었습니다.");
+        notifySuccess("내 노트가 수정되었습니다.");
       } else {
         const newNote = await request<BoardPost>("/posts/notes", {
           method: "POST",
@@ -705,7 +721,7 @@ function App() {
         });
         setSelectedNoteViewId(newNote.id);
         setSelectedNoteId(String(newNote.id));
-        setMessage("내 노트가 작성되었습니다.");
+        notifySuccess("내 노트가 작성되었습니다.");
       }
 
       resetNoteForm();
@@ -758,7 +774,7 @@ function App() {
 
   async function handleSaveChatAsNewNote() {
     if (!chatAnswer) {
-      setMessage("저장할 AI 답변이 없습니다.");
+      notifyWarning("저장할 AI 답변이 없습니다.");
       return;
     }
 
@@ -775,7 +791,7 @@ function App() {
 
       setSelectedNoteViewId(newNote.id);
       setSelectedNoteId(String(newNote.id));
-      setMessage("AI 답변을 새 노트로 저장했습니다.");
+      notifySuccess("AI 답변을 새 노트로 저장했습니다.");
       await loadNotes();
     } catch (error) {
       showError(error);
@@ -784,14 +800,14 @@ function App() {
 
   async function handleAppendChatToNote() {
     if (!chatAnswer) {
-      setMessage("추가할 AI 답변이 없습니다.");
+      notifyWarning("추가할 AI 답변이 없습니다.");
       return;
     }
 
     const note = notes.find((item) => item.id === Number(selectedNoteId));
 
     if (!note) {
-      setMessage("추가할 노트를 선택해주세요.");
+      notifyWarning("추가할 노트를 선택해주세요.");
       return;
     }
 
@@ -804,7 +820,7 @@ function App() {
       });
 
       setSelectedNoteViewId(note.id);
-      setMessage("AI 답변을 선택한 노트에 추가했습니다.");
+      notifySuccess("AI 답변을 선택한 노트에 추가했습니다.");
       await loadNotes();
     } catch (error) {
       showError(error);
@@ -844,7 +860,7 @@ function App() {
         method: "DELETE",
       });
 
-      setMessage("삭제되었습니다.");
+      notifySuccess("삭제되었습니다.");
       await loadWikiPosts();
       setSelectedWikiDetail(null);
       await loadNotes();
@@ -1295,8 +1311,8 @@ function App() {
 
       <main className={menu === "workBriefs" ? "app-main--workspace" : undefined}>
         {message && (
-          <Alert tone="warning" className="app-message">
-            {message}
+          <Alert tone={message.tone} className="app-message">
+            {message.text}
           </Alert>
         )}
 

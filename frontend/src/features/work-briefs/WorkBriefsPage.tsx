@@ -1,9 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAdjustmentsHorizontal,
   IconBrandJira,
-  IconDotsVertical,
-  IconFileText,
   IconRefresh,
   IconSearch,
   IconStack2,
@@ -33,7 +31,15 @@ import type {
   WorkBriefApiRequest,
   WorkEvidence,
 } from "./work-briefs.types";
-import { PublicationPanel } from "./PublicationPanel";
+import { PublicationPanel, PublicationProgress } from "./PublicationPanel";
+import {
+  connectionTone,
+  providerLabel,
+  statusCopy,
+  type ConnectionStatus,
+  type IntegrationConnection,
+  type IntegrationProvider,
+} from "../integrations/connection-status";
 import "./work-briefs.css";
 
 type WorkBriefsPageProps = {
@@ -44,6 +50,42 @@ type WorkBriefsPageProps = {
 };
 
 type HttpError = Error & { status?: number };
+
+// Outcomes are toned so a completed action never renders as a warning.
+// `warning` asks the user to do something first; `danger` reports a failure.
+export type Notice = {
+  tone: "success" | "warning" | "danger";
+  text: string;
+} | null;
+
+type ConnectionSnapshot =
+  | { state: "loading" }
+  | { state: "unavailable" }
+  | { state: "ready"; byProvider: Record<IntegrationProvider, ConnectionStatus> };
+
+const PROVIDER_ORDER: IntegrationProvider[] = ["jira", "confluence"];
+
+function toConnectionSnapshot(
+  loaded: IntegrationConnection[],
+): ConnectionSnapshot {
+  if (!Array.isArray(loaded)) return { state: "unavailable" };
+  const statusOf = (provider: IntegrationProvider): ConnectionStatus =>
+    loaded.find((connection) => connection.provider === provider)?.status ??
+    "authorization_required";
+  return {
+    state: "ready",
+    byProvider: { jira: statusOf("jira"), confluence: statusOf("confluence") },
+  };
+}
+
+function connectionsNeedingAction(
+  snapshot: ConnectionSnapshot,
+): IntegrationProvider[] {
+  if (snapshot.state !== "ready") return [];
+  return PROVIDER_ORDER.filter(
+    (provider) => snapshot.byProvider[provider] !== "connected",
+  );
+}
 
 const blockReason = (code: BriefDraft["blockers"][number]["code"]) =>
   code === "ACCESS_CHANGED"
@@ -112,9 +154,12 @@ export function WorkBriefsPage({
   const [isLoadingConfluenceEvidence, setIsLoadingConfluenceEvidence] =
     useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<Notice>(null);
   const [conflict, setConflict] = useState(false);
   const [readiness, setReadiness] = useState<ReadinessAssessment | null>(null);
+  // Set when the draft is edited but not yet re-assessed. Without it the panel
+  // keeps advertising "게시 가능" for content the server has never checked.
+  const [readinessStale, setReadinessStale] = useState(false);
   const [isAssessingReadiness, setIsAssessingReadiness] = useState(false);
   const [publication, setPublication] = useState<BriefPublication | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -124,6 +169,50 @@ export function WorkBriefsPage({
     emptyPublicationApprovals,
   );
   const inFlightCommandKeyRef = useRef<Partial<Record<PublicationPhase, string>>>({});
+  const [connections, setConnections] = useState<ConnectionSnapshot>({
+    state: "loading",
+  });
+
+  const clearMessage = () => setMessage(null);
+  const notifySuccess = (text: string) => setMessage({ tone: "success", text });
+  const notifyWarning = (text: string) => setMessage({ tone: "warning", text });
+  const notifyFailure = (text: string) => setMessage({ tone: "danger", text });
+
+  // `request` is re-created on every parent render, so the connection lookup
+  // reads it through a ref instead of depending on its identity.
+  const requestRef = useRef(request);
+  useEffect(() => {
+    requestRef.current = request;
+  });
+
+  const loadConnections = useCallback(
+    () =>
+      requestRef.current<IntegrationConnection[]>("/integrations").then(
+        (loaded) => setConnections(toConnectionSnapshot(loaded)),
+        // An unverified connection is reported as unknown. This screen must
+        // never fall back to a healthy-looking state, because a stale
+        // "connected" badge is exactly what hides an expired token.
+        () => setConnections({ state: "unavailable" }),
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    void requestRef.current<IntegrationConnection[]>("/integrations").then(
+      (loaded) => {
+        if (isCurrent) setConnections(toConnectionSnapshot(loaded));
+      },
+      () => {
+        if (isCurrent) setConnections({ state: "unavailable" });
+      },
+    );
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const evidence = useMemo(
     () => [...jiraEvidence, ...confluenceEvidence],
@@ -153,11 +242,27 @@ export function WorkBriefsPage({
   const jiraSelectedCount = selectedEvidence.filter((item) => item.provider === "jira").length;
   const confluenceSelectedCount = selectedEvidence.length - jiraSelectedCount;
 
+  const connectionWarnings = useMemo(
+    () =>
+      connectionsNeedingAction(connections).map((provider) => ({
+        provider,
+        detail:
+          connections.state === "ready"
+            ? statusCopy[connections.byProvider[provider]].detail
+            : "",
+      })),
+    [connections],
+  );
+
   function applyDraft(nextDraft: BriefDraft) {
     setDraft(nextDraft);
     setEditingContent(nextDraft.content);
     setConflict(false);
+    // Content changed, so the previous assessment and every previewHash-bound
+    // approval are void. That reset is deliberate; only the *visibility* of
+    // already-executed steps is restored elsewhere.
     setReadiness(null);
+    setReadinessStale(false);
     setPublication(null);
     setPublicationPreviews({});
     setPublicationApprovals(emptyPublicationApprovals());
@@ -168,13 +273,13 @@ export function WorkBriefsPage({
   async function collectEvidence() {
     const normalizedKey = issueKey.trim().toUpperCase();
     if (!normalizedKey) {
-      setMessage("Jira 이슈 키를 입력하세요.");
+      notifyWarning("Jira 이슈 키를 입력하세요.");
       return;
     }
 
     try {
       setIsLoadingEvidence(true);
-      setMessage("");
+      clearMessage();
       const result = await request<EvidenceCollection>(
         `/work-items/jira/${encodeURIComponent(normalizedKey)}/context`,
       );
@@ -182,7 +287,7 @@ export function WorkBriefsPage({
         setJiraEvidence([]);
         setConfluenceEvidence([]);
         setSelectedEvidenceIds([]);
-        setMessage("현재 사용자 권한으로 이슈 근거를 읽을 수 없습니다.");
+        notifyFailure("현재 사용자 권한으로 이슈 근거를 읽을 수 없습니다.");
         return;
       }
       setIssueKey(normalizedKey);
@@ -198,14 +303,17 @@ export function WorkBriefsPage({
       );
       setSelectedEvidenceIds(result.evidence.map((item) => item.id));
       if (result.recommendationAccessStatus === "access_limited") {
-        setMessage(
+        notifyFailure(
           "Jira 근거를 불러왔습니다. Confluence 자동 추천은 현재 권한으로 확인할 수 없습니다.",
         );
       }
     } catch {
-      setMessage(
+      notifyFailure(
         "이슈 근거를 불러오지 못했습니다. 연결 상태와 권한을 확인하세요.",
       );
+      // An expired token usually surfaces here first, so re-read the connection
+      // state instead of leaving a stale badge next to the failure.
+      void loadConnections();
     } finally {
       setIsLoadingEvidence(false);
     }
@@ -216,17 +324,17 @@ export function WorkBriefsPage({
     const query = confluenceQuery.trim();
 
     if (!issueKey || jiraEvidence.length === 0) {
-      setMessage("먼저 Jira 이슈 근거를 조회하세요.");
+      notifyWarning("먼저 Jira 이슈 근거를 조회하세요.");
       return;
     }
     if (!spaceKey || !query) {
-      setMessage("Confluence space 키와 검색어를 입력하세요.");
+      notifyWarning("Confluence space 키와 검색어를 입력하세요.");
       return;
     }
 
     try {
       setIsLoadingConfluenceEvidence(true);
-      setMessage("");
+      clearMessage();
       const result = await request<EvidenceCollection>(
         `/work-items/confluence/spaces/${encodeURIComponent(spaceKey)}/search?q=${encodeURIComponent(query)}`,
       );
@@ -235,7 +343,7 @@ export function WorkBriefsPage({
         setSelectedEvidenceIds((current) =>
           current.filter((id) => !id.startsWith("confluence:")),
         );
-        setMessage("현재 사용자 권한으로 Confluence 근거를 읽을 수 없습니다.");
+        notifyFailure("현재 사용자 권한으로 Confluence 근거를 읽을 수 없습니다.");
         return;
       }
 
@@ -244,7 +352,7 @@ export function WorkBriefsPage({
         Array.from(new Set([...current, ...result.evidence.map((item) => item.id)])),
       );
     } catch {
-      setMessage(
+      notifyFailure(
         "Confluence 근거를 불러오지 못했습니다. 연결 상태와 허용 space를 확인하세요.",
       );
     } finally {
@@ -262,13 +370,13 @@ export function WorkBriefsPage({
 
   async function createDraft() {
     if (selectedEvidenceIds.length === 0) {
-      setMessage("브리프에 포함할 근거를 하나 이상 선택하세요.");
+      notifyWarning("브리프에 포함할 근거를 하나 이상 선택하세요.");
       return;
     }
 
     try {
       setIsSaving(true);
-      setMessage("");
+      clearMessage();
       applyDraft(
         await request<BriefDraft>("/brief-drafts", {
           method: "POST",
@@ -280,8 +388,8 @@ export function WorkBriefsPage({
         }),
       );
     } catch {
-      setMessage(
-        "브리프를 생성하지 못했습니다. AI 제외 사유와 연결 상태를 확인하세요.",
+      notifyFailure(
+        "브리프를 생성하지 못했습니다. 연결 상태와 선택한 근거의 접근 권한을 확인하세요.",
       );
     } finally {
       setIsSaving(false);
@@ -293,7 +401,7 @@ export function WorkBriefsPage({
 
     try {
       setIsSaving(true);
-      setMessage("");
+      clearMessage();
       applyDraft(
         await request<BriefDraft>(`/brief-drafts/${draft.id}`, {
           method: "PATCH",
@@ -303,14 +411,17 @@ export function WorkBriefsPage({
           }),
         }),
       );
+      notifySuccess(
+        "초안을 저장했습니다. 내용이 바뀌었으므로 준비성 점검과 게시 승인을 다시 진행하세요.",
+      );
     } catch (error) {
       if ((error as HttpError).status === 409) {
         setConflict(true);
-        setMessage(
+        notifyFailure(
           "다른 탭에서 먼저 저장했습니다. 최신 초안을 불러와 다시 검토하세요.",
         );
       } else {
-        setMessage(
+        notifyFailure(
           "저장하지 못했습니다. 모든 항목에 선택한 근거를 연결했는지 확인하세요.",
         );
       }
@@ -324,7 +435,7 @@ export function WorkBriefsPage({
 
     try {
       setIsSaving(true);
-      setMessage("");
+      clearMessage();
       applyDraft(
         await request<BriefDraft>(`/brief-drafts/${draft.id}/refresh`, {
           method: "POST",
@@ -334,11 +445,11 @@ export function WorkBriefsPage({
     } catch (error) {
       if ((error as HttpError).status === 409) {
         setConflict(true);
-        setMessage(
+        notifyFailure(
           "초안이 다른 탭에서 변경되었습니다. 최신 버전을 불러오세요.",
         );
       } else {
-        setMessage("근거를 새로 고치지 못했습니다.");
+        notifyFailure("근거를 새로 고치지 못했습니다.");
       }
     } finally {
       setIsSaving(false);
@@ -349,9 +460,9 @@ export function WorkBriefsPage({
     if (!draft) return;
     try {
       applyDraft(await request<BriefDraft>(`/brief-drafts/${draft.id}`));
-      setMessage("최신 초안을 불러왔습니다. 변경 내용을 다시 검토하세요.");
+      notifySuccess("최신 초안을 불러왔습니다. 변경 내용을 다시 검토하세요.");
     } catch {
-      setMessage("최신 초안을 불러오지 못했습니다.");
+      notifyFailure("최신 초안을 불러오지 못했습니다.");
     }
   }
 
@@ -360,14 +471,15 @@ export function WorkBriefsPage({
 
     try {
       setIsAssessingReadiness(true);
-      setMessage("");
+      clearMessage();
       setReadiness(
         await request<ReadinessAssessment>(
           `/brief-drafts/${draft.id}/readiness`,
         ),
       );
+      setReadinessStale(false);
     } catch {
-      setMessage(
+      notifyFailure(
         "준비성 점검을 완료하지 못했습니다. 연결 상태와 권한을 확인하세요.",
       );
     } finally {
@@ -408,15 +520,15 @@ export function WorkBriefsPage({
 
   async function preparePublicationPhase(phase: PublicationPhase) {
     if (!draft || !readiness?.publishAllowed) {
-      setMessage("준비성 점검을 통과한 초안만 게시 미리보기를 열 수 있습니다.");
+      notifyWarning("준비성 점검을 통과한 초안만 게시 미리보기를 열 수 있습니다.");
       return;
     }
     if (publication?.status === "PUBLISHING") {
-      setMessage("다른 요청이 게시를 처리 중입니다. 완료 상태가 갱신될 때까지 기다리세요.");
+      notifyWarning("다른 요청이 게시를 처리 중입니다. 완료 상태가 갱신될 때까지 기다리세요.");
       return;
     }
     if (phase !== "confluence" && !publication) {
-      setMessage("Confluence 게시가 완료된 후 다음 단계 미리보기를 열 수 있습니다.");
+      notifyWarning("Confluence 게시가 완료된 후 다음 단계 미리보기를 열 수 있습니다.");
       return;
     }
 
@@ -430,16 +542,16 @@ export function WorkBriefsPage({
 
     try {
       setIsLoadingPublicationPreview(true);
-      setMessage("");
+      clearMessage();
       const preview = await request<PublicationPreview>(path);
       setPublicationPreviews((current) => ({ ...current, [phase]: preview }));
       setPublicationApprovals((current) => ({ ...current, [phase]: false }));
     } catch (error) {
       if ((error as HttpError).status === 409) {
         setConflict(true);
-        setMessage("미리보기 대상 또는 초안 버전이 바뀌었습니다. 최신 초안을 다시 검토하세요.");
+        notifyFailure("미리보기 대상 또는 초안 버전이 바뀌었습니다. 최신 초안을 다시 검토하세요.");
       } else {
-        setMessage("게시 미리보기를 준비하지 못했습니다. 연결 권한과 준비성 상태를 확인하세요.");
+        notifyFailure("게시 미리보기를 준비하지 못했습니다. 연결 권한과 준비성 상태를 확인하세요.");
       }
     } finally {
       setIsLoadingPublicationPreview(false);
@@ -448,20 +560,20 @@ export function WorkBriefsPage({
 
   async function executePublicationPhase(phase: PublicationPhase) {
     if (!draft || !readiness?.publishAllowed) {
-      setMessage("준비성 점검을 통과한 초안만 게시할 수 있습니다.");
+      notifyWarning("준비성 점검을 통과한 초안만 게시할 수 있습니다.");
       return;
     }
     if (publication?.status === "PUBLISHING") {
-      setMessage("다른 요청이 게시를 처리 중입니다. 현재 상태가 갱신될 때까지 기다리세요.");
+      notifyWarning("다른 요청이 게시를 처리 중입니다. 현재 상태가 갱신될 때까지 기다리세요.");
       return;
     }
     const preview = publicationPreviews[phase];
     if (!preview) {
-      setMessage("승인 전에 현재 단계의 미리보기를 열어야 합니다.");
+      notifyWarning("승인 전에 현재 단계의 미리보기를 열어야 합니다.");
       return;
     }
     if (!publicationApprovals[phase]) {
-      setMessage("현재 단계의 미리보기를 검토한 뒤 승인하세요.");
+      notifyWarning("현재 단계의 미리보기를 검토한 뒤 승인하세요.");
       return;
     }
 
@@ -491,7 +603,7 @@ export function WorkBriefsPage({
 
     try {
       setIsPublishing(true);
-      setMessage("");
+      clearMessage();
       const nextPublication = await request<BriefPublication>(path, {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
@@ -506,19 +618,26 @@ export function WorkBriefsPage({
         }));
         resetNeedsReviewState(nextPublication);
       }
-      setMessage(
-        nextPublication.status === "PARTIALLY_PUBLISHED" || nextPublication.status === "NEEDS_REVIEW"
-          ? `${publicationPhaseLabel(phase)} 단계가 일부 완료되었습니다. 미리보기를 다시 검토한 뒤 복구하세요.`
-          : nextPublication.executionMode === "real"
-          ? `${publicationPhaseLabel(phase)} 단계를 외부 도구에 반영했습니다.`
-          : `${publicationPhaseLabel(phase)} 단계를 mock 모드로 기록했습니다.`,
-      );
+      if (
+        nextPublication.status === "PARTIALLY_PUBLISHED" ||
+        nextPublication.status === "NEEDS_REVIEW"
+      ) {
+        notifyWarning(
+          `${publicationPhaseLabel(phase)} 단계가 일부 완료되었습니다. 미리보기를 다시 검토한 뒤 복구하세요.`,
+        );
+      } else {
+        notifySuccess(
+          nextPublication.executionMode === "real"
+            ? `${publicationPhaseLabel(phase)} 단계를 외부 도구에 반영했습니다.`
+            : `${publicationPhaseLabel(phase)} 단계를 mock 모드로 기록했습니다.`,
+        );
+      }
     } catch (error) {
       if ((error as HttpError).status === 409) {
         setConflict(true);
-        setMessage("현재 승인으로는 게시할 수 없습니다. 해당 단계의 미리보기를 다시 열고 새로 승인하세요.");
+        notifyFailure("현재 승인으로는 게시할 수 없습니다. 해당 단계의 미리보기를 다시 열고 새로 승인하세요.");
       } else {
-        setMessage(`${publicationPhaseLabel(phase)} 반영을 확인하지 못했습니다. 중복 생성을 막기 위해 미리보기를 다시 열어 상태를 확인한 뒤 재시도하세요.`);
+        notifyFailure(`${publicationPhaseLabel(phase)} 반영을 확인하지 못했습니다. 중복 생성을 막기 위해 미리보기를 다시 열어 상태를 확인한 뒤 재시도하세요.`);
       }
     } finally {
       delete inFlightCommandKeyRef.current[phase];
@@ -532,6 +651,7 @@ export function WorkBriefsPage({
 
   function updateContent(updater: (current: BriefContent) => BriefContent) {
     setEditingContent((current) => (current ? updater(current) : current));
+    setReadinessStale(true);
   }
 
   const editingEvidence = draft?.evidence ?? selectedEvidence;
@@ -547,7 +667,7 @@ export function WorkBriefsPage({
           <form className="work-brief-issue-form" onSubmit={(event) => { event.preventDefault(); void collectEvidence(); }}>
             <label htmlFor="brief-issue-key">이슈 키</label>
             <div>
-              <input id="brief-issue-key" value={issueKey} placeholder="이슈 키 입력" onChange={(event) => setIssueKey(event.target.value)} />
+              <input id="brief-issue-key" value={issueKey} placeholder="예: PROJ-284" onChange={(event) => setIssueKey(event.target.value)} />
               <Button type="submit" size="sm" disabled={isLoadingEvidence}>{isLoadingEvidence ? "조회 중" : "불러오기"}</Button>
             </div>
           </form>
@@ -557,7 +677,6 @@ export function WorkBriefsPage({
           <div className="work-brief-source-list">
             <Checkbox checked={showJira} onChange={(event) => setShowJira(event.target.checked)} label={<><IconBrandJira size={17} /> Jira</>} description={`${jiraEvidence.length}개 항목`} />
             <Checkbox checked={showConfluence} onChange={(event) => setShowConfluence(event.target.checked)} label={<><IconStack2 size={17} /> Confluence</>} description={`${confluenceEvidence.length}개 문서`} />
-            <Checkbox disabled label={<><IconFileText size={17} /> 내 노트</>} description="연결된 항목 없음" />
           </div>
           <div className="work-brief-rail-note">
             <strong>권한 범위</strong>
@@ -575,7 +694,11 @@ export function WorkBriefsPage({
             <Button variant="secondary" size="sm" leadingIcon={<IconRefresh size={16} />} onClick={() => void collectEvidence()} disabled={isLoadingEvidence}>새로 고침</Button>
           </header>
 
-          {message ? <p className="work-brief-message" role="alert">{message}</p> : null}
+          {message ? (
+            <Alert tone={message.tone} className="work-brief-message">
+              {message.text}
+            </Alert>
+          ) : null}
 
           <div className="work-brief-filters">
             <label><span>문서 유형</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}><option value="all">전체</option><option value="jira">Jira</option><option value="confluence">Confluence</option></select></label>
@@ -602,13 +725,23 @@ export function WorkBriefsPage({
               onChange={(event) => setSelectedEvidenceIds((current) => event.target.checked ? Array.from(new Set([...current, ...filteredEvidence.map((item) => item.id)])) : current.filter((id) => !filteredEvidence.some((item) => item.id === id)))}
               label={`${filteredEvidence.length}개 근거`}
             />
-            <span>업데이트</span><span>상태</span><span className="sr-only">행 메뉴</span>
+            <span>업데이트</span><span>상태</span>
           </div>
 
           {filteredEvidence.length > 0 ? (["jira", "confluence"] as const).map((provider) => {
             const items = filteredEvidence.filter((item) => item.provider === provider);
             return items.length ? <EvidenceWorkspaceGroup key={provider} provider={provider} evidence={items} selectedEvidenceIds={selectedEvidenceIds} onToggle={toggleEvidence} /> : null;
-          }) : <div className="work-brief-empty"><strong>표시할 근거가 없습니다.</strong><span>검색어나 소스 필터를 조정하세요.</span></div>}
+          }) : evidence.length === 0 ? (
+            <div className="work-brief-empty">
+              <strong>Jira 이슈 키를 입력하고 불러오기를 누르세요.</strong>
+              <span>예: PROJ-284 · 현재 계정 권한으로 읽을 수 있는 근거만 표시합니다.</span>
+            </div>
+          ) : (
+            <div className="work-brief-empty">
+              <strong>조건에 맞는 근거가 없습니다.</strong>
+              <span>검색어나 소스 필터를 조정하세요.</span>
+            </div>
+          )}
         </section>
 
         <aside className="work-brief-selection" aria-label="선택한 근거">
@@ -623,13 +756,32 @@ export function WorkBriefsPage({
             ))}
           </ul>
           <section className="work-brief-selection-summary"><h3>소스별 항목</h3><div><span>Jira</span><strong>{jiraSelectedCount}</strong></div><div><span>Confluence</span><strong>{confluenceSelectedCount}</strong></div></section>
-          <section className="work-brief-connection"><StatusIndicator tone="success">연결 정상</StatusIndicator><p>Jira와 Confluence 권한을 확인했습니다.</p><button type="button" onClick={onOpenIntegrations}>연동 설정</button></section>
+          <ConnectionSummary snapshot={connections} onOpenIntegrations={onOpenIntegrations} />
+          {connectionWarnings.length > 0 && (
+            <Alert tone="warning" className="work-brief-connection-warning">
+              <ul>
+                {connectionWarnings.map((warning) => (
+                  <li key={warning.provider}>
+                    <strong>{providerLabel[warning.provider]}</strong> {warning.detail}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          )}
           <footer><Button variant="secondary" onClick={() => setSelectedEvidenceIds([])}>전체 해제</Button><Button onClick={() => void createDraft()} disabled={isSaving || selectedEvidence.length === 0}>{isSaving ? "생성 중" : "브리프 생성"}</Button></footer>
         </aside>
       </div>
 
       {draft && (
         <section className="work-brief-editor ds-card" aria-live="polite">
+          {/* The save, readiness and publish controls live at the bottom of the
+              page, far from the header banner. Repeating the outcome here keeps
+              a failed save in the same viewport as the button that caused it. */}
+          {message ? (
+            <Alert tone={message.tone} className="work-brief-message">
+              {message.text}
+            </Alert>
+          ) : null}
           <header className="work-brief-draft-header">
             <div>
               <p className="eyebrow">초안 v{draft.optimisticVersion}</p>
@@ -679,12 +831,21 @@ export function WorkBriefsPage({
             </Alert>
           ))}
 
-          {readiness && <ReadinessPanel assessment={readiness} />}
+          {readiness && (
+            <ReadinessPanel assessment={readiness} stale={readinessStale} />
+          )}
+
+          {/* Approval UI stays gated on a fresh readiness pass, but progress
+              that already happened is always visible. */}
+          {!readiness && publication && (
+            <PublicationProgress publication={publication} />
+          )}
 
           {readiness && (
             <PublicationPanel
               draft={draft}
               readiness={readiness}
+              readinessStale={readinessStale}
               publication={publication}
               previews={publicationPreviews}
               approvals={publicationApprovals}
@@ -782,6 +943,43 @@ export function WorkBriefsPage({
   );
 }
 
+function ConnectionSummary({
+  snapshot,
+  onOpenIntegrations,
+}: {
+  snapshot: ConnectionSnapshot;
+  onOpenIntegrations?: () => void;
+}) {
+  return (
+    <section className="work-brief-connection">
+      <h3 className="sr-only">Jira · Confluence 연결 상태</h3>
+      {snapshot.state === "ready" ? (
+        <ul className="work-brief-connection-list">
+          {PROVIDER_ORDER.map((provider) => {
+            const status = snapshot.byProvider[provider];
+            return (
+              <li key={provider}>
+                <StatusIndicator tone={connectionTone(status)}>
+                  {providerLabel[provider]} · {statusCopy[status].label}
+                </StatusIndicator>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <StatusIndicator tone="neutral">
+          {snapshot.state === "loading"
+            ? "연결 상태 확인 중"
+            : "연결 상태를 확인할 수 없습니다"}
+        </StatusIndicator>
+      )}
+      <button type="button" onClick={onOpenIntegrations}>
+        연동 설정
+      </button>
+    </section>
+  );
+}
+
 function EvidenceWorkspaceGroup({
   provider,
   evidence,
@@ -804,29 +1002,33 @@ function EvidenceWorkspaceGroup({
         <span>{evidence.length}</span>
       </header>
       <ul>
-        {evidence.map((item, index) => {
-          const state = item.state ?? (index === evidence.length - 1 ? "review" : "current");
-          return (
-            <li key={item.id} className={selectedEvidenceIds.includes(item.id) ? "is-selected" : ""}>
-              <Checkbox checked={selectedEvidenceIds.includes(item.id)} onChange={() => onToggle(item.id)} label={<span className="sr-only">{item.title} 선택</span>} />
-              <div className="work-brief-evidence-copy">
-                <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
-                <span>{item.location ?? (provider === "jira" ? `프로젝트 / ${item.sourceId}` : `문서 / ${item.sourceId}`)}</span>
-                <div>
-                  {(item.tags ?? (provider === "jira" ? ["이슈"] : ["문서"])).slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}
-                  {item.recommendationReasons?.length ? (
-                    <em className="work-brief-recommendation">
-                      추천 · {item.recommendationReasons.map(recommendationLabel).join(", ")}
-                    </em>
-                  ) : null}
-                </div>
+        {evidence.map((item) => (
+          <li key={item.id} className={selectedEvidenceIds.includes(item.id) ? "is-selected" : ""}>
+            <Checkbox checked={selectedEvidenceIds.includes(item.id)} onChange={() => onToggle(item.id)} label={<span className="sr-only">{item.title} 선택</span>} />
+            <div className="work-brief-evidence-copy">
+              <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+              <span>{item.location ?? (provider === "jira" ? `프로젝트 / ${item.sourceId}` : `문서 / ${item.sourceId}`)}</span>
+              <div>
+                {(item.tags ?? (provider === "jira" ? ["이슈"] : ["문서"])).slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}
+                {item.recommendationReasons?.length ? (
+                  <em className="work-brief-recommendation">
+                    추천 · {item.recommendationReasons.map(recommendationLabel).join(", ")}
+                  </em>
+                ) : null}
               </div>
-              <div className="work-brief-evidence-date"><strong>{item.updatedAt ? new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit" }).format(new Date(item.updatedAt)) : `07.${String(29 - index).padStart(2, "0")}`}</strong><span>v{item.version}</span></div>
-              <StatusIndicator tone={state === "current" ? "success" : state === "review" ? "warning" : "neutral"}>{state === "current" ? "최신" : state === "review" ? "확인 필요" : "제한"}</StatusIndicator>
-              <IconButton label={`${item.title} 메뉴`}><IconDotsVertical size={17} /></IconButton>
-            </li>
-          );
-        })}
+            </div>
+            {/* Absent metadata is shown as absent. Deriving a plausible date or
+                review state here would put facts on screen that no source
+                asserted. */}
+            <div className="work-brief-evidence-date">
+              <strong>{item.updatedAt ? new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit" }).format(new Date(item.updatedAt)) : "—"}</strong>
+              <span>v{item.version}</span>
+            </div>
+            {item.state ? (
+              <StatusIndicator tone={item.state === "current" ? "success" : item.state === "review" ? "warning" : "neutral"}>{item.state === "current" ? "최신" : item.state === "review" ? "확인 필요" : "제한"}</StatusIndicator>
+            ) : null}
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -877,6 +1079,23 @@ const readinessTone = (
 ): "success" | "warning" | "danger" =>
   status === "READY" ? "success" : status === "BLOCKED" ? "danger" : "warning";
 
+// Short category shown in place of the raw finding code. The code itself stays
+// reachable through the row's `title` for support enquiries.
+const readinessFindingTitle: Record<
+  ReadinessAssessment["findings"][number]["code"],
+  string
+> = {
+  COVERAGE_MISSING: "근거 연결",
+  CREATE_FIELD_MISSING: "Jira 필수 field",
+  CREATE_METADATA_ACCESS_LIMITED: "권한 확인",
+  CREATE_METADATA_UNAVAILABLE: "Jira metadata",
+  UNRESOLVED_BLOCKER: "미해결 blocker",
+  ACCESS_LIMITED_DEPENDENCY: "권한 확인",
+  FRESHNESS_REVIEW_REQUIRED: "근거 최신성",
+  ACCESS_CHANGED: "접근 권한 변경",
+  PROFILE_CHANGED: "연동 프로필",
+};
+
 function readinessFindingDescription(
   finding: ReadinessAssessment["findings"][number],
 ): string {
@@ -908,21 +1127,48 @@ function readinessFindingDescription(
   }
 }
 
-function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
+function ReadinessPanel({
+  assessment,
+  stale,
+}: {
+  assessment: ReadinessAssessment;
+  stale: boolean;
+}) {
   return (
     <section
-      className={`work-brief-readiness ds-card readiness-${assessment.status.toLowerCase()}`}
+      className={`work-brief-readiness ds-card readiness-${stale ? "needs_attention" : assessment.status.toLowerCase()}`}
       aria-label="통합 준비성 점검"
     >
       <header>
         <div>
           <p className="eyebrow">읽기 전용 점검</p>
-          <h3>{readinessStatusLabel[assessment.status]}</h3>
+          <h3>
+            {stale ? "저장 후 다시 점검 필요" : readinessStatusLabel[assessment.status]}
+          </h3>
         </div>
-        <Badge tone={assessment.publishAllowed ? "success" : readinessTone(assessment.status)}>
-          {assessment.publishAllowed ? "게시 가능" : "게시 차단"}
+        {/* A stale assessment describes content the server has not seen. */}
+        <Badge
+          tone={
+            stale
+              ? "warning"
+              : assessment.publishAllowed
+                ? "success"
+                : readinessTone(assessment.status)
+          }
+        >
+          {stale
+            ? "재점검 필요"
+            : assessment.publishAllowed
+              ? "게시 가능"
+              : "게시 차단"}
         </Badge>
       </header>
+      {stale && (
+        <Alert tone="warning" className="work-brief-blocker">
+          편집한 내용은 아직 점검하지 않았습니다. 초안을 저장하고 준비성 점검을
+          다시 실행하세요.
+        </Alert>
+      )}
       {assessment.findings.length === 0 ? (
         <p>
           요구사항, 하위 작업, 검증 근거 및 Jira 생성 필수 field를 확인했습니다.
@@ -930,8 +1176,11 @@ function ReadinessPanel({ assessment }: { assessment: ReadinessAssessment }) {
       ) : (
         <ul>
           {assessment.findings.map((finding, index) => (
-            <li key={`${finding.code}-${finding.fieldId ?? index}`}>
-              <strong>{finding.code}</strong>
+            <li
+              key={`${finding.code}-${finding.fieldId ?? index}`}
+              title={finding.code}
+            >
+              <strong>{readinessFindingTitle[finding.code]}</strong>
               <span>{readinessFindingDescription(finding)}</span>
             </li>
           ))}
@@ -990,9 +1239,14 @@ function EvidenceList({
             </p>
           </div>
           {item.aiStatus === "excluded" && (
-            <Badge tone="warning" className="work-brief-ai-excluded">
-              AI 제외
-            </Badge>
+            <span className="work-brief-ai-excluded-cell">
+              <Badge tone="warning" className="work-brief-ai-excluded">
+                AI 제외
+              </Badge>
+              <small>
+                발췌가 비었거나 DLP 규칙에 걸려 AI 요청에 포함하지 않았습니다.
+              </small>
+            </span>
           )}
         </li>
       ))}
@@ -1056,7 +1310,8 @@ function CitationEditor({
             key={item.id}
             checked={citation.evidenceIds.includes(item.id)}
             onChange={() => toggleCitation(item.id)}
-            label={item.id}
+            label={item.title}
+            description={`${providerLabel[item.provider]} · ${item.sourceId}`}
           />
         ))}
       </fieldset>
