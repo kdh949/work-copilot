@@ -21,7 +21,7 @@ describe('AtlassianWriteClientService', () => {
     );
 
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',
@@ -38,6 +38,21 @@ describe('AtlassianWriteClientService', () => {
     );
   });
 
+  it('returns an explicit empty-success result for an object-creation contract', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(null, { status: 201 }),
+    );
+
+    await expect(
+      service.postJsonExpectObject(
+        new URL('https://jira.example.test/rest/api/2/issue'),
+        'https://jira.example.test/',
+        'user-token',
+        { fields: {} },
+      ),
+    ).resolves.toEqual({ status: 'ok_empty' });
+  });
+
   it('rejects a redirect instead of forwarding a bearer token', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(null, {
@@ -47,7 +62,7 @@ describe('AtlassianWriteClientService', () => {
     );
 
     await expect(
-      service.putJson(
+      service.putJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue/1'),
         'https://jira.example.test/',
         'user-token',
@@ -64,15 +79,36 @@ describe('AtlassianWriteClientService', () => {
       );
 
       await expect(
-        service.putJson(
+        service.putJsonAllowEmpty(
           new URL('https://jira.example.test/rest/api/2/issue/1/properties/key'),
           'https://jira.example.test/',
           'user-token',
           { value: 'safe' },
         ),
-      ).resolves.toEqual({ status: 'ok', body: {} });
+      ).resolves.toEqual({ status: 'ok_empty' });
     },
   );
+
+  it('separates a definitive 4xx refusal from an ambiguous 5xx outcome', async () => {
+    const post = () =>
+      service.postJsonExpectObject(
+        new URL('https://jira.example.test/rest/api/2/issue'),
+        'https://jira.example.test/',
+        'user-token',
+        { fields: {} },
+      );
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 400 }))
+      // A 5xx can be returned after the write already landed, so the caller
+      // must reconcile rather than treat it as "not created".
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 502 }));
+
+    await expect(post()).resolves.toEqual({ status: 'rejected' });
+    await expect(post()).resolves.toEqual({ status: 'unavailable' });
+    await expect(post()).resolves.toEqual({ status: 'unavailable' });
+  });
 
   it('rejects malformed or oversized successful response bodies', async () => {
     jest
@@ -88,7 +124,7 @@ describe('AtlassianWriteClientService', () => {
       );
 
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',
@@ -96,7 +132,7 @@ describe('AtlassianWriteClientService', () => {
       ),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(
-      service.postJson(
+      service.postJsonExpectObject(
         new URL('https://jira.example.test/rest/api/2/issue'),
         'https://jira.example.test/',
         'user-token',

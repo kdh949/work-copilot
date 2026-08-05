@@ -10,7 +10,20 @@ const REQUEST_TIMEOUT_MS = 5_000;
 
 export type ProviderWriteResult =
   | { status: 'ok'; body: Record<string, unknown> }
-  | { status: 'access_limited' | 'not_found' | 'conflict' | 'rejected' };
+  | { status: 'ok_empty' }
+  /**
+   * `rejected` is a definitive refusal by the provider (4xx): the object was
+   * not created. `unavailable` is a 5xx, which the provider may have returned
+   * after the write already landed, so callers must treat it as ambiguous.
+   */
+  | {
+      status:
+        | 'access_limited'
+        | 'not_found'
+        | 'conflict'
+        | 'rejected'
+        | 'unavailable';
+    };
 
 /**
  * Narrow write-only counterpart to the read adapter.  It keeps provider URLs,
@@ -21,7 +34,7 @@ export type ProviderWriteResult =
 export class AtlassianWriteClientService {
   constructor(private readonly urlPolicy: IntegrationProfileUrlPolicy) {}
 
-  async postJson(
+  async postJsonExpectObject(
     url: URL,
     baseUrl: string,
     accessToken: string,
@@ -30,7 +43,25 @@ export class AtlassianWriteClientService {
     return this.writeJson(url, baseUrl, accessToken, 'POST', body);
   }
 
-  async putJson(
+  async postJsonAllowEmpty(
+    url: URL,
+    baseUrl: string,
+    accessToken: string,
+    body: Record<string, unknown>,
+  ): Promise<ProviderWriteResult> {
+    return this.writeJson(url, baseUrl, accessToken, 'POST', body);
+  }
+
+  async putJsonExpectObject(
+    url: URL,
+    baseUrl: string,
+    accessToken: string,
+    body: Record<string, unknown>,
+  ): Promise<ProviderWriteResult> {
+    return this.writeJson(url, baseUrl, accessToken, 'PUT', body);
+  }
+
+  async putJsonAllowEmpty(
     url: URL,
     baseUrl: string,
     accessToken: string,
@@ -79,14 +110,17 @@ export class AtlassianWriteClientService {
     if (response.status >= 300 && response.status < 400) {
       throw new BadRequestException('Integration redirect is invalid.');
     }
+    if (response.status >= 500) {
+      return { status: 'unavailable' };
+    }
     if (!response.ok) {
       return { status: 'rejected' };
     }
 
-    return { status: 'ok', body: await this.readJson(response) };
+    return this.readJson(response);
   }
 
-  private async readJson(response: Response): Promise<Record<string, unknown>> {
+  private async readJson(response: Response): Promise<ProviderWriteResult> {
     const contentLength = Number(response.headers.get('content-length'));
     if (
       Number.isFinite(contentLength) &&
@@ -109,12 +143,8 @@ export class AtlassianWriteClientService {
       );
     }
 
-    // Several Jira write resources acknowledge a successful mutation with an
-    // empty 200/201/204 response.  The caller still validates fields required
-    // for its own operation, but an empty success body must not turn a
-    // completed provider write into a retryable local failure.
     if (text.trim().length === 0) {
-      return {};
+      return { status: 'ok_empty' };
     }
 
     try {
@@ -122,7 +152,7 @@ export class AtlassianWriteClientService {
       if (!this.isRecord(body)) {
         throw new Error('not a JSON object');
       }
-      return body;
+      return { status: 'ok', body };
     } catch {
       throw new ServiceUnavailableException('Integration response is invalid.');
     }

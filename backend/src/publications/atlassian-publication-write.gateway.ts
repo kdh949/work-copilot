@@ -4,8 +4,14 @@ import type {
   ChildTaskTemplate,
   IntegrationProfile,
 } from '../integrations/profiles/entities/integration-profile.entity';
-import { AtlassianReadClientService } from '../work-items/atlassian-read-client.service';
-import { AtlassianWriteClientService } from '../work-items/atlassian-write-client.service';
+import {
+  AtlassianReadClientService,
+  type ProviderReadResult,
+} from '../work-items/atlassian-read-client.service';
+import {
+  AtlassianWriteClientService,
+  type ProviderWriteResult,
+} from '../work-items/atlassian-write-client.service';
 import { IntegrationAccessPolicyService } from '../work-items/integration-access-policy.service';
 import type {
   BriefChildTask,
@@ -14,8 +20,10 @@ import type {
 } from '../work-briefs/brief-draft.types';
 import {
   PublicationGatewayError,
+  type ChildTaskReconciliationEntry,
   type PublicationWriteGateway,
   type PublicationWriteResult,
+  type ReconciliationResult,
 } from './publication-write-gateway';
 import { PublicationRendererService } from './publication-renderer.service';
 import {
@@ -41,13 +49,21 @@ type ConfluencePage = {
   id: string;
   version: string;
   url: string;
+  /** Null when the provider response carried no usable title. */
+  title: string | null;
 };
+
+type PageContinuation = 'yes' | 'no' | 'invalid';
+
+type IssueProperty =
+  | { state: 'found'; value: Record<string, unknown> }
+  | { state: 'absent' }
+  | { state: 'unknown' };
 
 /**
  * Real, user-context-only publication adapter for Jira and Confluence Data
- * Center. It intentionally persists no provider response body and uses a
- * deterministic Confluence title plus Jira markers for reconciliation after
- * an ambiguous network failure.
+ * Center. It persists only stable provider identifiers and uses deterministic
+ * markers for recovery after a response is lost.
  */
 @Injectable()
 export class AtlassianPublicationWriteGateway implements PublicationWriteGateway {
@@ -90,15 +106,22 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         accessToken,
         input.existingContentId,
       );
-      if (!existing) {
-        this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+      if (existing.status === 'found') {
+        // The title carries this revision's content marker. A different title
+        // means the stored page does not hold what we are about to record, so
+        // reporting success would attach a content hash the page never had.
+        if (
+          existing.value.title !== null &&
+          existing.value.title !== pageTitle
+        ) {
+          this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+        }
+        return this.confluenceResult(existing.value, rendered.contentHash);
       }
-      return {
-        providerObjectId: existing.id,
-        providerObjectVersion: existing.version,
-        providerUrl: existing.url,
-        contentHash: rendered.contentHash,
-      };
+      if (existing.status === 'indeterminate') {
+        this.failReconciliation();
+      }
+      this.fail('CONFLUENCE_VERSION_CONFLICT', false);
     }
 
     const parent = await this.readConfluenceParent(
@@ -112,64 +135,88 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       parent.id,
       pageTitle,
     );
-    if (reconciled) {
-      return {
-        providerObjectId: reconciled.id,
-        providerObjectVersion: reconciled.version,
-        providerUrl: reconciled.url,
-        contentHash: rendered.contentHash,
-      };
+    if (reconciled.status === 'found') {
+      return this.confluenceResult(reconciled.value, rendered.contentHash);
+    }
+    if (reconciled.status === 'indeterminate') {
+      this.failReconciliation();
     }
 
-    const created = await this.writeClient.postJson(
-      this.accessPolicy.providerUrl(
-        input.profile,
-        'confluence',
-        'rest/api/content',
-      ),
-      this.accessPolicy.providerBaseUrl(input.profile, 'confluence'),
-      accessToken,
-      {
-        type: 'page',
-        title: pageTitle,
-        space: { key: parent.spaceKey },
-        ancestors: [{ id: parent.id }],
-        body: {
-          storage: {
-            value: rendered.storageBody,
-            representation: 'storage',
-          },
+    const createBody = {
+      type: 'page',
+      title: pageTitle,
+      space: { key: parent.spaceKey },
+      ancestors: [{ id: parent.id }],
+      body: {
+        storage: {
+          value: rendered.storageBody,
+          representation: 'storage',
         },
       },
-    );
-    if (created.status !== 'ok') {
-      const recovered = await this.findConfluencePageByTitle(
+    };
+    let created: ProviderWriteResult;
+    try {
+      created = await this.writeClient.postJsonExpectObject(
+        this.accessPolicy.providerUrl(
+          input.profile,
+          'confluence',
+          'rest/api/content',
+        ),
+        this.accessPolicy.providerBaseUrl(input.profile, 'confluence'),
+        accessToken,
+        createBody,
+      );
+    } catch {
+      return this.reconcileAfterUncertainConfluenceCreate(
         input.profile,
         accessToken,
         parent.id,
         pageTitle,
+        rendered.contentHash,
       );
-      if (recovered) {
-        return {
-          providerObjectId: recovered.id,
-          providerObjectVersion: recovered.version,
-          providerUrl: recovered.url,
-          contentHash: rendered.contentHash,
-        };
-      }
-      if (created.status === 'conflict') {
-        this.fail('CONFLUENCE_VERSION_CONFLICT', false);
-      }
-      this.fail('CONFLUENCE_WRITE_FAILED', created.status === 'rejected');
     }
 
-    const page = this.confluencePage(input.profile, created.body);
-    return {
-      providerObjectId: page.id,
-      providerObjectVersion: page.version,
-      providerUrl: page.url,
-      contentHash: rendered.contentHash,
-    };
+    const createdPage =
+      created.status === 'ok'
+        ? this.confluencePageFromBody(input.profile, created.body)
+        : null;
+    if (createdPage) {
+      return this.confluenceResult(createdPage, rendered.contentHash);
+    }
+
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
+      return this.reconcileAfterUncertainConfluenceCreate(
+        input.profile,
+        accessToken,
+        parent.id,
+        pageTitle,
+        rendered.contentHash,
+      );
+    }
+
+    const recovered = await this.findConfluencePageByTitle(
+      input.profile,
+      accessToken,
+      parent.id,
+      pageTitle,
+    );
+    if (recovered.status === 'found') {
+      return this.confluenceResult(recovered.value, rendered.contentHash);
+    }
+    if (recovered.status === 'indeterminate') {
+      this.failReconciliation();
+    }
+    if (created.status === 'conflict') {
+      this.fail('CONFLUENCE_VERSION_CONFLICT', false);
+    }
+    if (created.status === 'access_limited') {
+      this.failReconciliation();
+    }
+    this.fail('CONFLUENCE_WRITE_FAILED', created.status === 'rejected');
   }
 
   async upsertJiraRemoteLink(
@@ -191,62 +238,77 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       'jira',
       `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/remotelink?globalId=${encodeURIComponent(globalId)}`,
     );
-    const existing = await this.readClient.getJson(
-      endpoint,
-      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
-      accessToken,
-    );
-    if (existing.status === 'ok') {
-      const existingId = this.identifier(existing.body.id);
-      if (existingId) {
-        return { providerObjectId: existingId, providerUrl: linkUrl };
-      }
+    const existing = await this.findRemoteLink(endpoint, input.profile, accessToken);
+    if (existing.status === 'found') {
+      return { providerObjectId: existing.value, providerUrl: linkUrl };
     }
-    if (existing.status === 'access_limited') {
-      this.fail('JIRA_REMOTE_LINK_FAILED', false);
+    if (existing.status === 'indeterminate') {
+      this.failReconciliation();
     }
 
-    const created = await this.writeClient.postJson(
-      this.accessPolicy.providerUrl(
-        input.profile,
-        'jira',
-        `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/remotelink`,
-      ),
-      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
-      accessToken,
-      {
-        globalId,
-        application: {
-          type: 'com.dh.work-copilot',
-          name: 'Work Copilot',
-        },
-        relationship: 'documents',
-        object: {
-          url: linkUrl,
-          title: this.plainText(input.confluenceTitle, 255),
-        },
+    const createBody = {
+      globalId,
+      application: {
+        type: 'com.dh.work-copilot',
+        name: 'Work Copilot',
       },
-    );
-    if (created.status !== 'ok') {
-      const reconciled = await this.readClient.getJson(
-        endpoint,
+      relationship: 'documents',
+      object: {
+        url: linkUrl,
+        title: this.plainText(input.confluenceTitle, 255),
+      },
+    };
+    let created: ProviderWriteResult;
+    try {
+      created = await this.writeClient.postJsonExpectObject(
+        this.accessPolicy.providerUrl(
+          input.profile,
+          'jira',
+          `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/remotelink`,
+        ),
         this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
         accessToken,
+        createBody,
       );
-      if (reconciled.status === 'ok') {
-        const existingId = this.identifier(reconciled.body.id);
-        if (existingId) {
-          return { providerObjectId: existingId, providerUrl: linkUrl };
-        }
-      }
-      this.fail('JIRA_REMOTE_LINK_FAILED', created.status === 'rejected');
+    } catch {
+      return this.reconcileAfterUncertainRemoteLinkCreate(
+        endpoint,
+        input.profile,
+        accessToken,
+        linkUrl,
+      );
     }
 
-    const id = this.identifier(created.body.id);
-    if (!id) {
-      this.fail('JIRA_REMOTE_LINK_FAILED', false);
+    if (created.status === 'ok') {
+      const id = this.identifier(created.body.id);
+      if (id) {
+        return { providerObjectId: id, providerUrl: linkUrl };
+      }
     }
-    return { providerObjectId: id, providerUrl: linkUrl };
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
+      return this.reconcileAfterUncertainRemoteLinkCreate(
+        endpoint,
+        input.profile,
+        accessToken,
+        linkUrl,
+      );
+    }
+
+    const recovered = await this.findRemoteLink(endpoint, input.profile, accessToken);
+    if (recovered.status === 'found') {
+      return { providerObjectId: recovered.value, providerUrl: linkUrl };
+    }
+    if (recovered.status === 'indeterminate') {
+      this.failReconciliation();
+    }
+    if (created.status === 'access_limited') {
+      this.failReconciliation();
+    }
+    this.fail('JIRA_REMOTE_LINK_FAILED', created.status === 'rejected');
   }
 
   async createJiraSummaryComment(
@@ -271,42 +333,90 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       accessToken,
       marker,
     );
-    if (existing) {
-      return { providerObjectId: existing };
+    if (existing.status === 'found') {
+      return { providerObjectId: existing.value };
+    }
+    if (existing.status === 'indeterminate') {
+      this.failReconciliation();
     }
 
     const pageUrl =
       input.confluenceUrl ??
       this.confluencePageUrl(input.profile, input.confluenceContentId);
-    const created = await this.writeClient.postJson(
-      this.accessPolicy.providerUrl(
-        input.profile,
-        'jira',
-        `rest/api/2/issue/${encodeURIComponent(input.sourceJiraId)}/comment`,
-      ),
-      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
-      accessToken,
-      {
-        body: `${this.escapeJiraWiki(input.summary)}\n\nConfluence: ${pageUrl}\n${marker}`,
-      },
-    );
-    if (created.status !== 'ok') {
-      const reconciled = await this.findCommentByMarker(
+    const createBody = {
+      body: `${this.escapeJiraWiki(input.summary)}\n\nConfluence: ${pageUrl}\n${marker}`,
+    };
+    let created: ProviderWriteResult;
+    try {
+      created = await this.writeClient.postJsonExpectObject(
+        endpoint,
+        this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
+        accessToken,
+        createBody,
+      );
+    } catch {
+      return this.reconcileAfterUncertainCommentCreate(
         endpoint,
         input.profile,
         accessToken,
         marker,
       );
-      if (reconciled) {
-        return { providerObjectId: reconciled };
+    }
+
+    if (created.status === 'ok') {
+      const id = this.identifier(created.body.id);
+      if (id) {
+        return { providerObjectId: id };
       }
-      this.fail('JIRA_SUMMARY_COMMENT_FAILED', created.status === 'rejected');
     }
-    const id = this.identifier(created.body.id);
-    if (!id) {
-      this.fail('JIRA_SUMMARY_COMMENT_FAILED', false);
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
+      return this.reconcileAfterUncertainCommentCreate(
+        endpoint,
+        input.profile,
+        accessToken,
+        marker,
+      );
     }
-    return { providerObjectId: id };
+
+    const recovered = await this.findCommentByMarker(
+      endpoint,
+      input.profile,
+      accessToken,
+      marker,
+    );
+    if (recovered.status === 'found') {
+      return { providerObjectId: recovered.value };
+    }
+    if (recovered.status === 'indeterminate') {
+      this.failReconciliation();
+    }
+    if (created.status === 'access_limited') {
+      this.failReconciliation();
+    }
+    this.fail('JIRA_SUMMARY_COMMENT_FAILED', created.status === 'rejected');
+  }
+
+  async reconcileJiraChildTasks(
+    input: GatewayContext & {
+      operationId: string;
+      sourceJiraKey: string;
+      clientTaskIds: readonly string[];
+    },
+  ): Promise<ReconciliationResult<Map<string, ChildTaskReconciliationEntry>>> {
+    const accessToken = await this.token(input, 'jira');
+    return this.findChildTasksByOperation(
+      input.profile,
+      accessToken,
+      input.sourceJiraKey,
+      input.operationId,
+      new Set(input.clientTaskIds),
+      MAX_RECONCILIATION_PAGES,
+      MAX_RECONCILIATION_PROPERTY_LOOKUPS,
+    );
   }
 
   async createJiraChildTask(
@@ -316,18 +426,33 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       sourceJiraKey: string;
       childTask: BriefChildTask;
       template: ChildTaskTemplate;
+      reconciledProviderObjectId?: string;
+      reconciliationCompleted?: boolean;
     },
   ): Promise<PublicationWriteResult> {
     const accessToken = await this.token(input, 'jira');
-    const existing = await this.findChildTaskByOperation(
-      input.profile,
-      accessToken,
-      input.sourceJiraKey,
-      input.operationId,
-      input.childTask.clientTaskId,
-    );
-    if (existing) {
-      return { providerObjectId: existing };
+    if (input.reconciledProviderObjectId) {
+      return { providerObjectId: input.reconciledProviderObjectId };
+    }
+    if (!input.reconciliationCompleted) {
+      const existing = await this.findChildTasksByOperation(
+        input.profile,
+        accessToken,
+        input.sourceJiraKey,
+        input.operationId,
+        new Set([input.childTask.clientTaskId]),
+        MAX_RECONCILIATION_PAGES,
+        MAX_RECONCILIATION_PROPERTY_LOOKUPS,
+      );
+      if (existing.status === 'found') {
+        const marker = existing.value.get(input.childTask.clientTaskId);
+        if (marker) {
+          return { providerObjectId: marker.issueId };
+        }
+      }
+      if (existing.status === 'indeterminate') {
+        this.failReconciliation();
+      }
     }
 
     const payload = buildChildTaskCreatePayload({
@@ -340,44 +465,66 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       this.fail('JIRA_CHILD_TASK_FAILED', false);
     }
     this.accessPolicy.assertAllowedProject(input.profile, payload.project.key);
-    const created = await this.writeClient.postJson(
-      this.accessPolicy.providerUrl(input.profile, 'jira', 'rest/api/2/issue'),
-      this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
-      accessToken,
-      {
-        fields: payload.fields,
-        // Jira creates entity properties with the issue in this request. That
-        // makes the provider marker atomic with child-task creation.
-        properties: [
-          {
-            key: JIRA_CHILD_PROPERTY_KEY,
-            value: {
-              operationId: input.operationId,
-              clientTaskId: input.childTask.clientTaskId,
-            },
+    const createBody = {
+      fields: payload.fields,
+      properties: [
+        {
+          key: JIRA_CHILD_PROPERTY_KEY,
+          value: {
+            operationId: input.operationId,
+            clientTaskId: input.childTask.clientTaskId,
           },
-        ],
-      },
-    );
-    if (created.status !== 'ok') {
-      const reconciled = await this.findChildTaskByOperation(
-        input.profile,
+        },
+      ],
+    };
+    let created: ProviderWriteResult;
+    try {
+      created = await this.writeClient.postJsonExpectObject(
+        this.accessPolicy.providerUrl(input.profile, 'jira', 'rest/api/2/issue'),
+        this.accessPolicy.providerBaseUrl(input.profile, 'jira'),
         accessToken,
-        input.sourceJiraKey,
-        input.operationId,
-        input.childTask.clientTaskId,
+        createBody,
       );
-      if (reconciled) {
-        return { providerObjectId: reconciled };
-      }
-      this.fail('JIRA_CHILD_TASK_FAILED', created.status === 'rejected');
+    } catch {
+      return this.reconcileAfterUncertainChildCreate(input, accessToken);
     }
 
-    const createdId = this.identifier(created.body.id);
-    if (!createdId) {
-      this.fail('JIRA_CHILD_TASK_FAILED', false);
+    if (created.status === 'ok') {
+      const createdId = this.identifier(created.body.id);
+      if (createdId) {
+        return { providerObjectId: createdId };
+      }
     }
-    return { providerObjectId: createdId };
+    if (
+      created.status === 'ok_empty' ||
+      created.status === 'ok' ||
+      created.status === 'unavailable'
+    ) {
+      return this.reconcileAfterUncertainChildCreate(input, accessToken);
+    }
+
+    const recovered = await this.findChildTasksByOperation(
+      input.profile,
+      accessToken,
+      input.sourceJiraKey,
+      input.operationId,
+      new Set([input.childTask.clientTaskId]),
+      1,
+      Math.min(5, MAX_RECONCILIATION_PROPERTY_LOOKUPS),
+    );
+    if (recovered.status === 'found') {
+      const marker = recovered.value.get(input.childTask.clientTaskId);
+      if (marker) {
+        return { providerObjectId: marker.issueId };
+      }
+    }
+    if (recovered.status === 'indeterminate') {
+      this.failReconciliation();
+    }
+    if (created.status === 'access_limited') {
+      this.failReconciliation();
+    }
+    this.fail('JIRA_CHILD_TASK_FAILED', created.status === 'rejected');
   }
 
   private async token(
@@ -397,15 +544,20 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     accessToken: string,
     parentPageId: string,
   ): Promise<{ id: string; spaceKey: string }> {
-    const result = await this.readClient.getJson(
-      this.accessPolicy.providerUrl(
-        profile,
-        'confluence',
-        `rest/api/content/${encodeURIComponent(parentPageId)}?expand=space,version`,
-      ),
-      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-      accessToken,
-    );
+    let result: ProviderReadResult;
+    try {
+      result = await this.readClient.getJson(
+        this.accessPolicy.providerUrl(
+          profile,
+          'confluence',
+          `rest/api/content/${encodeURIComponent(parentPageId)}?expand=space,version`,
+        ),
+        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+        accessToken,
+      );
+    } catch {
+      this.failReconciliation();
+    }
     if (result.status !== 'ok') {
       this.fail('CONFLUENCE_WRITE_FAILED', false);
     }
@@ -413,7 +565,7 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     const space = this.record(result.body.space);
     const spaceKey = typeof space?.key === 'string' ? space.key.trim() : '';
     if (!id || !spaceKey) {
-      this.fail('CONFLUENCE_WRITE_FAILED', false);
+      this.failReconciliation();
     }
     try {
       this.accessPolicy.assertAllowedSpace(profile, spaceKey);
@@ -427,19 +579,34 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     profile: IntegrationProfile,
     accessToken: string,
     pageId: string,
-  ): Promise<ConfluencePage | null> {
-    const result = await this.readClient.getJson(
-      this.accessPolicy.providerUrl(
-        profile,
-        'confluence',
-        `rest/api/content/${encodeURIComponent(pageId)}?expand=space,version`,
-      ),
-      this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-      accessToken,
-    );
-    return result.status === 'ok'
-      ? this.confluencePage(profile, result.body)
-      : null;
+  ): Promise<ReconciliationResult<ConfluencePage>> {
+    let result: ProviderReadResult;
+    try {
+      result = await this.readClient.getJson(
+        this.accessPolicy.providerUrl(
+          profile,
+          'confluence',
+          `rest/api/content/${encodeURIComponent(pageId)}?expand=space,version`,
+        ),
+        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+        accessToken,
+      );
+    } catch {
+      return this.indeterminate('provider_unavailable');
+    }
+    if (result.status === 'not_found') {
+      return { status: 'absent' };
+    }
+    if (result.status === 'access_limited') {
+      return this.indeterminate('access_limited');
+    }
+    if (result.status !== 'ok') {
+      return this.indeterminate('invalid_response');
+    }
+    const page = this.confluencePageFromBody(profile, result.body);
+    return page
+      ? { status: 'found', value: page }
+      : this.indeterminate('invalid_response');
   }
 
   private async findConfluencePageByTitle(
@@ -447,41 +614,88 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     accessToken: string,
     parentPageId: string,
     expectedTitle: string,
-  ): Promise<ConfluencePage | null> {
+  ): Promise<ReconciliationResult<ConfluencePage>> {
     let start = 0;
-    for (
-      let pageIndex = 0;
-      pageIndex < MAX_RECONCILIATION_PAGES;
-      pageIndex += 1
-    ) {
-      const children = await this.readClient.getJson(
-        this.accessPolicy.providerUrl(
-          profile,
-          'confluence',
-          `rest/api/content/${encodeURIComponent(parentPageId)}/child/page?expand=version&limit=${RECONCILIATION_PAGE_SIZE}&start=${start}`,
-        ),
-        this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-        accessToken,
-      );
-      if (children.status !== 'ok') {
-        return null;
+    for (let pageIndex = 0; pageIndex < MAX_RECONCILIATION_PAGES; pageIndex += 1) {
+      let children: ProviderReadResult;
+      try {
+        children = await this.readClient.getJson(
+          this.accessPolicy.providerUrl(
+            profile,
+            'confluence',
+            `rest/api/content/${encodeURIComponent(parentPageId)}/child/page?expand=version&limit=${RECONCILIATION_PAGE_SIZE}&start=${start}`,
+          ),
+          this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+          accessToken,
+        );
+      } catch {
+        return this.indeterminate('provider_unavailable');
       }
-      const items = Array.isArray(children.body.results)
-        ? children.body.results
-        : [];
+      if (children.status === 'access_limited') {
+        return this.indeterminate('access_limited');
+      }
+      if (children.status !== 'ok') {
+        return this.indeterminate('invalid_response');
+      }
+      if (!Array.isArray(children.body.results)) {
+        return this.indeterminate('invalid_response');
+      }
+      const items = children.body.results;
       for (const item of items) {
         const candidate = this.record(item);
         if (!candidate || candidate.title !== expectedTitle) {
           continue;
         }
-        return this.confluencePage(profile, candidate);
+        const page = this.confluencePageFromBody(profile, candidate);
+        return page
+          ? { status: 'found', value: page }
+          : this.indeterminate('invalid_response');
       }
-      if (!this.hasNextPage(children.body, start, items.length)) {
-        return null;
+      const continuation = this.pageContinuation(
+        children.body,
+        start,
+        items.length,
+      );
+      if (continuation === 'invalid') {
+        return this.indeterminate('invalid_response');
+      }
+      if (continuation === 'no') {
+        return { status: 'absent' };
       }
       start += items.length;
     }
-    return null;
+    return this.indeterminate('budget_exhausted');
+  }
+
+  private async findRemoteLink(
+    endpoint: URL,
+    profile: IntegrationProfile,
+    accessToken: string,
+  ): Promise<ReconciliationResult<string>> {
+    let result: ProviderReadResult;
+    try {
+      result = await this.readClient.getJson(
+        endpoint,
+        this.accessPolicy.providerBaseUrl(profile, 'jira'),
+        accessToken,
+      );
+    } catch {
+      return this.indeterminate('provider_unavailable');
+    }
+    if (result.status === 'not_found') {
+      return { status: 'absent' };
+    }
+    if (result.status === 'access_limited') {
+      return this.indeterminate('access_limited');
+    }
+    if (result.status !== 'ok') {
+      return this.indeterminate('invalid_response');
+    }
+    const id = this.identifier(result.body.id);
+    if (id) {
+      return { status: 'found', value: id };
+    }
+    return this.indeterminate('invalid_response');
   }
 
   private async findCommentByMarker(
@@ -489,25 +703,29 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
     profile: IntegrationProfile,
     accessToken: string,
     marker: string,
-  ): Promise<string | null> {
+  ): Promise<ReconciliationResult<string>> {
     let startAt = 0;
-    for (
-      let pageIndex = 0;
-      pageIndex < MAX_RECONCILIATION_PAGES;
-      pageIndex += 1
-    ) {
-      const page = new URL(endpoint);
-      page.searchParams.set('startAt', String(startAt));
-      page.searchParams.set('maxResults', String(RECONCILIATION_PAGE_SIZE));
-      const result = await this.readClient.getJson(
-        page,
-        this.accessPolicy.providerBaseUrl(profile, 'jira'),
-        accessToken,
-      );
-      if (result.status !== 'ok' || !Array.isArray(result.body.comments)) {
-        return null;
+    for (let pageIndex = 0; pageIndex < MAX_RECONCILIATION_PAGES; pageIndex += 1) {
+      let page: ProviderReadResult;
+      try {
+        const url = new URL(endpoint);
+        url.searchParams.set('startAt', String(startAt));
+        url.searchParams.set('maxResults', String(RECONCILIATION_PAGE_SIZE));
+        page = await this.readClient.getJson(
+          url,
+          this.accessPolicy.providerBaseUrl(profile, 'jira'),
+          accessToken,
+        );
+      } catch {
+        return this.indeterminate('provider_unavailable');
       }
-      for (const comment of result.body.comments) {
+      if (page.status === 'access_limited') {
+        return this.indeterminate('access_limited');
+      }
+      if (page.status !== 'ok' || !Array.isArray(page.body.comments)) {
+        return this.indeterminate('invalid_response');
+      }
+      for (const comment of page.body.comments) {
         const candidate = this.record(comment);
         if (
           candidate &&
@@ -515,35 +733,40 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
           candidate.body.includes(marker)
         ) {
           const id = this.identifier(candidate.id);
-          if (id) {
-            return id;
-          }
+          return id
+            ? { status: 'found', value: id }
+            : this.indeterminate('invalid_response');
         }
       }
-      if (
-        !this.hasNextPage(result.body, startAt, result.body.comments.length)
-      ) {
-        return null;
+      const continuation = this.pageContinuation(
+        page.body,
+        startAt,
+        page.body.comments.length,
+      );
+      if (continuation === 'invalid') {
+        return this.indeterminate('invalid_response');
       }
-      startAt += result.body.comments.length;
+      if (continuation === 'no') {
+        return { status: 'absent' };
+      }
+      startAt += page.body.comments.length;
     }
-    return null;
+    return this.indeterminate('budget_exhausted');
   }
 
-  private async findChildTaskByOperation(
+  private async findChildTasksByOperation(
     profile: IntegrationProfile,
     accessToken: string,
     parentIssueKey: string,
     operationId: string,
-    clientTaskId: string,
-  ): Promise<string | null> {
+    targetClientTaskIds: ReadonlySet<string>,
+    maxPages: number,
+    maxPropertyLookups: number,
+  ): Promise<ReconciliationResult<Map<string, ChildTaskReconciliationEntry>>> {
+    const matches = new Map<string, ChildTaskReconciliationEntry>();
     let startAt = 0;
     let propertyLookups = 0;
-    for (
-      let pageIndex = 0;
-      pageIndex < MAX_RECONCILIATION_PAGES;
-      pageIndex += 1
-    ) {
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
       const query = new URLSearchParams({
         jql: `parent = ${parentIssueKey}`,
         fields: 'summary',
@@ -551,132 +774,290 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
         maxResults: String(RECONCILIATION_PAGE_SIZE),
         startAt: String(startAt),
       });
-      const search = await this.readClient.getJson(
-        this.accessPolicy.providerUrl(
-          profile,
-          'jira',
-          `rest/api/2/search?${query.toString()}`,
-        ),
-        this.accessPolicy.providerBaseUrl(profile, 'jira'),
-        accessToken,
-      );
-      if (search.status !== 'ok' || !Array.isArray(search.body.issues)) {
-        return null;
-      }
-      for (const issue of search.body.issues) {
-        const candidate = this.record(issue);
-        const issueId = candidate ? this.identifier(candidate.id) : null;
-        if (!candidate || !issueId) {
-          continue;
-        }
-        const inlineValue = this.issuePropertyValue(
-          candidate,
-          JIRA_CHILD_PROPERTY_KEY,
-        );
-        if (
-          inlineValue?.operationId === operationId &&
-          inlineValue.clientTaskId === clientTaskId
-        ) {
-          return issueId;
-        }
-        if (
-          inlineValue !== null ||
-          propertyLookups >= MAX_RECONCILIATION_PROPERTY_LOOKUPS
-        ) {
-          continue;
-        }
-        propertyLookups += 1;
-        const property = await this.readClient.getJson(
+      let search: ProviderReadResult;
+      try {
+        search = await this.readClient.getJson(
           this.accessPolicy.providerUrl(
             profile,
             'jira',
-            `rest/api/2/issue/${encodeURIComponent(issueId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+            `rest/api/2/search?${query.toString()}`,
           ),
           this.accessPolicy.providerBaseUrl(profile, 'jira'),
           accessToken,
         );
-        const value =
-          property.status === 'ok' ? this.record(property.body.value) : null;
+      } catch {
+        return this.indeterminate('provider_unavailable');
+      }
+      if (search.status === 'access_limited') {
+        return this.indeterminate('access_limited');
+      }
+      if (search.status !== 'ok' || !Array.isArray(search.body.issues)) {
+        return this.indeterminate('invalid_response');
+      }
+
+      for (const issue of search.body.issues) {
+        const candidate = this.record(issue);
+        const issueId = candidate ? this.identifier(candidate.id) : null;
+        if (!candidate || !issueId) {
+          return this.indeterminate('invalid_response');
+        }
+        const inline = this.issuePropertyValue(
+          candidate,
+          JIRA_CHILD_PROPERTY_KEY,
+        );
+        if (inline.state === 'absent') {
+          continue;
+        }
+        let marker: Record<string, unknown> | null =
+          inline.state === 'found' ? inline.value : null;
+        if (marker === null) {
+          if (propertyLookups >= maxPropertyLookups) {
+            return this.indeterminate('budget_exhausted');
+          }
+          propertyLookups += 1;
+          let property: ProviderReadResult;
+          try {
+            property = await this.readClient.getJson(
+              this.accessPolicy.providerUrl(
+                profile,
+                'jira',
+                `rest/api/2/issue/${encodeURIComponent(issueId)}/properties/${JIRA_CHILD_PROPERTY_KEY}`,
+              ),
+              this.accessPolicy.providerBaseUrl(profile, 'jira'),
+              accessToken,
+            );
+          } catch {
+            return this.indeterminate('provider_unavailable');
+          }
+          if (property.status === 'access_limited') {
+            return this.indeterminate('access_limited');
+          }
+          if (property.status === 'ok') {
+            if (!Object.prototype.hasOwnProperty.call(property.body, 'value')) {
+              return this.indeterminate('invalid_response');
+            }
+            const value = this.record(property.body.value);
+            marker = value;
+          } else if (property.status !== 'not_found') {
+            return this.indeterminate('invalid_response');
+          }
+        }
+        if (!marker) {
+          continue;
+        }
+        const markerOperationId = marker.operationId;
+        const markerClientTaskId = marker.clientTaskId;
         if (
-          value?.operationId === operationId &&
-          value.clientTaskId === clientTaskId
+          typeof markerOperationId !== 'string' ||
+          typeof markerClientTaskId !== 'string'
         ) {
-          return issueId;
+          return this.indeterminate('invalid_response');
+        }
+        if (
+          markerOperationId === operationId &&
+          targetClientTaskIds.has(markerClientTaskId)
+        ) {
+          matches.set(markerClientTaskId, {
+            issueId,
+            operationId: markerOperationId,
+          });
         }
       }
-      if (!this.hasNextPage(search.body, startAt, search.body.issues.length)) {
-        return null;
+
+      const continuation = this.pageContinuation(
+        search.body,
+        startAt,
+        search.body.issues.length,
+      );
+      if (continuation === 'invalid') {
+        return this.indeterminate('invalid_response');
+      }
+      if (continuation === 'no') {
+        return matches.size > 0
+          ? { status: 'found', value: matches }
+          : { status: 'absent' };
       }
       startAt += search.body.issues.length;
     }
-    return null;
+    return this.indeterminate('budget_exhausted');
   }
 
-  private hasNextPage(
+  private pageContinuation(
     body: Record<string, unknown>,
     start: number,
     received: number,
-  ): boolean {
+  ): PageContinuation {
     if (received === 0) {
-      return false;
+      return 'no';
     }
-    if (typeof body.total === 'number') {
-      return start + received < body.total;
+    if (Object.prototype.hasOwnProperty.call(body, 'total')) {
+      return typeof body.total === 'number' && Number.isFinite(body.total)
+        ? start + received < body.total
+          ? 'yes'
+          : 'no'
+        : 'invalid';
     }
-    if (typeof body.isLast === 'boolean') {
-      return !body.isLast;
+    if (Object.prototype.hasOwnProperty.call(body, 'isLast')) {
+      return typeof body.isLast === 'boolean'
+        ? body.isLast
+          ? 'no'
+          : 'yes'
+        : 'invalid';
     }
     const links = this.record(body._links);
-    if (typeof links?.next === 'string' && links.next.trim()) {
-      return true;
+    if (Object.prototype.hasOwnProperty.call(body, '_links')) {
+      return typeof links?.next === 'string' && links.next.trim()
+        ? 'yes'
+        : links
+          ? 'no'
+          : 'invalid';
     }
-    return received >= RECONCILIATION_PAGE_SIZE;
+    return received >= RECONCILIATION_PAGE_SIZE ? 'yes' : 'no';
   }
 
+  /**
+   * `absent` means the search returned this issue's property set and our key
+   * is not in it, so the issue is provably not ours and needs no follow-up
+   * request. `unknown` means the response carried no property container at
+   * all, which is the only case worth spending a per-issue lookup on.
+   */
   private issuePropertyValue(
     issue: Record<string, unknown>,
     propertyKey: string,
-  ): Record<string, unknown> | null {
+  ): IssueProperty {
     const properties = issue.properties;
     if (Array.isArray(properties)) {
       for (const property of properties) {
         const candidate = this.record(property);
         if (candidate?.key === propertyKey) {
-          return this.record(candidate.value);
+          const value = this.record(candidate.value);
+          return value ? { state: 'found', value } : { state: 'absent' };
         }
       }
-      return null;
+      return { state: 'absent' };
     }
     const record = this.record(properties);
     if (!record) {
-      return null;
+      return { state: 'unknown' };
     }
     const direct = this.record(record[propertyKey]);
     if (direct) {
-      return this.record(direct.value) ?? direct;
+      return { state: 'found', value: this.record(direct.value) ?? direct };
     }
     for (const property of Object.values(record)) {
       const candidate = this.record(property);
       if (candidate?.key === propertyKey) {
-        return this.record(candidate.value);
+        const value = this.record(candidate.value);
+        return value ? { state: 'found', value } : { state: 'absent' };
       }
     }
-    return null;
+    return { state: 'absent' };
   }
 
-  private confluencePage(
+  private async reconcileAfterUncertainConfluenceCreate(
+    profile: IntegrationProfile,
+    accessToken: string,
+    parentPageId: string,
+    pageTitle: string,
+    contentHash: string,
+  ): Promise<never> {
+    const recovered = await this.findConfluencePageByTitle(
+      profile,
+      accessToken,
+      parentPageId,
+      pageTitle,
+    );
+    if (recovered.status === 'found') {
+      return this.confluenceResult(recovered.value, contentHash) as never;
+    }
+    this.failUncertainWrite();
+  }
+
+  private async reconcileAfterUncertainRemoteLinkCreate(
+    endpoint: URL,
+    profile: IntegrationProfile,
+    accessToken: string,
+    linkUrl: string,
+  ): Promise<never> {
+    const recovered = await this.findRemoteLink(endpoint, profile, accessToken);
+    if (recovered.status === 'found') {
+      return { providerObjectId: recovered.value, providerUrl: linkUrl } as never;
+    }
+    this.failUncertainWrite();
+  }
+
+  private async reconcileAfterUncertainCommentCreate(
+    endpoint: URL,
+    profile: IntegrationProfile,
+    accessToken: string,
+    marker: string,
+  ): Promise<never> {
+    const recovered = await this.findCommentByMarker(
+      endpoint,
+      profile,
+      accessToken,
+      marker,
+    );
+    if (recovered.status === 'found') {
+      return { providerObjectId: recovered.value } as never;
+    }
+    this.failUncertainWrite();
+  }
+
+  private async reconcileAfterUncertainChildCreate(
+    input: {
+      profile: IntegrationProfile;
+      sourceJiraKey: string;
+      operationId: string;
+      childTask: BriefChildTask;
+    },
+    accessToken: string,
+  ): Promise<never> {
+    const recovered = await this.findChildTasksByOperation(
+      input.profile,
+      accessToken,
+      input.sourceJiraKey,
+      input.operationId,
+      new Set([input.childTask.clientTaskId]),
+      1,
+      Math.min(5, MAX_RECONCILIATION_PROPERTY_LOOKUPS),
+    );
+    if (recovered.status === 'found') {
+      const marker = recovered.value.get(input.childTask.clientTaskId);
+      if (marker) {
+        return { providerObjectId: marker.issueId } as never;
+      }
+    }
+    this.failUncertainWrite();
+  }
+
+  private confluenceResult(
+    page: ConfluencePage,
+    contentHash: string,
+  ): PublicationWriteResult {
+    return {
+      providerObjectId: page.id,
+      providerObjectVersion: page.version,
+      providerUrl: page.url,
+      contentHash,
+    };
+  }
+
+  private confluencePageFromBody(
     profile: IntegrationProfile,
     body: Record<string, unknown>,
-  ): ConfluencePage {
+  ): ConfluencePage | null {
     const id = this.identifier(body.id);
     const version = this.version(body.version);
     if (!id || !version) {
-      this.fail('CONFLUENCE_WRITE_FAILED', false);
+      return null;
     }
     return {
       id,
       version,
       url: this.confluencePageUrl(profile, id),
+      title:
+        typeof body.title === 'string' && body.title.trim() ? body.title : null,
     };
   }
 
@@ -717,8 +1098,12 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
   }
 
   private identifier(value: unknown): string | null {
-    return typeof value === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(value)
-      ? value
+    const normalized =
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+        ? String(value)
+        : value;
+    return typeof normalized === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(normalized)
+      ? normalized
       : null;
   }
 
@@ -736,10 +1121,39 @@ export class AtlassianPublicationWriteGateway implements PublicationWriteGateway
       : null;
   }
 
+  private indeterminate(
+    reason:
+      | 'budget_exhausted'
+      | 'access_limited'
+      | 'provider_unavailable'
+      | 'invalid_response',
+  ): ReconciliationResult<never> {
+    return { status: 'indeterminate', reason };
+  }
+
+  /**
+   * No create request was dispatched, so retrying cannot duplicate anything.
+   */
+  private failReconciliation(): never {
+    this.fail('PUBLICATION_RECONCILIATION_INDETERMINATE', true);
+  }
+
+  /**
+   * A create request was dispatched and reconciliation could not prove whether
+   * it landed. Marked non-retryable so the step becomes NEEDS_REVIEW: the next
+   * create needs an operator who has checked the provider, because a plain
+   * retry would create a second object whenever the marker search missed a
+   * write that actually succeeded.
+   */
+  private failUncertainWrite(): never {
+    this.fail('PUBLICATION_RECONCILIATION_INDETERMINATE', false);
+  }
+
   private fail(
     code:
       | 'CONFLUENCE_VERSION_CONFLICT'
       | 'CONFLUENCE_WRITE_FAILED'
+      | 'PUBLICATION_RECONCILIATION_INDETERMINATE'
       | 'JIRA_REMOTE_LINK_FAILED'
       | 'JIRA_SUMMARY_COMMENT_FAILED'
       | 'JIRA_CHILD_TASK_FAILED',

@@ -109,6 +109,7 @@ export type PublicationStep = {
   errorCode:
     | "CONFLUENCE_VERSION_CONFLICT"
     | "CONFLUENCE_WRITE_FAILED"
+    | "PUBLICATION_RECONCILIATION_INDETERMINATE"
     | "JIRA_REMOTE_LINK_FAILED"
     | "JIRA_SUMMARY_COMMENT_FAILED"
     | "JIRA_CHILD_TASK_FAILED"
@@ -122,6 +123,7 @@ export type ConfluencePublicationPreview = {
   phase: "confluence";
   draftVersion: number;
   previewHash: string;
+  approvalRevision: number;
   spaceKey: string;
   parentPage: { id: string; title: string; url: string; version: string };
   pageTitle: string;
@@ -140,6 +142,7 @@ export type JiraPublicationPreview = {
   phase: "jira";
   draftVersion: number;
   previewHash: string;
+  approvalRevision: number;
   confluencePage: { id: string; url: string; title: string };
   remoteLink: { globalId: string; url: string; title: string };
   summaryComment: { summary: string; url: string };
@@ -149,6 +152,7 @@ export type ChildTasksPublicationPreview = {
   phase: "child_tasks";
   draftVersion: number;
   previewHash: string;
+  approvalRevision: number;
   configurationFingerprint: string;
   childTasks: Array<{
     clientTaskId: string;

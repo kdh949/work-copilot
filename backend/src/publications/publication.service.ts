@@ -6,9 +6,9 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
 import { WorkCopilotMetricsService } from '../operations/work-copilot-metrics.service';
 import { ReadinessService } from '../readiness/readiness.service';
@@ -20,12 +20,18 @@ import { WorkBriefContentGuard } from '../work-briefs/work-brief-content-guard.s
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { BriefPublication } from './entities/brief-publication.entity';
 import { PublicationStep } from './entities/publication-step.entity';
-import { PublicationStepClaimerService } from './publication-step-claimer.service';
+import {
+  PUBLICATION_STEP_HEARTBEAT_INTERVAL_MS,
+  PublicationStepClaimerService,
+  type StepClaim,
+} from './publication-step-claimer.service';
 import {
   PublicationGatewayError,
   PUBLICATION_WRITE_GATEWAY,
   type PublicationWriteGateway,
   type PublicationWriteResult,
+  type ReconciliationResult,
+  type ChildTaskReconciliationEntry,
 } from './publication-write-gateway';
 import {
   type ChildTasksPublicationPreview,
@@ -50,15 +56,22 @@ type PhaseInput = {
   draftVersion: number;
   previewHash: string;
   approved: boolean;
+  approvalRevision?: number;
   idempotencyKey: string | undefined;
 };
 
 type RetryInput = PhaseInput & { phase: PublicationPhase };
 
+type InitialPublication = {
+  publication: BriefPublication;
+  steps: PublicationStep[];
+};
+
 type StepExecution =
   | { outcome: 'succeeded'; result: PublicationWriteResult }
   | { outcome: 'failed' }
-  | { outcome: 'in_progress' };
+  | { outcome: 'in_progress' }
+  | { outcome: 'stale' };
 
 @Injectable()
 export class PublicationService {
@@ -78,6 +91,7 @@ export class PublicationService {
     @Inject(PUBLICATION_WRITE_GATEWAY)
     private readonly writeGateway: PublicationWriteGateway,
     private readonly stepClaimer: PublicationStepClaimerService,
+    @InjectDataSource() private readonly dataSource: DataSource,
     @Optional() private readonly metrics?: WorkCopilotMetricsService,
   ) {}
 
@@ -89,12 +103,21 @@ export class PublicationService {
     const draft = await this.findOwnedDraft(userId, draftId);
     const profile = await this.findActivePublishProfile(draft);
     this.assertSafeDraftContent(draft.maskedBrief);
-    return this.previewService.confluence(
+    const publication = await this.latestPublicationForDraft(draft.id);
+    const sameVersionPublication =
+      publication?.draftVersion === draft.optimisticVersion
+        ? publication
+        : null;
+    const approvalRevision = sameVersionPublication
+      ? await this.advanceApprovalRevision(sameVersionPublication, 'confluence')
+      : 1;
+    const preview = await this.previewService.confluence(
       userId,
       draft,
       profile,
       correlationId,
     );
+    return { ...preview, approvalRevision };
   }
 
   async publish(
@@ -120,6 +143,15 @@ export class PublicationService {
         existingByKey,
         draft,
       );
+      if (this.isEmptyPendingConfluencePublication(recovered)) {
+        return this.resumeEmptyConfluencePublication(
+          userId,
+          draft,
+          recovered.publication,
+          input,
+          correlationId,
+        );
+      }
       return this.present(recovered.publication, recovered.steps);
     }
     const existingForVersion = await this.publicationsRepository.findOneBy({
@@ -131,6 +163,15 @@ export class PublicationService {
         existingForVersion,
         draft,
       );
+      if (this.isEmptyPendingConfluencePublication(recovered)) {
+        return this.resumeEmptyConfluencePublication(
+          userId,
+          draft,
+          recovered.publication,
+          input,
+          correlationId,
+        );
+      }
       return this.present(recovered.publication, recovered.steps);
     }
 
@@ -145,6 +186,10 @@ export class PublicationService {
       correlationId,
     );
     this.assertPreview(input.previewHash, preview.previewHash);
+    const approvalRevision = input.approvalRevision ?? 1;
+    if (approvalRevision !== 1) {
+      throw new ConflictException({ code: 'PUBLICATION_PREVIEW_STALE' });
+    }
 
     const now = new Date();
     const publication = this.publicationsRepository.create({
@@ -153,6 +198,7 @@ export class PublicationService {
       idempotencyKeyHash,
       draftVersion: draft.optimisticVersion,
       status: 'PENDING',
+      approvalRevision,
       confluenceContentId: null,
       jiraRemoteLinkId: null,
       jiraSummaryCommentId: null,
@@ -175,9 +221,15 @@ export class PublicationService {
       executionMode: this.writeGateway.mode,
       reviewRequiredAt: null,
     });
-    let stored: BriefPublication;
+    // Only the aggregate insert may lose the unique-index race. Keeping
+    // runConfluence outside the catch stops a duplicate-key error raised after
+    // an external write from being reported as a concurrent publication.
+    let transaction: InitialPublication;
     try {
-      stored = await this.publicationsRepository.save(publication);
+      transaction = await this.createInitialPublication(
+        publication,
+        approvalRevision,
+      );
     } catch (error) {
       if (!this.isDuplicateKeyError(error)) {
         throw error;
@@ -199,16 +251,14 @@ export class PublicationService {
       );
       return this.present(recovered.publication, recovered.steps);
     }
-
-    const steps = await this.ensureSteps(stored, 'confluence', []);
     return this.runConfluence(
-      stored,
+      transaction.publication,
       draft,
       profile,
-      steps,
+      transaction.steps,
       userId,
       correlationId,
-      preview,
+      { ...preview, approvalRevision },
     );
   }
 
@@ -225,7 +275,14 @@ export class PublicationService {
     );
     this.assertPublicationDraftVersion(recovered.publication, draft);
     this.assertConfluenceSucceeded(recovered.steps);
-    return this.previewService.jira(draft, recovered.publication);
+    const approvalRevision = await this.advanceApprovalRevision(
+      recovered.publication,
+      'jira',
+    );
+    return {
+      ...this.previewService.jira(draft, recovered.publication),
+      approvalRevision,
+    };
   }
 
   async publishJira(
@@ -259,13 +316,40 @@ export class PublicationService {
     this.assertSafeDraftContent(draft.maskedBrief);
     const preview = this.previewService.jira(draft, publication);
     this.assertPreview(input.previewHash, preview.previewHash);
+    const approvalRevision = this.approvalRevisionForInput(
+      input,
+      publication,
+    );
+    const needsReview = this.phaseNeedsReview(steps, 'jira');
+    if (needsReview && input.approvalRevision === undefined) {
+      throw new ConflictException({
+        code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED',
+      });
+    }
+    const reviewReopened = await this.reopenReviewStepsIfRequired(
+      publication,
+      steps,
+      'jira',
+      approvalRevision,
+    );
+    if (needsReview && !reviewReopened) {
+      return this.presentLatestPublication(publication.id);
+    }
+    publication.approvalRevision = approvalRevision;
     publication.jiraIdempotencyKeyHash = idempotencyKeyHash;
     publication.jiraPreviewHash = preview.previewHash;
     publication.jiraApprovedByUserId = userId;
     publication.jiraApprovedAt = new Date();
     publication.updatedAt = new Date();
     const saved = await this.savePhaseApproval(publication, 'jira');
-    const phaseSteps = await this.ensureSteps(saved, 'jira', steps);
+    const phaseSteps = await this.ensureSteps(
+      saved,
+      'jira',
+      steps,
+      [],
+      null,
+      approvalRevision,
+    );
     return this.runJira(
       saved,
       draft,
@@ -296,11 +380,18 @@ export class PublicationService {
     // before execution so a changed provider configuration cannot bypass it.
     await this.assertReadyForPublication(userId, draft, correlationId);
     const profile = await this.findActivePublishProfile(draft);
-    return this.previewService.childTasks(
-      draft,
+    const approvalRevision = await this.advanceApprovalRevision(
       recovered.publication,
-      profile,
+      'child_tasks',
     );
+    return {
+      ...this.previewService.childTasks(
+        draft,
+        recovered.publication,
+        profile,
+      ),
+      approvalRevision,
+    };
   }
 
   async publishChildTasks(
@@ -334,6 +425,26 @@ export class PublicationService {
     this.assertSafeDraftContent(draft.maskedBrief);
     const preview = this.previewService.childTasks(draft, publication, profile);
     this.assertPreview(input.previewHash, preview.previewHash);
+    const approvalRevision = this.approvalRevisionForInput(
+      input,
+      publication,
+    );
+    const needsReview = this.phaseNeedsReview(steps, 'child_tasks');
+    if (needsReview && input.approvalRevision === undefined) {
+      throw new ConflictException({
+        code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED',
+      });
+    }
+    const reviewReopened = await this.reopenReviewStepsIfRequired(
+      publication,
+      steps,
+      'child_tasks',
+      approvalRevision,
+    );
+    if (needsReview && !reviewReopened) {
+      return this.presentLatestPublication(publication.id);
+    }
+    publication.approvalRevision = approvalRevision;
     publication.childTasksIdempotencyKeyHash = idempotencyKeyHash;
     publication.childTasksPreviewHash = preview.previewHash;
     publication.childTasksApprovedByUserId = userId;
@@ -346,6 +457,7 @@ export class PublicationService {
       steps,
       draft.maskedBrief.childTasks.filter((task) => task.selected),
       idempotencyKeyHash,
+      approvalRevision,
     );
     return this.runChildTasks(
       saved,
@@ -447,10 +559,36 @@ export class PublicationService {
       correlationId,
     );
     this.assertPreview(input.previewHash, preview.previewHash);
+    const approvalRevision = this.approvalRevisionForInput(
+      input,
+      publication,
+    );
+    const needsReview = this.phaseNeedsReview(
+      existingSteps,
+      'confluence',
+    );
+    if (needsReview && input.approvalRevision === undefined) {
+      throw new ConflictException({
+        code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED',
+      });
+    }
+    const reviewReopened = await this.reopenReviewStepsIfRequired(
+      publication,
+      existingSteps,
+      'confluence',
+      approvalRevision,
+    );
+    if (needsReview && !reviewReopened) {
+      return this.presentLatestPublication(publication.id);
+    }
+    publication.approvalRevision = approvalRevision;
     const steps = await this.ensureSteps(
       publication,
       'confluence',
       existingSteps,
+      [],
+      null,
+      approvalRevision,
     );
     return this.runConfluence(
       publication,
@@ -476,31 +614,30 @@ export class PublicationService {
     publication.updatedAt = new Date();
     publication = await this.publicationsRepository.save(publication);
     const step = this.requiredStep(steps, CONFLUENCE_STEP);
-    const execution = await this.executeStep(step, () =>
-      this.writeGateway.upsertConfluenceBrief({
-        userId,
-        correlationId,
-        profile,
-        operationId: publication.operationId,
-        parentPageId: profile.briefParentPageId as string,
-        existingContentId: publication.confluenceContentId,
-        draftId: draft.id,
-        sourceJiraKey: draft.sourceJiraKey,
-        content: draft.maskedBrief,
-        evidence: draft.evidence,
-      }),
+    const execution = await this.executeStep(
+      step,
+      () =>
+        this.writeGateway.upsertConfluenceBrief({
+          userId,
+          correlationId,
+          profile,
+          operationId: publication.operationId,
+          parentPageId: profile.briefParentPageId as string,
+          existingContentId: publication.confluenceContentId,
+          draftId: draft.id,
+          sourceJiraKey: draft.sourceJiraKey,
+          content: draft.maskedBrief,
+          evidence: draft.evidence,
+        }),
+      preview.contentHash,
     );
     if (execution.outcome === 'in_progress') {
       return this.present(publication);
     }
+    if (execution.outcome === 'stale') {
+      return this.presentLatestPublication(publication.id);
+    }
     if (execution.outcome === 'succeeded') {
-      // The canonical Confluence content hash is part of the recovery record,
-      // including for the in-memory adapter used by tests.
-      if (!step.contentHash) {
-        step.contentHash = execution.result.contentHash ?? preview.contentHash;
-        step.updatedAt = new Date();
-        await this.stepsRepository.save(step);
-      }
       if (this.applyStepResult(publication, step)) {
         publication.updatedAt = new Date();
         publication = await this.publicationsRepository.save(publication);
@@ -537,6 +674,9 @@ export class PublicationService {
     if (linkExecution.outcome === 'in_progress') {
       return this.present(publication);
     }
+    if (linkExecution.outcome === 'stale') {
+      return this.presentLatestPublication(publication.id);
+    }
     if (linkExecution.outcome === 'failed') {
       return this.finalize(publication, steps, 'jira', draft);
     }
@@ -560,6 +700,9 @@ export class PublicationService {
     );
     if (commentExecution.outcome === 'in_progress') {
       return this.present(publication);
+    }
+    if (commentExecution.outcome === 'stale') {
+      return this.presentLatestPublication(publication.id);
     }
     if (
       commentExecution.outcome === 'succeeded' &&
@@ -587,8 +730,52 @@ export class PublicationService {
     if (!template && preview.childTasks.length > 0) {
       throw new ConflictException({ code: 'CHILD_TASK_TEMPLATE_REQUIRED' });
     }
-    for (const childTask of this.selectedChildTasks(draft)) {
+    const selectedTasks = this.selectedChildTasks(draft);
+    let reconciliation: ReconciliationResult<
+      Map<string, ChildTaskReconciliationEntry>
+    >;
+    try {
+      reconciliation = await this.writeGateway.reconcileJiraChildTasks({
+        userId,
+        correlationId,
+        profile,
+        operationId: publication.operationId,
+        sourceJiraKey: draft.sourceJiraKey,
+        clientTaskIds: selectedTasks.map((task) => task.clientTaskId),
+      });
+    } catch {
+      reconciliation = {
+        status: 'indeterminate',
+        reason: 'provider_unavailable',
+      };
+    }
+    if (reconciliation.status === 'indeterminate') {
+      const step = steps.find(
+        (candidate) =>
+          candidate.phase === 'child_tasks' && candidate.status !== 'SUCCEEDED',
+      );
+      if (step) {
+        const execution = await this.executeStep(step, () =>
+          Promise.reject(
+            new PublicationGatewayError(
+              'PUBLICATION_RECONCILIATION_INDETERMINATE',
+              true,
+            ),
+          ),
+        );
+        if (execution.outcome === 'stale') {
+          return this.presentLatestPublication(publication.id);
+        }
+      }
+      return this.finalize(publication, steps, 'child_tasks', draft);
+    }
+    const existingTasks =
+      reconciliation.status === 'found'
+        ? reconciliation.value
+        : new Map<string, ChildTaskReconciliationEntry>();
+    for (const childTask of selectedTasks) {
       const step = this.requiredStep(steps, this.childTaskStepKey(childTask));
+      const existing = existingTasks.get(childTask.clientTaskId);
       const execution = await this.executeStep(step, () =>
         this.writeGateway.createJiraChildTask({
           userId,
@@ -599,10 +786,21 @@ export class PublicationService {
           sourceJiraKey: draft.sourceJiraKey,
           childTask,
           template: template as NonNullable<typeof template>,
+          reconciledProviderObjectId: existing?.issueId,
+          reconciliationCompleted: true,
         }),
       );
       if (execution.outcome === 'in_progress') {
         return this.present(publication);
+      }
+      if (execution.outcome === 'stale') {
+        return this.presentLatestPublication(publication.id);
+      }
+      if (execution.outcome === 'succeeded') {
+        existingTasks.set(childTask.clientTaskId, {
+          issueId: execution.result.providerObjectId,
+          operationId: publication.operationId,
+        });
       }
     }
     return this.finalize(publication, steps, 'child_tasks', draft);
@@ -611,20 +809,41 @@ export class PublicationService {
   private async executeStep(
     step: PublicationStep,
     operation: () => Promise<PublicationWriteResult>,
+    fallbackContentHash?: string,
   ): Promise<StepExecution> {
     const existing = this.writeResultFromStep(step);
     if (existing) {
       return { outcome: 'succeeded', result: existing };
     }
-    if (!(await this.stepClaimer.claim(step.id))) {
+    const claim: StepClaim = await this.stepClaimer.claim(step.id);
+    if (!claim.claimed) {
       return { outcome: 'in_progress' };
     }
 
     step.status = 'RUNNING';
     step.errorCode = null;
     step.attempts += 1;
-    step.executionLeaseExpiresAt = new Date(Date.now() + 30_000);
+    step.executionToken = claim.executionToken;
+    step.executionLeaseExpiresAt = claim.leaseExpiresAt;
     step.updatedAt = new Date();
+
+    if (claim.reclaimedInterrupted) {
+      return this.parkInterruptedExecution(step, claim.executionToken);
+    }
+
+    let heartbeatLost = false;
+    const heartbeatTimer = setInterval(() => {
+      void this.stepClaimer
+        .heartbeat(step.id, claim.executionToken)
+        .then((alive) => {
+          if (!alive) {
+            heartbeatLost = true;
+          }
+        })
+        .catch(() => {
+          heartbeatLost = true;
+        });
+    }, PUBLICATION_STEP_HEARTBEAT_INTERVAL_MS);
 
     let result: PublicationWriteResult;
     try {
@@ -635,13 +854,30 @@ export class PublicationService {
           true,
         );
       }
+      result = {
+        ...result,
+        ...(result.contentHash || !fallbackContentHash
+          ? {}
+          : { contentHash: fallbackContentHash }),
+      };
     } catch (error) {
+      clearInterval(heartbeatTimer);
       const failure = this.failureFor(step.stepKey, error);
-      step.status = failure.retryable ? 'FAILED' : 'NEEDS_REVIEW';
+      const status = failure.retryable ? 'FAILED' : 'NEEDS_REVIEW';
+      const fenced = await this.stepClaimer.markFailed(
+        step.id,
+        claim.executionToken,
+        status,
+        failure.code,
+      );
+      if (!fenced || heartbeatLost) {
+        return { outcome: 'stale' };
+      }
+      step.status = status;
       step.errorCode = failure.code;
+      step.executionToken = null;
       step.executionLeaseExpiresAt = null;
       step.updatedAt = new Date();
-      await this.stepsRepository.save(step);
       this.metrics?.increment('publication_stage_total', {
         stage: this.metricStage(step.stepKey),
         outcome: 'failure',
@@ -649,20 +885,64 @@ export class PublicationService {
       return { outcome: 'failed' };
     }
 
+    clearInterval(heartbeatTimer);
+    const fenced = await this.stepClaimer.markSucceeded(
+      step.id,
+      claim.executionToken,
+      result,
+    );
+    if (!fenced || heartbeatLost) {
+      return { outcome: 'stale' };
+    }
     step.status = 'SUCCEEDED';
     step.providerObjectId = result.providerObjectId;
     step.providerObjectVersion = result.providerObjectVersion ?? null;
     step.providerUrl = result.providerUrl ?? null;
     step.contentHash = result.contentHash ?? null;
     step.errorCode = null;
+    step.executionToken = null;
     step.executionLeaseExpiresAt = null;
     step.updatedAt = new Date();
-    await this.stepsRepository.save(step);
     this.metrics?.increment('publication_stage_total', {
       stage: this.metricStage(step.stepKey),
       outcome: 'success',
     });
     return { outcome: 'succeeded', result };
+  }
+
+  /**
+   * A previous worker was killed while the provider write may already have
+   * been dispatched, and nothing durable records how it ended. Re-issuing the
+   * create here would rely on provider search to prove absence, which is not
+   * read-your-write consistent (Jira child tasks are found through a JQL
+   * index), so a fresh create can duplicate an object that already exists.
+   * Park the step for the revision-gated review flow instead.
+   */
+  private async parkInterruptedExecution(
+    step: PublicationStep,
+    executionToken: string,
+  ): Promise<StepExecution> {
+    const errorCode: PublicationErrorCode =
+      'PUBLICATION_RECONCILIATION_INDETERMINATE';
+    const fenced = await this.stepClaimer.markFailed(
+      step.id,
+      executionToken,
+      'NEEDS_REVIEW',
+      errorCode,
+    );
+    if (!fenced) {
+      return { outcome: 'stale' };
+    }
+    step.status = 'NEEDS_REVIEW';
+    step.errorCode = errorCode;
+    step.executionToken = null;
+    step.executionLeaseExpiresAt = null;
+    step.updatedAt = new Date();
+    this.metrics?.increment('publication_stage_total', {
+      stage: this.metricStage(step.stepKey),
+      outcome: 'failure',
+    });
+    return { outcome: 'failed' };
   }
 
   private async finalize(
@@ -673,9 +953,255 @@ export class PublicationService {
   ): Promise<BriefPublicationView> {
     const currentSteps = await this.stepsFor(publication.id);
     publication.status = this.statusFor(currentSteps, phase, draft);
+    if (
+      publication.status !== 'NEEDS_REVIEW' &&
+      !currentSteps.some((step) => step.status === 'NEEDS_REVIEW')
+    ) {
+      publication.reviewRequiredAt = null;
+    }
     publication.updatedAt = new Date();
     const saved = await this.publicationsRepository.save(publication);
     return this.present(saved, currentSteps);
+  }
+
+  private async createInitialPublication(
+    publication: BriefPublication,
+    approvalRevision: number,
+  ): Promise<InitialPublication> {
+    const createStep = (repository: Repository<PublicationStep>) =>
+      repository.create({
+        publicationId: publication.id,
+        stepKey: CONFLUENCE_STEP,
+        phase: 'confluence',
+        status: 'PENDING',
+        attempts: 0,
+        errorCode: null,
+        providerObjectId: null,
+        providerObjectVersion: null,
+        providerUrl: null,
+        contentHash: null,
+        executionToken: null,
+        executionLeaseExpiresAt: null,
+        reviewRevision: approvalRevision,
+        approvedRevision: approvalRevision,
+        idempotencyKeyHash: null,
+      });
+
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      const publications = manager.getRepository(BriefPublication);
+      const steps = manager.getRepository(PublicationStep);
+      const stored = await publications.save(publication);
+      await steps.insert(createStep(steps));
+      return {
+        publication: stored,
+        steps: await steps.find({
+          where: { publicationId: stored.id },
+          order: { createdAt: 'ASC' },
+        }),
+      };
+    });
+  }
+
+  private isEmptyPendingConfluencePublication(
+    recovered: { publication: BriefPublication; steps: PublicationStep[] },
+  ): boolean {
+    return (
+      recovered.publication.status === 'PENDING' &&
+      recovered.steps.length === 0
+    );
+  }
+
+  private async resumeEmptyConfluencePublication(
+    userId: number,
+    draft: WorkBriefDraft,
+    publication: BriefPublication,
+    input: PhaseInput,
+    correlationId: string,
+  ): Promise<BriefPublicationView> {
+    this.assertDraftVersion(draft, input.draftVersion);
+    this.assertPublicationDraftVersion(publication, draft);
+    await this.assertReadyForPublication(userId, draft, correlationId);
+    const profile = await this.findActivePublishProfile(draft);
+    this.assertSafeDraftContent(draft.maskedBrief);
+    const preview = await this.previewService.confluence(
+      userId,
+      draft,
+      profile,
+      correlationId,
+    );
+    this.assertPreview(input.previewHash, preview.previewHash);
+    const approvalRevision = this.approvalRevisionForInput(input, publication);
+    publication.approvalRevision = approvalRevision;
+    publication.confluencePreviewHash = preview.previewHash;
+    publication.approvedByUserId = userId;
+    publication.approvedAt = new Date();
+    publication.updatedAt = new Date();
+    const saved = await this.publicationsRepository.save(publication);
+    const steps = await this.ensureSteps(
+      saved,
+      'confluence',
+      [],
+      [],
+      null,
+      approvalRevision,
+    );
+    return this.runConfluence(
+      saved,
+      draft,
+      profile,
+      steps,
+      userId,
+      correlationId,
+      { ...preview, approvalRevision },
+    );
+  }
+
+  private async latestPublicationForDraft(
+    draftId: string,
+  ): Promise<BriefPublication | null> {
+    const publications = await this.publicationsRepository.find({
+      where: { draftId },
+      order: { createdAt: 'DESC' },
+    });
+    return publications.at(0) ?? null;
+  }
+
+  private async advanceApprovalRevision(
+    publication: BriefPublication,
+    phase: PublicationPhase,
+  ): Promise<number> {
+    const currentRevision = Math.max(publication.approvalRevision ?? 0, 0);
+    // Increment and read in one statement. A separate read-back can observe a
+    // concurrent preview's value and hand two callers the same revision.
+    const allocated = await this.publicationsRepository
+      .createQueryBuilder()
+      .update(BriefPublication)
+      .set({ approvalRevision: () => '"approvalRevision" + 1' })
+      .where('"id" = :id', { id: publication.id })
+      .returning(['approvalRevision'])
+      .execute();
+    const revision = Math.max(
+      this.revisionValue(allocated.raw) ?? 0,
+      currentRevision + 1,
+    );
+    publication.approvalRevision = revision;
+    const phaseSteps = await this.stepsFor(publication.id);
+    for (const step of phaseSteps.filter((candidate) => candidate.phase === phase)) {
+      await this.stepsRepository.update(
+        { id: step.id },
+        { reviewRevision: revision },
+      );
+      step.reviewRevision = revision;
+    }
+    return revision;
+  }
+
+  private revisionValue(raw: unknown): number | null {
+    const row = Array.isArray(raw) ? (raw as unknown[]).at(0) : null;
+    const value =
+      typeof row === 'object' && row !== null
+        ? (row as { approvalRevision?: unknown }).approvalRevision
+        : null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    // Postgres returns integer columns as strings through some drivers.
+    const parsed = typeof value === 'string' ? Number(value) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private approvalRevisionForInput(
+    input: PhaseInput,
+    publication: BriefPublication,
+  ): number {
+    const currentRevision = Math.max(publication.approvalRevision ?? 1, 1);
+    if (
+      input.approvalRevision !== undefined &&
+      input.approvalRevision !== currentRevision
+    ) {
+      throw new ConflictException({
+        code: 'PUBLICATION_PREVIEW_STALE',
+      });
+    }
+    return input.approvalRevision ?? currentRevision;
+  }
+
+  private phaseNeedsReview(
+    steps: readonly PublicationStep[],
+    phase: PublicationPhase,
+  ): boolean {
+    return steps.some(
+      (step) => step.phase === phase && step.status === 'NEEDS_REVIEW',
+    );
+  }
+
+  private async reopenReviewStepsIfRequired(
+    publication: BriefPublication,
+    steps: PublicationStep[],
+    phase: PublicationPhase,
+    approvalRevision: number,
+  ): Promise<boolean> {
+    const candidates = steps.filter(
+      (step) => step.phase === phase && step.status === 'NEEDS_REVIEW',
+    );
+    if (candidates.length === 0) {
+      return true;
+    }
+    if (
+      publication.approvalRevision !== approvalRevision ||
+      candidates.some((step) => step.reviewRevision !== approvalRevision)
+    ) {
+      throw new ConflictException({
+        code: 'PUBLICATION_REVIEW_APPROVAL_REQUIRED',
+      });
+    }
+
+    let reopened = false;
+    for (const step of candidates) {
+      const changed = await this.stepClaimer.reopenForReview(
+        step.id,
+        approvalRevision,
+      );
+      if (!changed) {
+        continue;
+      }
+      reopened = true;
+      step.status = 'PENDING';
+      step.errorCode = null;
+      step.approvedRevision = approvalRevision;
+      step.executionToken = null;
+      step.executionLeaseExpiresAt = null;
+      step.updatedAt = new Date();
+    }
+    return reopened;
+  }
+
+  private async presentLatestPublication(
+    publicationId: string,
+  ): Promise<BriefPublicationView> {
+    const publication = await this.publicationsRepository.findOneBy({
+      id: publicationId,
+    });
+    if (!publication) {
+      throw new NotFoundException('Brief publication was not found.');
+    }
+    const steps = await this.stepsFor(publication.id);
+    const recovered = await this.recoverPublicationFromSteps(
+      publication,
+      await this.draftForPublication(publication),
+      steps,
+    );
+    return this.present(recovered.publication, recovered.steps);
+  }
+
+  private async draftForPublication(
+    publication: BriefPublication,
+  ): Promise<WorkBriefDraft> {
+    const draft = await this.draftsRepository.findOneBy({ id: publication.draftId });
+    if (!draft) {
+      throw new NotFoundException('Brief draft was not found.');
+    }
+    return draft;
   }
 
   private statusFor(
@@ -684,6 +1210,23 @@ export class PublicationService {
     draft: WorkBriefDraft,
   ): PublicationStatus {
     const phaseSteps = steps.filter((step) => step.phase === phase);
+    if (phaseSteps.length === 0) {
+      const laterPhaseExists =
+        phase === 'confluence'
+          ? steps.some((step) => step.phase !== 'confluence')
+          : phase === 'jira'
+            ? steps.some((step) => step.phase === 'child_tasks')
+            : false;
+      return laterPhaseExists ? 'NEEDS_REVIEW' : 'PENDING';
+    }
+    if (
+      (phase === 'jira' && !this.phaseSucceeded(steps, 'confluence')) ||
+      (phase === 'child_tasks' &&
+        (!this.phaseSucceeded(steps, 'confluence') ||
+          !this.phaseSucceeded(steps, 'jira')))
+    ) {
+      return 'NEEDS_REVIEW';
+    }
     if (phaseSteps.some((step) => step.status === 'NEEDS_REVIEW')) {
       return 'NEEDS_REVIEW';
     }
@@ -710,6 +1253,7 @@ export class PublicationService {
     loadedSteps?: PublicationStep[],
     childTasks: readonly BriefChildTask[] = [],
     childTaskIdempotencyKeyHash: string | null = null,
+    approvalRevision?: number,
   ): Promise<PublicationStep[]> {
     const existing = loadedSteps ?? (await this.stepsFor(publication.id));
     const keys = this.stepKeys(phase, childTasks);
@@ -718,31 +1262,40 @@ export class PublicationService {
     if (missing.length === 0) {
       return existing;
     }
-    const created = await this.stepsRepository.save(
-      missing.map((stepKey) =>
-        this.stepsRepository.create({
-          publicationId: publication.id,
-          stepKey,
-          phase,
-          status: 'PENDING',
-          attempts: 0,
-          errorCode: null,
-          providerObjectId: null,
-          providerObjectVersion: null,
-          providerUrl: null,
-          contentHash: null,
-          executionLeaseExpiresAt: null,
-          idempotencyKeyHash:
-            phase === 'child_tasks' && childTaskIdempotencyKeyHash
-              ? this.childTaskIdempotencyHash(
-                  childTaskIdempotencyKeyHash,
-                  stepKey,
-                )
-              : null,
-        }),
-      ),
+    const revision = approvalRevision ?? publication.approvalRevision ?? 1;
+    const values = missing.map((stepKey) =>
+      this.stepsRepository.create({
+        publicationId: publication.id,
+        stepKey,
+        phase,
+        status: 'PENDING',
+        attempts: 0,
+        errorCode: null,
+        providerObjectId: null,
+        providerObjectVersion: null,
+        providerUrl: null,
+        contentHash: null,
+        executionToken: null,
+        executionLeaseExpiresAt: null,
+        reviewRevision: revision,
+        approvedRevision: revision,
+        idempotencyKeyHash:
+          phase === 'child_tasks' && childTaskIdempotencyKeyHash
+            ? this.childTaskIdempotencyHash(
+                childTaskIdempotencyKeyHash,
+                stepKey,
+              )
+            : null,
+      }),
     );
-    return [...existing, ...created];
+    await this.stepsRepository
+      .createQueryBuilder()
+      .insert()
+      .into(PublicationStep)
+      .values(values)
+      .orIgnore()
+      .execute();
+    return this.stepsFor(publication.id);
   }
 
   private stepKeys(
@@ -783,9 +1336,25 @@ export class PublicationService {
     }
 
     const phase = this.latestPhase(steps);
-    const recoveredStatus = this.statusFor(steps, phase, draft);
+    const invalidPhaseOrder = this.hasInvalidPhaseOrder(steps);
+    const recoveredStatus = invalidPhaseOrder
+      ? 'NEEDS_REVIEW'
+      : this.statusFor(steps, phase, draft);
     if (publication.status !== recoveredStatus) {
       publication.status = recoveredStatus;
+      changed = true;
+    }
+    if (invalidPhaseOrder && !publication.reviewRequiredAt) {
+      publication.reviewRequiredAt = new Date();
+      changed = true;
+    }
+    if (
+      !invalidPhaseOrder &&
+      recoveredStatus !== 'NEEDS_REVIEW' &&
+      !steps.some((step) => step.status === 'NEEDS_REVIEW') &&
+      publication.reviewRequiredAt
+    ) {
+      publication.reviewRequiredAt = null;
       changed = true;
     }
 
@@ -808,6 +1377,17 @@ export class PublicationService {
       return 'jira';
     }
     return 'confluence';
+  }
+
+  private hasInvalidPhaseOrder(steps: readonly PublicationStep[]): boolean {
+    const hasJira = steps.some((step) => step.phase === 'jira');
+    const hasChildTasks = steps.some((step) => step.phase === 'child_tasks');
+    return (
+      (hasJira && !this.phaseSucceeded(steps, 'confluence')) ||
+      (hasChildTasks &&
+        (!this.phaseSucceeded(steps, 'confluence') ||
+          !this.phaseSucceeded(steps, 'jira')))
+    );
   }
 
   private applyStepResult(
@@ -1137,6 +1717,7 @@ export class PublicationService {
     const steps = loadedSteps ?? (await this.stepsFor(publication.id));
     const requiresReview =
       Boolean(publication.reviewRequiredAt) ||
+      publication.status === 'NEEDS_REVIEW' ||
       steps.some((step) => step.status === 'NEEDS_REVIEW');
     return {
       id: publication.id,

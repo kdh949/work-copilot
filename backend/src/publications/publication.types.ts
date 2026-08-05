@@ -17,6 +17,7 @@ export type PublicationExecutionMode = 'mock' | 'real';
 export type PublicationErrorCode =
   | 'CONFLUENCE_VERSION_CONFLICT'
   | 'CONFLUENCE_WRITE_FAILED'
+  | 'PUBLICATION_RECONCILIATION_INDETERMINATE'
   | 'JIRA_REMOTE_LINK_FAILED'
   | 'JIRA_SUMMARY_COMMENT_FAILED'
   | 'JIRA_CHILD_TASK_FAILED';

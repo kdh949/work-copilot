@@ -28,8 +28,10 @@ function createGateway(readResponses: unknown[], writeResponses: unknown[]) {
     getJson: jest.fn(() => Promise.resolve(readResponses.shift())),
   };
   const writeClient = {
-    postJson: jest.fn(() => Promise.resolve(writeResponses.shift())),
-    putJson: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    postJsonExpectObject: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    postJsonAllowEmpty: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    putJsonExpectObject: jest.fn(() => Promise.resolve(writeResponses.shift())),
+    putJsonAllowEmpty: jest.fn(() => Promise.resolve(writeResponses.shift())),
   };
   const gateway = new AtlassianPublicationWriteGateway(
     oauth as never,
@@ -119,7 +121,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       PROFILE,
       'ENG',
     );
-    expect(harness.writeClient.postJson).toHaveBeenNthCalledWith(
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenNthCalledWith(
       1,
       expect.any(URL),
       'https://confluence.example.test/',
@@ -130,7 +132,7 @@ describe('AtlassianPublicationWriteGateway', () => {
         title: expectedConfluenceTitle(),
       }),
     );
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
   it('reuses a page carrying the same deterministic title without another write', async () => {
@@ -161,7 +163,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     ).resolves.toMatchObject({
       providerObjectId: '99',
     });
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('reconciles a page after an ambiguous create response without a property write', async () => {
@@ -191,8 +193,108 @@ describe('AtlassianPublicationWriteGateway', () => {
     await expect(
       harness.gateway.upsertConfluenceBrief(input),
     ).resolves.toMatchObject({ providerObjectId: '99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a 201 empty Confluence create response before accepting success', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: [] } },
+        {
+          status: 'ok',
+          body: {
+            results: [
+              { id: '99', title: expectedConfluenceTitle(), version: { number: 1 } },
+            ],
+          },
+        },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).resolves.toMatchObject({ providerObjectId: '99' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send another create when an empty response cannot be reconciled', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'ok', body: { results: [] } },
+        { status: 'ok', body: { results: [] } },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    // The create was dispatched, so a plain retry could create a second page.
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: false,
+    });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create when the Confluence listing is access limited', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        { status: 'access_limited' },
+      ],
+      [],
+    );
+
+    await expect(harness.gateway.upsertConfluenceBrief(input)).rejects.toThrow(
+      'PUBLICATION_RECONCILIATION_INDETERMINATE',
+    );
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('does not create when the marker is beyond the reconciliation page budget', async () => {
+    const pages = Array.from({ length: 5 }, () => ({
+      status: 'ok',
+      body: {
+        results: Array.from({ length: 50 }, (_, index) => ({
+          id: `unrelated-${index}`,
+          title: 'different title',
+          version: { number: 1 },
+        })),
+        total: 300,
+      },
+    }));
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: { id: '55', space: { key: 'ENG' }, version: { number: 4 } },
+        },
+        ...pages,
+      ],
+      [],
+    );
+
+    // Nothing was dispatched, so this stays a safe retry.
+    await expect(
+      harness.gateway.upsertConfluenceBrief(input),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: true,
+    });
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('finds a Confluence title marker on a later child-page page', async () => {
@@ -229,7 +331,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       harness.gateway.upsertConfluenceBrief(input),
     ).resolves.toMatchObject({ providerObjectId: '99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(3);
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('finds a summary comment marker on a later result page', async () => {
@@ -265,7 +367,80 @@ describe('AtlassianPublicationWriteGateway', () => {
       }),
     ).resolves.toEqual({ providerObjectId: 'comment-99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('treats a malformed remote-link lookup as indeterminate', async () => {
+    const harness = createGateway(
+      [{ status: 'ok', body: {} }],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertJiraRemoteLink({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        confluenceContentId: '99',
+        confluenceUrl: 'https://confluence.example.test/pages/99',
+        confluenceTitle: '배포 브리프',
+      }),
+    ).rejects.toThrow('PUBLICATION_RECONCILIATION_INDETERMINATE');
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an empty remote-link create response without a second create', async () => {
+    const harness = createGateway(
+      [
+        { status: 'not_found' },
+        { status: 'ok', body: { id: 99 } },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(
+      harness.gateway.upsertJiraRemoteLink({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        confluenceContentId: '99',
+        confluenceUrl: 'https://confluence.example.test/pages/99',
+        confluenceTitle: '배포 브리프',
+      }),
+    ).resolves.toEqual({
+      providerObjectId: '99',
+      providerUrl: 'https://confluence.example.test/pages/99',
+    });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles an empty Jira comment create response by its marker', async () => {
+    const marker = `[work-copilot-operation:${input.operationId}]`;
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { comments: [], total: 0 } },
+        { status: 'ok', body: { comments: [{ id: 'comment-99', body: marker }] } },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraSummaryComment({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        summary: '요약',
+        confluenceContentId: '99',
+        confluenceUrl: 'https://confluence.example.test/pages/99',
+      }),
+    ).resolves.toEqual({ providerObjectId: 'comment-99' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
   it('creates the child-task operation marker atomically in issue creation', async () => {
@@ -295,7 +470,7 @@ describe('AtlassianPublicationWriteGateway', () => {
     });
 
     expect(result).toEqual({ providerObjectId: 'child-99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledWith(
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledWith(
       expect.any(URL),
       'https://jira.example.test/',
       'user-token',
@@ -316,7 +491,118 @@ describe('AtlassianPublicationWriteGateway', () => {
         ],
       }),
     );
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an empty child-task create response by its property marker', async () => {
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: [], total: 0 } },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-99',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 1,
+          },
+        },
+      ],
+      [{ status: 'ok_empty' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraId: '42',
+        sourceJiraKey: 'ENG-42',
+        childTask: {
+          clientTaskId: 'child-task-1',
+          text: '하위 작업',
+          summary: '하위 작업 요약',
+          evidenceIds: [],
+          selected: true,
+        },
+        template: { issueTypeId: '10001', fields: {} },
+      }),
+    ).resolves.toEqual({ providerObjectId: 'child-99' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('collects child-task markers for a phase in one paginated reconciliation', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-1',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 2,
+          },
+        },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-2',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-2',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 2,
+          },
+        },
+      ],
+      [],
+    );
+
+    const result = await harness.gateway.reconcileJiraChildTasks({
+      userId: 7,
+      correlationId: 'correlation-1',
+      profile: PROFILE,
+      operationId: input.operationId,
+      sourceJiraKey: 'ENG-42',
+      clientTaskIds: ['child-task-1', 'child-task-2'],
+    });
+
+    expect(result).toMatchObject({ status: 'found' });
+    if (result.status === 'found') {
+      expect(result.value.get('child-task-1')?.issueId).toBe('child-1');
+      expect(result.value.get('child-task-2')?.issueId).toBe('child-2');
+    }
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 
   it('reconciles an ambiguous child-task create through its atomic marker', async () => {
@@ -355,7 +641,206 @@ describe('AtlassianPublicationWriteGateway', () => {
         template: { issueTypeId: '10001', fields: {} },
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
-    expect(harness.writeClient.postJson).toHaveBeenCalledTimes(1);
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  const childTaskInput = {
+    userId: 7,
+    correlationId: 'correlation-1',
+    profile: PROFILE,
+    operationId: input.operationId,
+    sourceJiraId: '42',
+    sourceJiraKey: 'ENG-42',
+    childTask: {
+      clientTaskId: 'child-task-1',
+      text: '하위 작업',
+      summary: '하위 작업 요약',
+      evidenceIds: [],
+      selected: true,
+    },
+    template: { issueTypeId: '10001', fields: {} },
+    reconciliationCompleted: true,
+  };
+
+  it('does not spend property lookups on children the search proved are not ours', async () => {
+    // 50 unrelated children whose property set came back empty: the search
+    // already answered for them, so no per-issue lookup may be issued.
+    const unrelated = Array.from({ length: 50 }, (_, index) => ({
+      id: `child-${index}`,
+      properties: {},
+    }));
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: unrelated, total: 51 } },
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-99',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 51,
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.reconcileJiraChildTasks({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraKey: 'ENG-42',
+        clientTaskIds: ['child-task-1'],
+      }),
+    ).resolves.toMatchObject({ status: 'found' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('still looks up a property the search response never carried', async () => {
+    const harness = createGateway(
+      [
+        { status: 'ok', body: { issues: [{ id: 'child-99' }], total: 1 } },
+        {
+          status: 'ok',
+          body: {
+            value: {
+              operationId: input.operationId,
+              clientTaskId: 'child-task-1',
+            },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.reconcileJiraChildTasks({
+        userId: 7,
+        correlationId: 'correlation-1',
+        profile: PROFILE,
+        operationId: input.operationId,
+        sourceJiraKey: 'ENG-42',
+        clientTaskIds: ['child-task-1'],
+      }),
+    ).resolves.toMatchObject({ status: 'found' });
+    expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to reuse a stored page whose title no longer matches the content', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            id: '99',
+            title: '[ENG-42] 이전 내용',
+            space: { key: 'ENG' },
+            version: { number: 7 },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief({
+        ...input,
+        existingContentId: '99',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLUENCE_VERSION_CONFLICT',
+      retryable: false,
+    });
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('reuses a stored page that still carries this revision title marker', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            id: '99',
+            title: expectedConfluenceTitle(),
+            space: { key: 'ENG' },
+            version: { number: 7 },
+          },
+        },
+      ],
+      [],
+    );
+
+    await expect(
+      harness.gateway.upsertConfluenceBrief({
+        ...input,
+        existingContentId: '99',
+      }),
+    ).resolves.toMatchObject({
+      providerObjectId: '99',
+      providerObjectVersion: '7',
+    });
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
+  });
+
+  it('treats a 5xx child-task create as an ambiguous write and reconciles it', async () => {
+    const harness = createGateway(
+      [
+        {
+          status: 'ok',
+          body: {
+            issues: [
+              {
+                id: 'child-77',
+                properties: {
+                  'work-copilot.publication-task': {
+                    value: {
+                      operationId: input.operationId,
+                      clientTaskId: 'child-task-1',
+                    },
+                  },
+                },
+              },
+            ],
+            total: 1,
+          },
+        },
+      ],
+      [{ status: 'unavailable' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask(childTaskInput),
+    ).resolves.toEqual({ providerObjectId: 'child-77' });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks an unconfirmed child-task write non-retryable so a retry cannot duplicate it', async () => {
+    // The Jira issue search is index-backed, so an empty result right after a
+    // dispatched create is not proof that the issue is absent.
+    const harness = createGateway(
+      [{ status: 'ok', body: { issues: [], total: 0 } }],
+      [{ status: 'unavailable' }],
+    );
+
+    await expect(
+      harness.gateway.createJiraChildTask(childTaskInput),
+    ).rejects.toMatchObject({
+      code: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      retryable: false,
+    });
+    expect(harness.writeClient.postJsonExpectObject).toHaveBeenCalledTimes(1);
   });
 
   it('finds a child-task marker on the second Jira search page without property N+1', async () => {
@@ -412,7 +897,7 @@ describe('AtlassianPublicationWriteGateway', () => {
       }),
     ).resolves.toEqual({ providerObjectId: 'child-99' });
     expect(harness.readClient.getJson).toHaveBeenCalledTimes(2);
-    expect(harness.writeClient.putJson).not.toHaveBeenCalled();
-    expect(harness.writeClient.postJson).not.toHaveBeenCalled();
+    expect(harness.writeClient.putJsonExpectObject).not.toHaveBeenCalled();
+    expect(harness.writeClient.postJsonExpectObject).not.toHaveBeenCalled();
   });
 });

@@ -16,6 +16,23 @@ export type PublicationWriteResult = {
   contentHash?: string;
 };
 
+export type ReconciliationResult<T> =
+  | { status: 'found'; value: T }
+  | { status: 'absent' }
+  | {
+      status: 'indeterminate';
+      reason:
+        | 'budget_exhausted'
+        | 'access_limited'
+        | 'provider_unavailable'
+        | 'invalid_response';
+    };
+
+export type ChildTaskReconciliationEntry = {
+  issueId: string;
+  operationId: string;
+};
+
 type PublicationGatewayContext = {
   userId: number;
   correlationId: string;
@@ -60,8 +77,17 @@ export type PublicationWriteGateway = {
       sourceJiraKey: string;
       childTask: BriefChildTask;
       template: ChildTaskTemplate;
+      reconciledProviderObjectId?: string;
+      reconciliationCompleted?: boolean;
     },
   ): Promise<PublicationWriteResult>;
+  reconcileJiraChildTasks(
+    input: PublicationGatewayContext & {
+      operationId: string;
+      sourceJiraKey: string;
+      clientTaskIds: readonly string[];
+    },
+  ): Promise<ReconciliationResult<Map<string, ChildTaskReconciliationEntry>>>;
 };
 
 export class PublicationGatewayError extends Error {

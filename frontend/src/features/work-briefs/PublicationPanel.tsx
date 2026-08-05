@@ -57,6 +57,7 @@ export function PublicationPanel({
   const preview = phase ? previews[phase] : undefined;
   const status = publication?.status;
   const needsReview = publication?.requiresReview ?? false;
+  const anotherRequestIsPublishing = status === "PUBLISHING" && !isPublishing;
 
   return (
     <section
@@ -99,6 +100,12 @@ export function PublicationPanel({
         <PublicationSteps publication={publication} />
       ) : null}
 
+      {anotherRequestIsPublishing ? (
+        <Alert tone="warning" className="work-brief-blocker">
+          다른 요청이 게시를 처리 중입니다. 완료 상태가 갱신될 때까지 중복 실행할 수 없습니다.
+        </Alert>
+      ) : null}
+
       {!publicationAllowed ? (
         <Alert tone="warning" className="work-brief-blocker">
           준비성 점검과 근거 freshness가 통과하기 전에는 게시할 수 없습니다.
@@ -110,6 +117,7 @@ export function PublicationPanel({
           preview={preview}
           approved={approvals[phase]}
           isPublishing={isPublishing}
+          anotherRequestIsPublishing={anotherRequestIsPublishing}
           isLoadingPreview={isLoadingPreview}
           requiresReview={needsReview}
           onApprovalChange={onApprovalChange}
@@ -129,6 +137,7 @@ function PublicationPhaseApproval({
   preview,
   approved,
   isPublishing,
+  anotherRequestIsPublishing,
   isLoadingPreview,
   requiresReview,
   onApprovalChange,
@@ -140,6 +149,7 @@ function PublicationPhaseApproval({
   preview: PublicationPreviews[PublicationPhase];
   approved: boolean;
   isPublishing: boolean;
+  anotherRequestIsPublishing: boolean;
   isLoadingPreview: boolean;
   requiresReview: boolean;
   onApprovalChange: (phase: PublicationPhase, approved: boolean) => void;
@@ -162,9 +172,11 @@ function PublicationPhaseApproval({
             variant="secondary"
             size="sm"
             onClick={() => onPrepare(phase)}
-            disabled={isLoadingPreview || isPublishing}
+            disabled={
+              isLoadingPreview || isPublishing || anotherRequestIsPublishing
+            }
           >
-            미리보기 새로 고침
+            {phaseLabel[phase]} 미리보기 다시 열기
           </Button>
         ) : null}
       </div>
@@ -189,22 +201,26 @@ function PublicationPhaseApproval({
           <Button
             type="button"
             onClick={() => onPrepare(phase)}
-            disabled={isLoadingPreview || isPublishing}
+            disabled={
+              isLoadingPreview || isPublishing || anotherRequestIsPublishing
+            }
           >
             {isLoadingPreview
               ? "미리보기 준비 중"
-              : `${phaseLabel[phase]} 미리보기`}
+              : `${phaseLabel[phase]} 미리보기 열기`}
           </Button>
         ) : (
           <Button
             type="button"
             onClick={() => onExecute(phase)}
-            disabled={!approved || isPublishing}
+            disabled={
+              !approved || isPublishing || anotherRequestIsPublishing
+            }
           >
             {isPublishing
               ? "반영 중"
               : requiresReview
-                ? "검토 후 다시 시도"
+                ? `${phaseLabel[phase]} 다시 승인 및 실행`
                 : `${phaseLabel[phase]} 승인 및 실행`}
           </Button>
         )}

@@ -1,6 +1,7 @@
 import { createDatabaseOptions } from './database.config';
 import { WorkCopilotFoundation1785510000000 } from '../database/migrations/2026080100000-work-copilot-foundation';
 import { PublicationSagaState1785609800000 } from '../database/migrations/2026080200000-publication-saga-state';
+import { PublicationExecutionFencing1785873600000 } from '../database/migrations/2026080500000-publication-execution-fencing';
 
 describe('createDatabaseOptions', () => {
   it('disables automatic schema synchronization and registers the migration', () => {
@@ -18,6 +19,7 @@ describe('createDatabaseOptions', () => {
     expect(options.migrationsTableName).toBe('schema_migrations');
     expect(options.migrations).toContain(WorkCopilotFoundation1785510000000);
     expect(options.migrations).toContain(PublicationSagaState1785609800000);
+    expect(options.migrations).toContain(PublicationExecutionFencing1785873600000);
   });
 
   it('rejects invalid database ports before a connection is attempted', () => {
