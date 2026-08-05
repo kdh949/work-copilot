@@ -89,7 +89,10 @@ function matches(
   );
 }
 
-function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
+function createHarness(
+  selectedTaskIds: string[] = [FIRST_TASK_ID],
+  options: { transactional?: boolean } = {},
+) {
   const draft = createDraft(selectedTaskIds);
   const profile = createProfile();
   const publications: BriefPublication[] = [];
@@ -98,6 +101,7 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   let stepCounter = 0;
   let publicationSaveFailure:
     ((publication: BriefPublication) => boolean) | null = null;
+  let failStepInsert = false;
 
   const draftsRepository = {
     findOneBy: jest.fn(() => Promise.resolve(draft)),
@@ -136,6 +140,16 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         publications.filter((item) => matches(item as never, where)),
       ),
     ),
+    increment: jest.fn(
+      (where: Record<string, unknown>, property: string, amount: number) => {
+        const publication = publications.find((item) => matches(item as never, where));
+        if (publication) {
+          const current = Number(publication[property as keyof BriefPublication] ?? 0);
+          (publication as unknown as Record<string, unknown>)[property] = current + amount;
+        }
+        return Promise.resolve();
+      },
+    ),
   };
   const stepsRepository = {
     create: jest.fn((values: Partial<PublicationStep>) => ({
@@ -155,6 +169,41 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         }
       }
       return Promise.resolve(value);
+    }),
+    upsert: jest.fn((values: PublicationStep[]) => {
+      for (const step of values) {
+        const existing = steps.find(
+          (item) =>
+            item.publicationId === step.publicationId &&
+            item.stepKey === step.stepKey,
+        );
+        if (existing) {
+          Object.assign(existing, step);
+        } else {
+          steps.push(step);
+        }
+      }
+      return Promise.resolve();
+    }),
+    update: jest.fn(
+      (where: Record<string, unknown>, values: Partial<PublicationStep>) => {
+        for (const step of steps) {
+          if (matches(step as never, where)) {
+            Object.assign(step, values);
+          }
+        }
+        return Promise.resolve();
+      },
+    ),
+    insert: jest.fn((value: PublicationStep) => {
+      if (failStepInsert) {
+        return Promise.reject(new Error('step insert failed'));
+      }
+      const existing = steps.find((item) => item.id === value.id);
+      if (!existing) {
+        steps.push(value);
+      }
+      return Promise.resolve();
     }),
     find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
       Promise.resolve(steps.filter((item) => matches(item as never, where))),
@@ -235,8 +284,87 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   };
   const gateway = new MockPublicationWriteGateway();
   const stepClaimer = {
-    claim: jest.fn().mockResolvedValue(true),
+    claim: jest.fn().mockResolvedValue({
+      claimed: true,
+      executionToken: 'execution-token-test',
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+    }),
+    heartbeat: jest.fn().mockResolvedValue(true),
+    reopenForReview: jest.fn((stepId: string, revision: number) => {
+      const step = steps.find((candidate) => candidate.id === stepId);
+      if (
+        !step ||
+        step.status !== 'NEEDS_REVIEW' ||
+        step.reviewRevision !== revision ||
+        (step.approvedRevision !== null &&
+          step.approvedRevision >= step.reviewRevision)
+      ) {
+        return Promise.resolve(false);
+      }
+      step.status = 'PENDING';
+      step.errorCode = null;
+      step.approvedRevision = revision;
+      step.executionToken = null;
+      step.executionLeaseExpiresAt = null;
+      return Promise.resolve(true);
+    }),
+    markSucceeded: jest.fn(
+      (stepId: string, _token: string, result: PublicationWriteResult) => {
+        const step = steps.find((candidate) => candidate.id === stepId);
+        if (!step) return Promise.resolve(false);
+        Object.assign(step, {
+          status: 'SUCCEEDED',
+          providerObjectId: result.providerObjectId,
+          providerObjectVersion: result.providerObjectVersion ?? null,
+          providerUrl: result.providerUrl ?? null,
+          contentHash: result.contentHash ?? null,
+          errorCode: null,
+          executionToken: null,
+          executionLeaseExpiresAt: null,
+        });
+        return Promise.resolve(true);
+      },
+    ),
+    markFailed: jest.fn(
+      (stepId: string, _token: string, status: PublicationStep['status'], errorCode: PublicationStep['errorCode']) => {
+        const step = steps.find((candidate) => candidate.id === stepId);
+        if (!step) return Promise.resolve(false);
+        Object.assign(step, {
+          status,
+          errorCode,
+          executionToken: null,
+          executionLeaseExpiresAt: null,
+        });
+        return Promise.resolve(true);
+      },
+    ),
   };
+  const dataSource = options.transactional
+    ? {
+        transaction: async (
+          callback: (manager: {
+            getRepository: (
+              entity: unknown,
+            ) => typeof publicationsRepository | typeof stepsRepository;
+          }) => unknown,
+        ) => {
+          const publicationSnapshot = [...publications];
+          const stepSnapshot = [...steps];
+          try {
+            return await callback({
+              getRepository: jest
+                .fn()
+                .mockReturnValueOnce(publicationsRepository)
+                .mockReturnValueOnce(stepsRepository),
+            });
+          } catch (error) {
+            publications.splice(0, publications.length, ...publicationSnapshot);
+            steps.splice(0, steps.length, ...stepSnapshot);
+            throw error;
+          }
+        },
+      }
+    : undefined;
   const service = new PublicationService(
     draftsRepository as never,
     profilesRepository as never,
@@ -246,6 +374,8 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     previewService as never,
     gateway,
     stepClaimer as never,
+    undefined,
+    dataSource,
   );
 
   return {
@@ -258,6 +388,11 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     readinessService,
     previewService,
     stepClaimer,
+    publicationsRepository,
+    dataSource,
+    failStepInsert: () => {
+      failStepInsert = true;
+    },
     failPublicationSaveWhen: (
       predicate: (publication: BriefPublication) => boolean,
     ) => {
@@ -330,6 +465,105 @@ async function publishChildTasks(
 }
 
 describe('PublicationService', () => {
+  it('rolls back the publication when the initial Confluence step insert fails', async () => {
+    const harness = createHarness([FIRST_TASK_ID], { transactional: true });
+    harness.failStepInsert();
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    await expect(
+      harness.service.publish(
+        7,
+        DRAFT_ID,
+        {
+          draftVersion: 3,
+          approved: true,
+          previewHash: preview.previewHash,
+          approvalRevision: preview.approvalRevision,
+          idempotencyKey: 'transaction-rollback-key',
+        },
+        'corr',
+      ),
+    ).rejects.toThrow('step insert failed');
+
+    expect(harness.publications).toHaveLength(0);
+    expect(harness.steps).toHaveLength(0);
+  });
+
+  it('repairs a pending publication with no steps before calling Confluence', async () => {
+    const harness = createHarness();
+    harness.publications.push(
+      harness.publicationsRepository.create({
+        draftId: DRAFT_ID,
+        operationId: 'seed-operation',
+        idempotencyKeyHash: 'seed-key',
+        draftVersion: 3,
+        status: 'PENDING',
+        approvalRevision: 1,
+        confluenceContentId: null,
+        jiraRemoteLinkId: null,
+        jiraSummaryCommentId: null,
+        confluencePageVersion: null,
+        confluencePageUrl: null,
+        confluenceContentHash: null,
+        requestedByUserId: 7,
+        requestedAt: new Date(),
+        approvedByUserId: 7,
+        approvedAt: new Date(),
+        jiraIdempotencyKeyHash: null,
+        childTasksIdempotencyKeyHash: null,
+        confluencePreviewHash: null,
+        jiraPreviewHash: null,
+        childTasksPreviewHash: null,
+        jiraApprovedByUserId: null,
+        jiraApprovedAt: null,
+        childTasksApprovedByUserId: null,
+        childTasksApprovedAt: null,
+        executionMode: 'mock',
+        reviewRequiredAt: null,
+      }),
+    );
+    const preview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+
+    const recovered = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        approvalRevision: preview.approvalRevision,
+        idempotencyKey: 'repair-empty-step-key',
+      },
+      'corr',
+    );
+
+    expect(recovered.status).toBe('CONFLUENCE_PUBLISHED');
+    expect(harness.steps).toHaveLength(1);
+    expect(confluence).toHaveBeenCalledTimes(1);
+  });
+
+  it('never treats an empty current phase as completed', () => {
+    const harness = createHarness();
+    const service = harness.service as unknown as {
+      statusFor: (
+        steps: readonly PublicationStep[],
+        phase: 'confluence' | 'jira' | 'child_tasks',
+        draft: WorkBriefDraft,
+      ) => string;
+    };
+
+    expect(service.statusFor([], 'confluence', harness.draft)).toBe('PENDING');
+  });
+
   it('creates only the Confluence page after the first approved preview', async () => {
     const harness = createHarness();
     const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
@@ -388,6 +622,208 @@ describe('PublicationService', () => {
 
     expect(retried.status).toBe('CONFLUENCE_PUBLISHED');
     expect(retried.confluencePage).toEqual(published.confluencePage);
+    expect(confluence).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse the old approval after a non-retryable provider failure', async () => {
+    const harness = createHarness();
+    harness.gateway.failNext(
+      'confluence_page',
+      'CONFLUENCE_WRITE_FAILED',
+      false,
+    );
+    const confluence = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+    const firstPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const first = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: firstPreview.previewHash,
+        approvalRevision: firstPreview.approvalRevision,
+        idempotencyKey: 'needs-review-key',
+      },
+      'corr',
+    );
+
+    expect(first.status).toBe('NEEDS_REVIEW');
+    const oldApproval = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      first.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: firstPreview.previewHash,
+        approvalRevision: firstPreview.approvalRevision,
+        idempotencyKey: 'old-review-key',
+      },
+      'corr',
+    );
+
+    expect(oldApproval.status).toBe('NEEDS_REVIEW');
+    expect(confluence).toHaveBeenCalledTimes(1);
+
+    const freshPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const retried = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      first.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: freshPreview.previewHash,
+        approvalRevision: freshPreview.approvalRevision,
+        idempotencyKey: 'fresh-review-key',
+      },
+      'corr',
+    );
+
+    expect(retried.status).toBe('CONFLUENCE_PUBLISHED');
+    expect(confluence).toHaveBeenCalledTimes(2);
+  });
+
+  it('requires a new approval revision even when the regenerated preview hash is unchanged', async () => {
+    const harness = createHarness();
+    harness.gateway.failNext(
+      'confluence_page',
+      'CONFLUENCE_WRITE_FAILED',
+      false,
+    );
+    const firstPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const first = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: firstPreview.previewHash,
+        approvalRevision: 1,
+        idempotencyKey: 'same-hash-needs-review',
+      },
+      'corr',
+    );
+    const freshPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+
+    await expect(
+      harness.service.retry(
+        7,
+        DRAFT_ID,
+        first.id,
+        {
+          phase: 'confluence',
+          draftVersion: 3,
+          approved: true,
+          previewHash: freshPreview.previewHash,
+          approvalRevision: 1,
+          idempotencyKey: 'same-hash-old-revision',
+        },
+        'corr',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(
+      harness.steps.find((step) => step.stepKey === 'confluence_page')?.status,
+    ).toBe('NEEDS_REVIEW');
+  });
+
+  it('lets only one concurrent fresh approval reopen and execute a needs-review step', async () => {
+    const harness = createHarness();
+    harness.gateway.failNext(
+      'confluence_page',
+      'CONFLUENCE_WRITE_FAILED',
+      false,
+    );
+    const firstPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    const failed = await harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: firstPreview.previewHash,
+        approvalRevision: firstPreview.approvalRevision,
+        idempotencyKey: 'concurrent-review-seed',
+      },
+      'corr',
+    );
+    const freshPreview = await harness.service.previewConfluence(
+      7,
+      DRAFT_ID,
+      'corr',
+    );
+    let resolveProvider: ((result: PublicationWriteResult) => void) | undefined;
+    const provider = new Promise<PublicationWriteResult>((resolve) => {
+      resolveProvider = resolve;
+    });
+    const confluence = jest
+      .spyOn(harness.gateway, 'upsertConfluenceBrief')
+      .mockImplementation(() => provider);
+    harness.stepClaimer.claim
+      .mockResolvedValueOnce({
+        claimed: true,
+        executionToken: 'fresh-token',
+        leaseExpiresAt: new Date(Date.now() + 30_000),
+      })
+      .mockResolvedValueOnce({ claimed: false });
+
+    const first = harness.service.retry(
+      7,
+      DRAFT_ID,
+      failed.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: freshPreview.previewHash,
+        approvalRevision: freshPreview.approvalRevision,
+        idempotencyKey: 'concurrent-review-first',
+      },
+      'corr',
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const second = await harness.service.retry(
+      7,
+      DRAFT_ID,
+      failed.id,
+      {
+        phase: 'confluence',
+        draftVersion: 3,
+        approved: true,
+        previewHash: freshPreview.previewHash,
+        approvalRevision: freshPreview.approvalRevision,
+        idempotencyKey: 'concurrent-review-second',
+      },
+      'corr',
+    );
+
+    resolveProvider?.({ providerObjectId: 'reconciled-page' });
+    const firstResult = await first;
+
+    expect(second.status).toBe('PUBLISHING');
+    expect(firstResult.status).toBe('CONFLUENCE_PUBLISHED');
     expect(confluence).toHaveBeenCalledTimes(1);
   });
 
@@ -705,9 +1141,17 @@ describe('PublicationService', () => {
     );
     harness.stepClaimer.claim.mockClear();
     harness.stepClaimer.claim
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValue(true);
+      .mockResolvedValueOnce({
+        claimed: true,
+        executionToken: 'execution-token-first',
+        leaseExpiresAt: new Date(Date.now() + 30_000),
+      })
+      .mockResolvedValueOnce({ claimed: false })
+      .mockResolvedValue({
+        claimed: true,
+        executionToken: 'execution-token-next',
+        leaseExpiresAt: new Date(Date.now() + 30_000),
+      });
 
     let resolveLink: (result: PublicationWriteResult) => void;
     const pendingLink = new Promise<PublicationWriteResult>((resolve) => {

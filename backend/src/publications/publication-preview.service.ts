@@ -25,6 +25,7 @@ type PreviewEvidence = {
 export type ConfluencePublicationPreview = {
   phase: 'confluence';
   draftVersion: number;
+  approvalRevision?: number;
   previewHash: string;
   spaceKey: string;
   parentPage: { id: string; title: string; url: string; version: string };
@@ -37,6 +38,7 @@ export type ConfluencePublicationPreview = {
 export type JiraPublicationPreview = {
   phase: 'jira';
   draftVersion: number;
+  approvalRevision?: number;
   previewHash: string;
   confluencePage: { id: string; url: string; title: string };
   remoteLink: { globalId: string; url: string; title: string };
@@ -46,6 +48,7 @@ export type JiraPublicationPreview = {
 export type ChildTasksPublicationPreview = {
   phase: 'child_tasks';
   draftVersion: number;
+  approvalRevision?: number;
   previewHash: string;
   configurationFingerprint: string;
   childTasks: Array<{

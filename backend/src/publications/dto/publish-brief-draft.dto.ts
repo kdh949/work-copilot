@@ -25,6 +25,10 @@ export class PublishBriefDraftDto {
   @IsString()
   @Matches(/^[a-f0-9]{64}$/i)
   previewHash: string;
+
+  @IsInt()
+  @Min(1)
+  approvalRevision: number;
 }
 
 export class RetryPublicationDto extends PublishBriefDraftDto {
