@@ -21,6 +21,28 @@ const initialContent: BriefContent = {
   childTasks: [],
 };
 
+/** A schema v2 model output where every item cites only what supports it. */
+const aiOutput = (overrides: Record<string, unknown> = {}) => ({
+  schemaVersion: 2,
+  title: { text: '배포 준비', evidenceIds: ['jira:100'] },
+  summary: { text: '테스트를 진행합니다.', evidenceIds: ['jira:100'] },
+  keyPoints: [{ text: '회귀 테스트를 실행합니다.', evidenceIds: ['jira:100'] }],
+  acceptanceCriteria: [
+    { text: '회귀 테스트가 모두 통과한다.', evidenceIds: ['jira:100'] },
+  ],
+  risks: [{ text: '일정 지연', evidenceIds: ['jira:100'] }],
+  nextSteps: [{ text: '승인 요청', evidenceIds: ['jira:100'] }],
+  childTasks: [
+    {
+      summary: '회귀 테스트 실행',
+      text: '릴리스 전 회귀 테스트를 실행한다.',
+      evidenceIds: ['jira:100'],
+    },
+  ],
+  excludedEvidence: [],
+  ...overrides,
+});
+
 const createDraft = (
   overrides: Partial<WorkBriefDraft> = {},
 ): WorkBriefDraft => ({
@@ -155,14 +177,7 @@ describe('WorkBriefsService', () => {
         },
       ],
     });
-    aiClient.generate.mockResolvedValue({
-      title: '배포 준비',
-      summary: '테스트를 진행합니다.',
-      keyPoints: ['회귀 테스트를 실행합니다.'],
-      risks: ['일정 지연'],
-      nextSteps: ['승인 요청'],
-      evidenceIds: ['jira:100'],
-    });
+    aiClient.generate.mockResolvedValue(aiOutput());
     const stored = createDraft();
     let createdInput: Partial<WorkBriefDraft> | undefined;
     repository.create.mockImplementation((value) => {
@@ -235,14 +250,14 @@ describe('WorkBriefsService', () => {
         },
       ],
     });
-    aiClient.generate.mockResolvedValue({
-      title: '배포 준비',
-      summary: '테스트를 진행합니다.',
-      keyPoints: ['회귀 테스트를 실행합니다.'],
-      risks: ['일정 지연'],
-      nextSteps: ['승인 요청'],
-      evidenceIds: ['jira:100', 'confluence:200'],
-    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        summary: {
+          text: '테스트를 진행합니다.',
+          evidenceIds: ['confluence:200'],
+        },
+      }),
+    );
 
     await createService().createDraft(
       7,
@@ -267,6 +282,163 @@ describe('WorkBriefsService', () => {
     );
     expect(JSON.stringify(createdInput)).not.toContain(
       'Confluence original remains in memory only.',
+    );
+  });
+
+  it('keeps per-item citations and starts every child task unselected', async () => {
+    const stored = createDraft();
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: stored.profileId,
+      sourceJiraId: stored.sourceJiraId,
+      sourceJiraKey: stored.sourceJiraKey,
+      sourceJiraVersion: stored.sourceJiraVersion,
+      evidence: [
+        { evidence: stored.evidence[0], content: 'transient evidence' },
+        {
+          evidence: { ...stored.evidence[0], id: 'jira:101', sourceId: '101' },
+          content: 'second transient evidence',
+        },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        acceptanceCriteria: [
+          { text: '회귀 테스트가 모두 통과한다.', evidenceIds: ['jira:101'] },
+        ],
+      }),
+    );
+    repository.create.mockImplementation((value) => ({ ...stored, ...value }));
+    repository.save.mockImplementation((value: WorkBriefDraft) =>
+      Promise.resolve(value),
+    );
+
+    const draft = await createService().createDraft(
+      7,
+      {
+        sourceJiraKey: stored.sourceJiraKey,
+        selectedEvidenceIds: ['jira:100', 'jira:101'],
+        instruction: '실행 브리프를 작성하세요.',
+      },
+      'correlation-id',
+    );
+
+    // Items cite what supports them, not the whole evidence list: without
+    // this the readiness coverage check passes for free.
+    expect(draft.content?.title.evidenceIds).toEqual(['jira:100']);
+    expect(draft.content?.acceptanceCriteria.at(0)?.evidenceIds).toEqual([
+      'jira:101',
+    ]);
+    expect(draft.content?.childTasks).toHaveLength(1);
+    expect(draft.content?.childTasks.at(0)?.selected).toBe(false);
+    expect(draft.content?.childTasks.at(0)?.clientTaskId).toEqual(
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    );
+  });
+
+  it('marks uncited evidence excluded and keeps the model reason', async () => {
+    const stored = createDraft();
+    const unusedEvidence = {
+      ...stored.evidence[0],
+      id: 'jira:101',
+      sourceId: '101',
+    };
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: stored.profileId,
+      sourceJiraId: stored.sourceJiraId,
+      sourceJiraKey: stored.sourceJiraKey,
+      sourceJiraVersion: stored.sourceJiraVersion,
+      evidence: [
+        { evidence: stored.evidence[0], content: 'transient evidence' },
+        { evidence: unusedEvidence, content: 'unrelated transient evidence' },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        excludedEvidence: [
+          { evidenceId: 'jira:101', reason: '요구사항과 관련이 없습니다.' },
+        ],
+      }),
+    );
+    let createdInput: Partial<WorkBriefDraft> | undefined;
+    repository.create.mockImplementation((value) => {
+      createdInput = value;
+      return { ...stored, ...value };
+    });
+    repository.save.mockImplementation((value: WorkBriefDraft) =>
+      Promise.resolve(value),
+    );
+
+    const draft = await createService().createDraft(
+      7,
+      {
+        sourceJiraKey: stored.sourceJiraKey,
+        selectedEvidenceIds: ['jira:100', 'jira:101'],
+        instruction: '실행 브리프를 작성하세요.',
+      },
+      'correlation-id',
+    );
+
+    expect(createdInput?.evidence).toEqual([
+      expect.objectContaining({ id: 'jira:100', aiStatus: 'included' }),
+      expect.objectContaining({
+        id: 'jira:101',
+        aiStatus: 'excluded',
+        aiExclusionReason: '요구사항과 관련이 없습니다.',
+      }),
+    ]);
+    expect(draft.evidence.at(0)?.aiExclusionReason).toBeUndefined();
+  });
+
+  it('masks a child task summary with its own value, not the next task text', async () => {
+    const current = createDraft();
+    const edited: BriefContent = {
+      ...initialContent,
+      childTasks: [
+        {
+          clientTaskId: '8a8c0e4a-0000-4000-8000-000000000001',
+          summary: '첫 번째 요약',
+          text: '첫 번째 본문',
+          evidenceIds: ['jira:100'],
+          selected: false,
+        },
+        {
+          clientTaskId: '8a8c0e4a-0000-4000-8000-000000000002',
+          summary: '두 번째 요약',
+          text: '두 번째 본문',
+          evidenceIds: ['jira:100'],
+          selected: false,
+        },
+      ],
+    };
+    repository.findOneBy.mockResolvedValue(current);
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    // The sanitize contract is order-preserving: citation texts first, then
+    // child task summaries.  A shifted index silently swaps user text.
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values.map((value) => `${value}(masked)`)),
+    );
+
+    const updated = await createService().updateDraft(7, current.id, {
+      optimisticVersion: 1,
+      content: edited,
+    });
+
+    expect(updated.content?.childTasks.at(0)).toEqual(
+      expect.objectContaining({
+        summary: '첫 번째 요약(masked)',
+        text: '첫 번째 본문(masked)',
+      }),
+    );
+    expect(updated.content?.childTasks.at(1)).toEqual(
+      expect.objectContaining({
+        summary: '두 번째 요약(masked)',
+        text: '두 번째 본문(masked)',
+      }),
     );
   });
 

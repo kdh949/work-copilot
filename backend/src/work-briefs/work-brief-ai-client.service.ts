@@ -10,14 +10,44 @@ import {
   type WorkBriefEvidenceInput,
 } from './work-brief-content-guard.service';
 
-export type WorkBriefOutput = {
-  title: string;
-  summary: string;
-  keyPoints: string[];
-  risks: string[];
-  nextSteps: string[];
+export const WORK_BRIEF_SCHEMA_VERSION = 2;
+
+export type WorkBriefCitation = {
+  text: string;
   evidenceIds: string[];
 };
+
+export type WorkBriefChildTaskOutput = WorkBriefCitation & {
+  summary: string;
+};
+
+export type WorkBriefExcludedEvidence = {
+  evidenceId: string;
+  reason: string;
+};
+
+/**
+ * Schema v2.  Every item carries its own `evidenceIds`; there is no
+ * response-level evidence list to copy onto each item.
+ */
+export type WorkBriefOutput = {
+  schemaVersion: number;
+  title: WorkBriefCitation;
+  summary: WorkBriefCitation;
+  keyPoints: WorkBriefCitation[];
+  acceptanceCriteria: WorkBriefCitation[];
+  risks: WorkBriefCitation[];
+  nextSteps: WorkBriefCitation[];
+  childTasks: WorkBriefChildTaskOutput[];
+  excludedEvidence: WorkBriefExcludedEvidence[];
+};
+
+const CITATION_LIST_FIELDS = [
+  'keyPoints',
+  'acceptanceCriteria',
+  'risks',
+  'nextSteps',
+] as const;
 
 @Injectable()
 export class WorkBriefAiClientService {
@@ -60,13 +90,7 @@ export class WorkBriefAiClientService {
       if (!this.isWorkBriefOutput(payload)) {
         throw new Error('invalid work brief response');
       }
-      this.contentGuard.assertSafeModelOutput([
-        payload.title,
-        payload.summary,
-        ...payload.keyPoints,
-        ...payload.risks,
-        ...payload.nextSteps,
-      ]);
+      this.contentGuard.assertSafeModelOutput(this.modelText(payload));
       if (!this.hasOnlyRequestedEvidence(payload, evidence)) {
         throw new Error('invalid work brief evidence');
       }
@@ -161,13 +185,64 @@ export class WorkBriefAiClientService {
 
     const candidate = value as Record<string, unknown>;
     return (
-      typeof candidate.title === 'string' &&
-      typeof candidate.summary === 'string' &&
-      this.isStringArray(candidate.keyPoints) &&
-      this.isStringArray(candidate.risks) &&
-      this.isStringArray(candidate.nextSteps) &&
+      candidate.schemaVersion === WORK_BRIEF_SCHEMA_VERSION &&
+      this.isCitation(candidate.title) &&
+      this.isCitation(candidate.summary) &&
+      CITATION_LIST_FIELDS.every(
+        (field) =>
+          Array.isArray(candidate[field]) &&
+          (candidate[field] as unknown[]).every((item) =>
+            this.isCitation(item),
+          ),
+      ) &&
+      Array.isArray(candidate.childTasks) &&
+      candidate.childTasks.every(
+        (item) =>
+          this.isCitation(item) &&
+          typeof (item as Record<string, unknown>).summary === 'string',
+      ) &&
+      Array.isArray(candidate.excludedEvidence) &&
+      candidate.excludedEvidence.every((item) => this.isExcludedEvidence(item))
+    );
+  }
+
+  private isCitation(value: unknown): value is WorkBriefCitation {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+
+    const candidate = value as Record<string, unknown>;
+    return (
+      typeof candidate.text === 'string' &&
       this.isStringArray(candidate.evidenceIds)
     );
+  }
+
+  private isExcludedEvidence(
+    value: unknown,
+  ): value is WorkBriefExcludedEvidence {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+
+    const candidate = value as Record<string, unknown>;
+    return (
+      typeof candidate.evidenceId === 'string' &&
+      typeof candidate.reason === 'string'
+    );
+  }
+
+  /** Every model-authored string, including the v2 fields (R8). */
+  private modelText(output: WorkBriefOutput): string[] {
+    return [
+      output.title.text,
+      output.summary.text,
+      ...CITATION_LIST_FIELDS.flatMap((field) =>
+        output[field].map((item) => item.text),
+      ),
+      ...output.childTasks.flatMap((item) => [item.summary, item.text]),
+      ...output.excludedEvidence.map((item) => item.reason),
+    ];
   }
 
   private isStringArray(value: unknown): value is string[] {
@@ -189,6 +264,11 @@ export class WorkBriefAiClientService {
     );
   }
 
+  /**
+   * Per item, not per response.  A whole-response check passes for an output
+   * that copies every requested evidence id onto every item, which is the
+   * citation quality problem schema v2 exists to fix.
+   */
   private hasOnlyRequestedEvidence(
     output: WorkBriefOutput,
     evidence: readonly WorkBriefEvidenceInput[],
@@ -196,11 +276,35 @@ export class WorkBriefAiClientService {
     const requestedEvidenceIds = new Set(
       evidence.map((item) => item.evidenceId),
     );
+    const citations: WorkBriefCitation[] = [
+      output.title,
+      output.summary,
+      ...CITATION_LIST_FIELDS.flatMap((field) => output[field]),
+      ...output.childTasks,
+    ];
+    const citedEvidenceIds = new Set<string>();
+    for (const citation of citations) {
+      if (
+        citation.evidenceIds.length === 0 ||
+        citation.evidenceIds.length !== new Set(citation.evidenceIds).size ||
+        citation.evidenceIds.some(
+          (evidenceId) => !requestedEvidenceIds.has(evidenceId),
+        )
+      ) {
+        return false;
+      }
+      for (const evidenceId of citation.evidenceIds) {
+        citedEvidenceIds.add(evidenceId);
+      }
+    }
+
+    // Evidence cannot be both the basis for an item and unusable.
     return (
-      output.evidenceIds.length > 0 &&
-      output.evidenceIds.length === new Set(output.evidenceIds).size &&
-      output.evidenceIds.every((evidenceId) =>
-        requestedEvidenceIds.has(evidenceId),
+      citedEvidenceIds.size > 0 &&
+      output.excludedEvidence.every(
+        (item) =>
+          requestedEvidenceIds.has(item.evidenceId) &&
+          !citedEvidenceIds.has(item.evidenceId),
       )
     );
   }

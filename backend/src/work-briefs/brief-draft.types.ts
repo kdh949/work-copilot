@@ -25,6 +25,12 @@ export type BriefContent = {
 
 export type StoredBriefEvidence = NormalizedEvidence & {
   aiStatus: 'included' | 'excluded';
+  /**
+   * Why the model did not use this evidence.  Model-authored text, so it is
+   * stored only after passing the same DLP path as the brief body, and is
+   * absent for included evidence.
+   */
+  aiExclusionReason?: string;
 };
 
 export type DraftStatus = 'draft' | 'review_required';
