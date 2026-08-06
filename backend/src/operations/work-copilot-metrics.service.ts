@@ -21,7 +21,8 @@ type MetricOutcome =
   | 'success'
   | 'failure'
   | 'blocked';
-type MetricJob = 'transient_evidence' | 'source_change_events';
+type MetricJob =
+  'transient_evidence' | 'source_change_events' | 'deleted_brief_drafts';
 type MetricOperation = 'generate' | 'sanitize';
 type MetricStage =
   | 'confluence_page'
@@ -65,7 +66,11 @@ const OUTCOMES = new Set<MetricOutcome>([
   'failure',
   'blocked',
 ]);
-const JOBS = new Set<MetricJob>(['transient_evidence', 'source_change_events']);
+const JOBS = new Set<MetricJob>([
+  'transient_evidence',
+  'source_change_events',
+  'deleted_brief_drafts',
+]);
 const OPERATIONS = new Set<MetricOperation>(['generate', 'sanitize']);
 const STAGES = new Set<MetricStage>([
   'confluence_page',

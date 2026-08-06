@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WorkCopilotMetricsService } from './work-copilot-metrics.service';
 
-export type CleanupJob = 'transient_evidence' | 'source_change_events';
+export type CleanupJob =
+  'transient_evidence' | 'source_change_events' | 'deleted_brief_drafts';
 export type CleanupJobStatus = 'pending' | 'healthy' | 'degraded';
 
 export type CleanupHealthView = {
@@ -14,6 +15,7 @@ export type CleanupHealthView = {
     lastAttemptAt: string | null;
     lastSuccessAt: string | null;
     lastDeletedCount: number;
+    lastSkippedCount: number;
   }>;
 };
 
@@ -21,9 +23,14 @@ type CleanupJobState = {
   lastAttemptAt: Date | null;
   lastSuccessAt: Date | null;
   lastDeletedCount: number;
+  lastSkippedCount: number;
 };
 
-const JOBS: CleanupJob[] = ['transient_evidence', 'source_change_events'];
+const JOBS: CleanupJob[] = [
+  'transient_evidence',
+  'source_change_events',
+  'deleted_brief_drafts',
+];
 // The pilot runbook calls for an alert before a missed hourly cleanup job can
 // silently exceed the evidence/event retention window.
 const DEFAULT_MAX_AGE_SECONDS = 70 * 60;
@@ -33,7 +40,12 @@ export class CleanupHealthService {
   private readonly jobs = new Map<CleanupJob, CleanupJobState>(
     JOBS.map((job) => [
       job,
-      { lastAttemptAt: null, lastSuccessAt: null, lastDeletedCount: 0 },
+      {
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        lastDeletedCount: 0,
+        lastSkippedCount: 0,
+      },
     ]),
   );
 
@@ -42,12 +54,19 @@ export class CleanupHealthService {
     private readonly metrics: WorkCopilotMetricsService,
   ) {}
 
-  recordSuccess(job: CleanupJob, deletedCount: number): void {
+  /**
+   * `skippedCount` is a success that did not do its job. The retention run
+   * reports rows it refused to delete because they still have an external
+   * write, which should be impossible through the application. Reporting it
+   * as plain success would bury the only signal that it happened.
+   */
+  recordSuccess(job: CleanupJob, deletedCount: number, skippedCount = 0): void {
     const state = this.stateFor(job);
     const now = new Date();
     state.lastAttemptAt = now;
     state.lastSuccessAt = now;
     state.lastDeletedCount = Math.max(0, Math.floor(deletedCount));
+    state.lastSkippedCount = Math.max(0, Math.floor(skippedCount));
     this.metrics.increment('cleanup_runs_total', { job, outcome: 'success' });
   }
 
@@ -67,6 +86,7 @@ export class CleanupHealthService {
         lastAttemptAt: state.lastAttemptAt?.toISOString() ?? null,
         lastSuccessAt: state.lastSuccessAt?.toISOString() ?? null,
         lastDeletedCount: state.lastDeletedCount,
+        lastSkippedCount: state.lastSkippedCount,
       };
     });
 
@@ -92,6 +112,10 @@ export class CleanupHealthService {
   ): CleanupJobStatus {
     if (!state.lastSuccessAt) {
       return state.lastAttemptAt ? 'degraded' : 'pending';
+    }
+
+    if (state.lastSkippedCount > 0) {
+      return 'degraded';
     }
 
     return now.getTime() - state.lastSuccessAt.getTime() <=
