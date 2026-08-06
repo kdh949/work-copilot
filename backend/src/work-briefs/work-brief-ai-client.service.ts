@@ -283,6 +283,7 @@ export class WorkBriefAiClientService {
       ...output.childTasks,
     ];
     const citedEvidenceIds = new Set<string>();
+    const citationEvidenceSets: Set<string>[] = [];
     for (const citation of citations) {
       if (
         citation.evidenceIds.length === 0 ||
@@ -293,19 +294,62 @@ export class WorkBriefAiClientService {
       ) {
         return false;
       }
+      citationEvidenceSets.push(new Set(citation.evidenceIds));
       for (const evidenceId of citation.evidenceIds) {
         citedEvidenceIds.add(evidenceId);
       }
     }
 
-    // Evidence cannot be both the basis for an item and unusable.
-    return (
-      citedEvidenceIds.size > 0 &&
-      output.excludedEvidence.every(
-        (item) =>
-          requestedEvidenceIds.has(item.evidenceId) &&
-          !citedEvidenceIds.has(item.evidenceId),
+    if (!citedEvidenceIds.size) {
+      return false;
+    }
+
+    const excludedEvidenceIds = new Set<string>();
+    for (const item of output.excludedEvidence) {
+      // Evidence cannot be both the basis for an item and unusable, and every
+      // omitted source needs one explicit exclusion reason.
+      if (
+        !requestedEvidenceIds.has(item.evidenceId) ||
+        citedEvidenceIds.has(item.evidenceId) ||
+        excludedEvidenceIds.has(item.evidenceId)
+      ) {
+        return false;
+      }
+      excludedEvidenceIds.add(item.evidenceId);
+    }
+
+    if (
+      [...requestedEvidenceIds].some(
+        (evidenceId) =>
+          !citedEvidenceIds.has(evidenceId) &&
+          !excludedEvidenceIds.has(evidenceId),
       )
-    );
+    ) {
+      return false;
+    }
+
+    if (
+      requestedEvidenceIds.size > 1 &&
+      citationEvidenceSets.every(
+        (citationEvidenceIds) =>
+          citationEvidenceIds.size === requestedEvidenceIds.size &&
+          [...requestedEvidenceIds].every((evidenceId) =>
+            citationEvidenceIds.has(evidenceId),
+          ),
+      )
+    ) {
+      return false;
+    }
+
+    return output.keyPoints.every((requirement) => {
+      const sharesEvidence = (citation: WorkBriefCitation) =>
+        citation.evidenceIds.some((evidenceId) =>
+          requirement.evidenceIds.includes(evidenceId),
+        );
+      return (
+        output.acceptanceCriteria.some(sharesEvidence) &&
+        output.childTasks.some(sharesEvidence)
+      );
+    });
   }
 }

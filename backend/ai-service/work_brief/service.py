@@ -302,13 +302,28 @@ def _parse_model_output(response: dict[str, Any], allowed_evidence_ids: set[str]
     # pass for an output that copies every evidenceId onto every item, which is
     # exactly the citation quality problem schema v2 exists to fix.
     cited_evidence_ids: set[str] = set()
+    citation_evidence_sets: list[set[str]] = []
+    for field_name in (*CITATION_LIST_FIELDS, "childTasks"):
+        if (
+            not isinstance(parsed[field_name], list)
+            or len(parsed[field_name]) > MAX_OUTPUT_LIST_ITEMS
+        ):
+            raise WorkBriefError("Work brief AI service returned an invalid response.")
     for field_name in ("title", "summary"):
-        cited_evidence_ids |= _assert_citation(parsed[field_name], allowed_evidence_ids)
+        citation_evidence_ids = _assert_citation(parsed[field_name], allowed_evidence_ids)
+        cited_evidence_ids |= citation_evidence_ids
+        citation_evidence_sets.append(citation_evidence_ids)
     for field_name in CITATION_LIST_FIELDS:
-        cited_evidence_ids |= _assert_citation_list(parsed[field_name], allowed_evidence_ids)
-    cited_evidence_ids |= _assert_citation_list(
-        parsed["childTasks"], allowed_evidence_ids, extra_text_fields=("summary",)
-    )
+        for citation in parsed[field_name]:
+            citation_evidence_ids = _assert_citation(citation, allowed_evidence_ids)
+            cited_evidence_ids |= citation_evidence_ids
+            citation_evidence_sets.append(citation_evidence_ids)
+    for child_task in parsed["childTasks"]:
+        citation_evidence_ids = _assert_citation(
+            child_task, allowed_evidence_ids, extra_text_fields=("summary",)
+        )
+        cited_evidence_ids |= citation_evidence_ids
+        citation_evidence_sets.append(citation_evidence_ids)
 
     if not cited_evidence_ids:
         raise WorkBriefError("Work brief AI service returned an invalid response.")
@@ -319,6 +334,23 @@ def _parse_model_output(response: dict[str, Any], allowed_evidence_ids: set[str]
     # An evidence id cannot be both the basis for an item and unusable.
     if excluded_evidence_ids & cited_evidence_ids:
         raise WorkBriefError("Work brief AI service returned an invalid response.")
+
+    # Every requested source must have an explicit accounting outcome.  This
+    # prevents the server from silently turning an omitted source into an
+    # excluded one without the model providing a reason.
+    if cited_evidence_ids | excluded_evidence_ids != allowed_evidence_ids:
+        raise WorkBriefError("Work brief AI service returned an invalid response.")
+
+    # Multiple sources may support one item, but schema v2 must not devolve
+    # into copying the complete source set onto every generated item.
+    if len(allowed_evidence_ids) > 1 and all(
+        evidence_ids == allowed_evidence_ids for evidence_ids in citation_evidence_sets
+    ):
+        raise WorkBriefError("Work brief AI service returned an invalid response.")
+
+    _assert_requirement_coverage(
+        parsed["keyPoints"], parsed["acceptanceCriteria"], parsed["childTasks"]
+    )
     return parsed
 
 
@@ -346,19 +378,6 @@ def _assert_citation(
     return set(evidence_ids)
 
 
-def _assert_citation_list(
-    value: Any,
-    allowed_evidence_ids: set[str],
-    extra_text_fields: tuple[str, ...] = (),
-) -> set[str]:
-    if not isinstance(value, list) or len(value) > MAX_OUTPUT_LIST_ITEMS:
-        raise WorkBriefError("Work brief AI service returned an invalid response.")
-    cited: set[str] = set()
-    for item in value:
-        cited |= _assert_citation(item, allowed_evidence_ids, extra_text_fields)
-    return cited
-
-
 def _assert_excluded_evidence(value: Any, allowed_evidence_ids: set[str]) -> set[str]:
     if not isinstance(value, list) or len(value) > MAX_EVIDENCE_ITEMS:
         raise WorkBriefError("Work brief AI service returned an invalid response.")
@@ -376,6 +395,31 @@ def _assert_excluded_evidence(value: Any, allowed_evidence_ids: set[str]) -> set
             raise WorkBriefError("Work brief AI service returned an invalid response.")
         excluded.add(evidence_id)
     return excluded
+
+
+def _assert_requirement_coverage(
+    requirements: Any,
+    acceptance_criteria: Any,
+    child_tasks: Any,
+) -> None:
+    """Require every generated requirement to have validation and work candidates.
+
+    The output structure has already been validated before this function is
+    reached.  Keeping this relationship check separate makes the invariant
+    explicit: each requirement must share at least one evidence id with both
+    an acceptance criterion and a child-task candidate.  Child tasks remain
+    unselected at generation time; selection is enforced later by readiness.
+    """
+    for requirement in requirements:
+        requirement_evidence_ids = set(requirement["evidenceIds"])
+        if not any(
+            requirement_evidence_ids & set(criterion["evidenceIds"])
+            for criterion in acceptance_criteria
+        ) or not any(
+            requirement_evidence_ids & set(child_task["evidenceIds"])
+            for child_task in child_tasks
+        ):
+            raise WorkBriefError("Work brief AI service returned an invalid response.")
 
 
 def _assert_model_text(value: Any) -> None:
