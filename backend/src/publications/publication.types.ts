@@ -49,3 +49,23 @@ export type BriefPublicationView = {
   steps: PublicationStepView[];
   updatedAt: Date;
 };
+
+/**
+ * Stored publication facts, read without step recovery.
+ *
+ * `findLatest` deliberately runs `recoverPublicationFromSteps`, which can hit
+ * Atlassian.  Callers that only need to render a badge — the draft list — must
+ * use this shape instead so a list of N drafts stays at one query (R4).
+ */
+export type StoredPublicationSummary = {
+  draftId: string;
+  id: string;
+  status: PublicationStatus;
+  externalWritePerformed: boolean;
+};
+
+/** Whether a draft may be soft-deleted, from stored publication rows only. */
+export type DraftDeletionAssessment = {
+  publishing: boolean;
+  externalWritePerformed: boolean;
+};

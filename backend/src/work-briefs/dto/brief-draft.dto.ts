@@ -4,15 +4,19 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+import type { DraftStatus } from '../brief-draft.types';
 
 export class EvidenceCitationDto {
   @IsString()
@@ -118,4 +122,28 @@ export class RefreshBriefDraftDto {
   @IsInt()
   @Min(1)
   optimisticVersion: number;
+}
+
+export const DRAFT_LIST_DEFAULT_LIMIT = 20;
+export const DRAFT_LIST_MAX_LIMIT = 50;
+
+export class ListBriefDraftsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(DRAFT_LIST_MAX_LIMIT)
+  limit?: number;
+
+  // Opaque base64url keyset cursor. The charset is pinned so a malformed
+  // cursor is rejected by validation rather than reaching the decoder.
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @Matches(/^[A-Za-z0-9_-]+$/)
+  cursor?: string;
+
+  @IsOptional()
+  @IsIn(['draft', 'review_required'])
+  status?: DraftStatus;
 }

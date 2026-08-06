@@ -1,11 +1,15 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +24,7 @@ import { PublicationService } from '../publications/publication.service';
 import { ReadinessService } from '../readiness/readiness.service';
 import {
   CreateBriefDraftDto,
+  ListBriefDraftsDto,
   RefreshBriefDraftDto,
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
@@ -45,9 +50,24 @@ export class WorkBriefsController {
     );
   }
 
+  @Get('brief-drafts')
+  list(@Query() query: ListBriefDraftsDto, @Req() request: WorkBriefRequest) {
+    return this.workBriefsService.listDrafts(request.user.sub, query);
+  }
+
   @Get('brief-drafts/:id')
   find(@Param('id') id: string, @Req() request: WorkBriefRequest) {
     return this.workBriefsService.findDraft(request.user.sub, id);
+  }
+
+  @Delete('brief-drafts/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id') id: string, @Req() request: WorkBriefRequest) {
+    return this.workBriefsService.deleteDraft(
+      request.user.sub,
+      id,
+      request.correlationId ?? 'missing-correlation-id',
+    );
   }
 
   @Get('brief-drafts/:id/readiness')

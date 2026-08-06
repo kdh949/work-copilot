@@ -12,23 +12,38 @@ import {
 } from '../work-items/confluence/confluence-work-item.service';
 import type { JiraDraftContext } from '../work-items/jira/jira-work-item.service';
 import { JiraWorkItemService } from '../work-items/jira/jira-work-item.service';
+import { SafeAuditService } from '../operations/safe-audit.service';
+import { PublicationService } from '../publications/publication.service';
 import { BriefCitationValidatorService } from './brief-citation-validator.service';
 import type {
   BriefContent,
+  BriefDraftListView,
+  BriefDraftPublicationSummary,
+  BriefDraftSummary,
   BriefDraftView,
+  DraftBlocker,
   EvidenceCitation,
   StoredBriefEvidence,
 } from './brief-draft.types';
 import {
   CreateBriefDraftDto,
+  DRAFT_LIST_DEFAULT_LIMIT,
+  ListBriefDraftsDto,
   RefreshBriefDraftDto,
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
+import { TransientEvidenceFragmentsService } from './transient-evidence-fragments.service';
 import {
   WorkBriefAiClientService,
   type WorkBriefOutput,
 } from './work-brief-ai-client.service';
 import { WorkBriefDraft } from './entities/work-brief-draft.entity';
+
+// The draft list shows own drafts only, so a colleague's draft on the same
+// issue is invisible and a bare "already exists" reads as a dead end. Say that
+// someone else may own it without disclosing who.
+const DRAFT_ALREADY_EXISTS_MESSAGE =
+  'A brief draft already exists for this issue. It may have been created by another user.';
 
 @Injectable()
 export class WorkBriefsService {
@@ -39,6 +54,9 @@ export class WorkBriefsService {
     private readonly confluenceWorkItemService: ConfluenceWorkItemService,
     private readonly aiClient: WorkBriefAiClientService,
     private readonly citationValidator: BriefCitationValidatorService,
+    private readonly publicationService: PublicationService,
+    private readonly fragments: TransientEvidenceFragmentsService,
+    private readonly audit: SafeAuditService,
   ) {}
 
   async createDraft(
@@ -109,9 +127,7 @@ export class WorkBriefsService {
       stored = await this.draftsRepository.save(draft);
     } catch (error) {
       if (this.isDuplicateDraftError(error)) {
-        throw new ConflictException(
-          'A brief draft already exists for this source.',
-        );
+        throw new ConflictException(DRAFT_ALREADY_EXISTS_MESSAGE);
       }
       throw error;
     }
@@ -121,6 +137,146 @@ export class WorkBriefsService {
 
   async findDraft(userId: number, draftId: string): Promise<BriefDraftView> {
     return this.present(await this.findOwnedDraft(userId, draftId));
+  }
+
+  /**
+   * Own drafts only (`createdByUserId = userId`), same strength as
+   * `findOwnedDraft`.  No new permission model is introduced here; a
+   * colleague's draft on the same issue stays invisible and only surfaces as
+   * the create-time 409.
+   */
+  async listDrafts(
+    userId: number,
+    query: ListBriefDraftsDto,
+  ): Promise<BriefDraftListView> {
+    const limit = query.limit ?? DRAFT_LIST_DEFAULT_LIMIT;
+    const cursor = this.decodeCursor(query.cursor);
+    const builder = this.draftsRepository
+      .createQueryBuilder('draft')
+      .where('draft."createdByUserId" = :userId', { userId })
+      // Redundant with the entity's soft delete filter, and kept anyway: the
+      // list is the one place where a leaked deleted row is user-visible.
+      .andWhere('draft."deletedAt" IS NULL')
+      .orderBy('draft."updatedAt"', 'DESC')
+      .addOrderBy('draft."id"', 'DESC')
+      // One extra row decides whether a next page exists without a COUNT.
+      .take(limit + 1);
+
+    if (query.status) {
+      builder.andWhere('draft."status" = :status', { status: query.status });
+    }
+    if (cursor) {
+      // Row-value comparison matches the (createdByUserId, updatedAt DESC,
+      // id DESC) partial index, and the id tiebreaker keeps paging stable
+      // when two drafts share an updatedAt (R12).
+      builder.andWhere(
+        '(draft."updatedAt", draft."id") < (:cursorUpdatedAt, :cursorId)',
+        { cursorUpdatedAt: cursor.updatedAt, cursorId: cursor.id },
+      );
+    }
+
+    const rows = await builder.getMany();
+    const items = rows.slice(0, limit);
+    // Stored publication rows only — no step recovery, so no Atlassian call
+    // is made per draft (R4).
+    const publications =
+      await this.publicationService.findLatestStoredSummaries(
+        items.map((draft) => draft.id),
+      );
+
+    return {
+      items: items.map((draft) => {
+        const publication = publications.get(draft.id);
+
+        return this.presentSummary(
+          draft,
+          publication
+            ? {
+                id: publication.id,
+                status: publication.status,
+                externalWritePerformed: publication.externalWritePerformed,
+              }
+            : null,
+        );
+      }),
+      nextCursor:
+        rows.length > limit ? this.encodeCursor(items[items.length - 1]) : null,
+    };
+  }
+
+  /**
+   * Soft-delete a draft so its Jira issue is released for a new one.
+   *
+   * No `optimisticVersion` is required: deletion is not a lost update, and a
+   * concurrently editing tab learns about it from the 404 on its next save.
+   */
+  async deleteDraft(
+    userId: number,
+    draftId: string,
+    correlationId: string,
+  ): Promise<void> {
+    // Not owned or already deleted both land here as 404, so the response
+    // cannot be used to probe whether a draft id exists.
+    const draft = await this.findOwnedDraft(userId, draftId);
+    const publication =
+      await this.publicationService.assessDraftDeletion(draftId);
+
+    if (publication.publishing) {
+      throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
+    }
+    if (publication.externalWritePerformed) {
+      // Deleting would free the issue for a new draft, and publishing that
+      // one would create a second Confluence page for work already
+      // published. Resume or retry the existing publication instead (R6).
+      throw new ConflictException({ code: 'DRAFT_HAS_PUBLICATION' });
+    }
+
+    const deleted = await this.draftsRepository.update(
+      { id: draftId, createdByUserId: userId, deletedAt: IsNull() },
+      { deletedAt: new Date() },
+    );
+
+    if (deleted.affected !== 1) {
+      throw new NotFoundException('Brief draft was not found.');
+    }
+
+    // Soft delete does not fire the fragments' ON DELETE CASCADE, so the
+    // encrypted excerpts are removed explicitly.
+    await this.fragments.purgeDraft(draftId);
+    // Draft id, issue key and profile only — never brief content.
+    await this.audit.record({
+      action: 'BRIEF_DRAFT_DELETED',
+      profileId: draft.profileId,
+      targetId: draft.sourceJiraKey,
+      correlationId,
+      resultCode: 'SOFT_DELETED',
+    });
+  }
+
+  private encodeCursor(draft: WorkBriefDraft): string {
+    return Buffer.from(
+      `${draft.updatedAt.toISOString()}|${draft.id}`,
+      'utf8',
+    ).toString('base64url');
+  }
+
+  private decodeCursor(
+    cursor: string | undefined,
+  ): { updatedAt: Date; id: string } | null {
+    if (!cursor) {
+      return null;
+    }
+
+    const [updatedAt, id, ...rest] = Buffer.from(cursor, 'base64url')
+      .toString('utf8')
+      .split('|');
+    const parsed = new Date(updatedAt ?? '');
+
+    if (rest.length > 0 || !id || Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Draft list cursor is invalid.');
+    }
+
+    return { updatedAt: parsed, id };
   }
 
   async updateDraft(
@@ -369,9 +525,7 @@ export class WorkBriefsService {
       sourceJiraId,
     });
     if (existing) {
-      throw new ConflictException(
-        'A brief draft already exists for this source.',
-      );
+      throw new ConflictException(DRAFT_ALREADY_EXISTS_MESSAGE);
     }
   }
 
@@ -514,13 +668,50 @@ export class WorkBriefsService {
     return draft;
   }
 
-  private present(draft: WorkBriefDraft): BriefDraftView {
+  /**
+   * The single non-disclosure branch.  `present()` and `presentSummary()` must
+   * share it: a list that reproduced the rule by hand would eventually drift
+   * and leak the title of a draft the user can no longer read (R5).
+   */
+  private visibility(draft: WorkBriefDraft): {
+    accessChanged: boolean;
+    blockers: DraftBlocker[];
+  } {
     const accessChanged = draft.freshnessStatus === 'access_changed';
-    const blockers = accessChanged
-      ? [{ code: 'ACCESS_CHANGED' as const }]
-      : draft.freshnessStatus === 'review_required'
-        ? [{ code: 'SOURCE_REVIEW_REQUIRED' as const }]
-        : [];
+
+    return {
+      accessChanged,
+      blockers: accessChanged
+        ? [{ code: 'ACCESS_CHANGED' as const }]
+        : draft.freshnessStatus === 'review_required'
+          ? [{ code: 'SOURCE_REVIEW_REQUIRED' as const }]
+          : [],
+    };
+  }
+
+  private presentSummary(
+    draft: WorkBriefDraft,
+    publication: BriefDraftPublicationSummary | null,
+  ): BriefDraftSummary {
+    const { accessChanged, blockers } = this.visibility(draft);
+
+    return {
+      id: draft.id,
+      sourceJiraKey: draft.sourceJiraKey,
+      title: accessChanged ? null : (draft.maskedBrief?.title?.text ?? null),
+      evidenceCount: accessChanged ? null : draft.evidence.length,
+      status: draft.status,
+      freshnessStatus: draft.freshnessStatus,
+      optimisticVersion: draft.optimisticVersion,
+      blockers,
+      publication,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+    };
+  }
+
+  private present(draft: WorkBriefDraft): BriefDraftView {
+    const { accessChanged, blockers } = this.visibility(draft);
 
     return {
       id: draft.id,

@@ -41,9 +41,11 @@ import {
 } from './publication-preview.service';
 import type {
   BriefPublicationView,
+  DraftDeletionAssessment,
   PublicationErrorCode,
   PublicationPhase,
   PublicationStatus,
+  StoredPublicationSummary,
 } from './publication.types';
 
 const CONFLUENCE_STEP = 'confluence_page';
@@ -51,6 +53,17 @@ const REMOTE_LINK_STEP = 'jira_remote_link';
 const SUMMARY_COMMENT_STEP = 'jira_summary_comment';
 const CHILD_TASK_STEP_PREFIX = 'jira_child_task:';
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
+
+/**
+ * The single definition of "something exists in Atlassian because of this
+ * publication".  Draft deletion and the list badge both depend on it, so it
+ * must not be restated anywhere else.
+ */
+const externalWritePerformed = (
+  publication: Pick<BriefPublication, 'executionMode' | 'confluenceContentId'>,
+): boolean =>
+  publication.executionMode === 'real' &&
+  Boolean(publication.confluenceContentId);
 
 type PhaseInput = {
   draftVersion: number;
@@ -523,6 +536,81 @@ export class PublicationService {
       draft,
     );
     return this.present(recovered.publication, recovered.steps);
+  }
+
+  /**
+   * Latest stored publication per draft, in one query.
+   *
+   * Callers must have already scoped `draftIds` to the requesting user — this
+   * method performs no ownership check because it exists to serve a list that
+   * was itself filtered by `createdByUserId`.
+   *
+   * Unlike `findLatest` this never runs step recovery, so it issues no
+   * Atlassian calls no matter how many drafts are on the page (R4).
+   */
+  async findLatestStoredSummaries(
+    draftIds: string[],
+  ): Promise<Map<string, StoredPublicationSummary>> {
+    if (draftIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.publicationsRepository.query<
+      Array<
+        Pick<
+          BriefPublication,
+          'id' | 'draftId' | 'status' | 'executionMode' | 'confluenceContentId'
+        >
+      >
+    >(
+      `SELECT DISTINCT ON ("draftId")
+              "draftId", "id", "status", "executionMode", "confluenceContentId"
+         FROM "brief_publications"
+        WHERE "draftId" = ANY($1::uuid[])
+        ORDER BY "draftId", "createdAt" DESC`,
+      [draftIds],
+    );
+
+    return new Map(
+      rows.map((row) => [
+        row.draftId,
+        {
+          draftId: row.draftId,
+          id: row.id,
+          status: row.status,
+          externalWritePerformed: externalWritePerformed(row),
+        },
+      ]),
+    );
+  }
+
+  /**
+   * Deletion guard for a single draft, from stored rows only.
+   *
+   * Every publication of the draft is scanned rather than just the latest one.
+   * A draft that once wrote to Confluence must stay undeletable even if a
+   * later mock publication sits on top of it, otherwise deleting it would let
+   * a fresh draft for the same issue create a duplicate page (R6).  This is
+   * also the invariant the 90-day retention job relies on when it refuses to
+   * hard-delete drafts with external writes.
+   */
+  async assessDraftDeletion(draftId: string): Promise<DraftDeletionAssessment> {
+    const publications = await this.publicationsRepository.find({
+      select: {
+        id: true,
+        status: true,
+        executionMode: true,
+        confluenceContentId: true,
+      },
+      where: { draftId },
+    });
+
+    return {
+      publishing: publications.some(
+        (publication) => publication.status === 'PUBLISHING',
+      ),
+      externalWritePerformed: publications.some(externalWritePerformed),
+    };
   }
 
   private async retryConfluence(
@@ -1725,9 +1813,7 @@ export class PublicationService {
       draftVersion: publication.draftVersion,
       status: publication.status,
       executionMode: publication.executionMode,
-      externalWritePerformed:
-        publication.executionMode === 'real' &&
-        Boolean(publication.confluenceContentId),
+      externalWritePerformed: externalWritePerformed(publication),
       confluencePage: publication.confluenceContentId
         ? {
             id: publication.confluenceContentId,

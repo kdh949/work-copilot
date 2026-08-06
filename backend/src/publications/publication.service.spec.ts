@@ -139,6 +139,23 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         publications.filter((item) => matches(item as never, where)),
       ),
     ),
+    // Stands in for the DISTINCT ON ("draftId") ... ORDER BY "createdAt" DESC
+    // read used by the draft list.
+    query: jest.fn((_sql: string, [draftIds]: [string[]]) =>
+      Promise.resolve(
+        draftIds
+          .map((draftId) =>
+            publications
+              .filter((item) => item.draftId === draftId)
+              .sort(
+                (left, right) =>
+                  right.createdAt.getTime() - left.createdAt.getTime(),
+              )
+              .at(0),
+          )
+          .filter((item): item is BriefPublication => Boolean(item)),
+      ),
+    ),
     createQueryBuilder: jest.fn(() => {
       let assignments: Record<string, unknown> = {};
       let parameters: Record<string, unknown> = {};
@@ -1780,5 +1797,99 @@ describe('PublicationService', () => {
 
     expect(confluence).not.toHaveBeenCalled();
     expect(harness.publications).toHaveLength(0);
+  });
+
+  describe('list and deletion reads', () => {
+    // R4: the draft list renders a publication badge per row. If that reused
+    // findLatest, recoverPublicationFromSteps would run — and reconcile — once
+    // per draft, turning a list render into N Atlassian calls.
+    it('summarizes the latest publication without running step recovery', async () => {
+      const harness = createHarness();
+      const published = await publishConfluence(harness);
+      const reconcile = jest.spyOn(harness.gateway, 'reconcileJiraChildTasks');
+      const upsert = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+      harness.stepsRepository.find.mockClear();
+      harness.publicationsRepository.query.mockClear();
+
+      const summaries = await harness.service.findLatestStoredSummaries([
+        DRAFT_ID,
+      ]);
+
+      expect(summaries.get(DRAFT_ID)).toEqual({
+        draftId: DRAFT_ID,
+        id: published.id,
+        status: published.status,
+        // The harness publishes in mock mode, so nothing exists externally.
+        externalWritePerformed: false,
+      });
+      expect(harness.publicationsRepository.query).toHaveBeenCalledTimes(1);
+      expect(harness.stepsRepository.find).not.toHaveBeenCalled();
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it('reads publications for every draft id in one query', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publicationsRepository.query.mockClear();
+
+      const summaries = await harness.service.findLatestStoredSummaries([
+        DRAFT_ID,
+        '99999999-9999-4999-8999-999999999999',
+      ]);
+
+      expect(harness.publicationsRepository.query).toHaveBeenCalledTimes(1);
+      expect(summaries.size).toBe(1);
+    });
+
+    it('does not query at all for an empty page', async () => {
+      const harness = createHarness();
+      harness.publicationsRepository.query.mockClear();
+
+      await expect(
+        harness.service.findLatestStoredSummaries([]),
+      ).resolves.toEqual(new Map());
+      expect(harness.publicationsRepository.query).not.toHaveBeenCalled();
+    });
+
+    it('reports a mock-mode publication as safe to delete', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toEqual({ publishing: false, externalWritePerformed: false });
+    });
+
+    // R6: external write history is what makes deletion unsafe, and it must
+    // be detected across every publication of the draft rather than only the
+    // latest one — a later mock publication must not mask an earlier real page.
+    it('reports external write history from any publication of the draft', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].executionMode = 'real';
+      harness.publications[0].confluenceContentId = 'confluence-page-1';
+      harness.publications.push({
+        ...harness.publications[0],
+        id: 'publication-later',
+        executionMode: 'mock',
+        confluenceContentId: null,
+        createdAt: new Date(Date.now() + 1_000),
+      });
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+    });
+
+    it('reports a running publication as blocking deletion', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].status = 'PUBLISHING';
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ publishing: true });
+    });
   });
 });

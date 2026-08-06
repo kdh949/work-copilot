@@ -1,5 +1,10 @@
 import 'reflect-metadata';
-import { PATH_METADATA } from '@nestjs/common/constants';
+import {
+  HTTP_CODE_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+} from '@nestjs/common/constants';
+import { HttpStatus, RequestMethod } from '@nestjs/common';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { WorkBriefsController } from './work-briefs.controller';
 
@@ -9,6 +14,8 @@ describe('WorkBriefsController', () => {
     findDraft: jest.fn(),
     updateDraft: jest.fn(),
     refreshDraft: jest.fn(),
+    listDrafts: jest.fn(),
+    deleteDraft: jest.fn(),
   };
   const readinessService = {
     assessDraft: jest.fn(),
@@ -180,6 +187,59 @@ describe('WorkBriefsController', () => {
         previewHash: 'b'.repeat(64),
         idempotencyKey: 'child-key',
       }),
+      'correlation-id',
+    );
+  });
+
+  it('exposes the collection list and a 204 delete on the draft resource', () => {
+    const handlers = WorkBriefsController.prototype as unknown as Record<
+      string,
+      object
+    >;
+
+    expect(Reflect.getMetadata(PATH_METADATA, handlers.list)).toBe(
+      'brief-drafts',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, handlers.list)).toBe(
+      RequestMethod.GET,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, handlers.remove)).toBe(
+      'brief-drafts/:id',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, handlers.remove)).toBe(
+      RequestMethod.DELETE,
+    );
+    // A deleted draft has no body to return, and returning one would risk
+    // echoing brief content back on the way out.
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handlers.remove)).toBe(
+      HttpStatus.NO_CONTENT,
+    );
+  });
+
+  it('forwards list filters and the delete correlation ID', async () => {
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+      publicationService as never,
+    );
+    const request = { user: { sub: 7 }, correlationId: 'correlation-id' };
+    service.listDrafts.mockResolvedValue({ items: [], nextCursor: null });
+    service.deleteDraft.mockResolvedValue(undefined);
+
+    await controller.list(
+      { limit: 10, status: 'draft', cursor: 'cursor' },
+      request as never,
+    );
+    await controller.remove('draft-id', request as never);
+
+    expect(service.listDrafts).toHaveBeenCalledWith(7, {
+      limit: 10,
+      status: 'draft',
+      cursor: 'cursor',
+    });
+    expect(service.deleteDraft).toHaveBeenCalledWith(
+      7,
+      'draft-id',
       'correlation-id',
     );
   });

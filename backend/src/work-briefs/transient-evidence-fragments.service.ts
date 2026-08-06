@@ -101,6 +101,19 @@ export class TransientEvidenceFragmentsService
     );
   }
 
+  /**
+   * Hard-delete every fragment of one draft.
+   *
+   * The table's `ON DELETE CASCADE` only fires on a real row delete, so a
+   * soft-deleted draft would otherwise keep its encrypted excerpts around
+   * until their TTL expired.  Deletion must not extend retention.
+   */
+  async purgeDraft(draftId: string): Promise<number> {
+    const result = await this.fragmentsRepository.delete({ draftId });
+
+    return result.affected ?? 0;
+  }
+
   async purgeExpired(): Promise<void> {
     try {
       const result = await this.fragmentsRepository.delete({
