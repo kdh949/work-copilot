@@ -1,11 +1,48 @@
+import { BriefPublication } from '../publications/entities/brief-publication.entity';
+import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { CleanupHealthService } from './cleanup-health.service';
 import { DeletedBriefDraftCleanupService } from './deleted-brief-draft-cleanup.service';
 import { WorkCopilotMetricsService } from './work-copilot-metrics.service';
 
+const createDataSource = ({
+  blockedCount = 0,
+  queryError,
+}: {
+  blockedCount?: number;
+  queryError?: Error;
+} = {}) => {
+  const manager = {
+    query: jest.fn((statement: string) => {
+      if (queryError) return Promise.reject(queryError);
+      if (statement.includes('pg_try_advisory_xact_lock')) {
+        return Promise.resolve([{ locked: true }]);
+      }
+      if (statement.includes('SELECT draft."id"')) return Promise.resolve([]);
+      if (statement.includes('COUNT(*)::int')) {
+        return Promise.resolve([{ count: blockedCount }]);
+      }
+      return Promise.reject(new Error(`Unexpected query: ${statement}`));
+    }),
+    getRepository: jest.fn((entity: unknown) => {
+      if (entity === BriefPublication || entity === WorkBriefDraft) {
+        return { delete: jest.fn() };
+      }
+      throw new Error('Unregistered entity');
+    }),
+  };
+
+  return {
+    manager,
+    transaction: jest.fn(
+      async (callback: (transactionManager: typeof manager) => unknown) =>
+        callback(manager),
+    ),
+  };
+};
+
 describe('DeletedBriefDraftCleanupService', () => {
   const createService = (
-    draftsRepository: Record<string, jest.Mock>,
-    publicationsRepository: Record<string, jest.Mock>,
+    dataSource: ReturnType<typeof createDataSource>,
     retentionDays: string | undefined = undefined,
   ) => {
     const cleanupHealth = new CleanupHealthService(
@@ -16,8 +53,7 @@ describe('DeletedBriefDraftCleanupService', () => {
     return {
       cleanupHealth,
       service: new DeletedBriefDraftCleanupService(
-        draftsRepository as never,
-        publicationsRepository as never,
+        dataSource as never,
         { get: jest.fn().mockReturnValue(retentionDays) } as never,
         cleanupHealth,
       ),
@@ -30,10 +66,7 @@ describe('DeletedBriefDraftCleanupService', () => {
       .jobs.find((job) => job.job === 'deleted_brief_drafts');
 
   it('reports a run that deleted nothing as healthy', async () => {
-    const { service, cleanupHealth } = createService(
-      { find: jest.fn().mockResolvedValue([]), delete: jest.fn() },
-      { find: jest.fn(), delete: jest.fn() },
-    );
+    const { service, cleanupHealth } = createService(createDataSource());
 
     await service.purgeExpired();
 
@@ -49,13 +82,9 @@ describe('DeletedBriefDraftCleanupService', () => {
   // R13: registering the job is what makes a stopped retention run visible.
   it('reports a failed run without recording a success', async () => {
     const { service, cleanupHealth } = createService(
-      {
-        find: jest
-          .fn()
-          .mockRejectedValue(new Error('brief content must never be logged')),
-        delete: jest.fn(),
-      },
-      { find: jest.fn(), delete: jest.fn() },
+      createDataSource({
+        queryError: new Error('brief content must never be logged'),
+      }),
     );
 
     await service.purgeExpired();
@@ -72,21 +101,7 @@ describe('DeletedBriefDraftCleanupService', () => {
   // reported as a clean run — this is the only signal that it happened.
   it('degrades the job when a draft was skipped', async () => {
     const { service, cleanupHealth } = createService(
-      {
-        find: jest.fn().mockResolvedValue([{ id: 'draft-1' }]),
-        delete: jest.fn(),
-      },
-      {
-        find: jest.fn().mockResolvedValue([
-          {
-            id: 'publication-1',
-            draftId: 'draft-1',
-            executionMode: 'real',
-            confluenceContentId: 'confluence-page-1',
-          },
-        ]),
-        delete: jest.fn(),
-      },
+      createDataSource({ blockedCount: 1 }),
     );
 
     await service.purgeExpired();
@@ -98,10 +113,7 @@ describe('DeletedBriefDraftCleanupService', () => {
   });
 
   it('does not leave a timer running after shutdown', () => {
-    const { service } = createService(
-      { find: jest.fn().mockResolvedValue([]), delete: jest.fn() },
-      { find: jest.fn(), delete: jest.fn() },
-    );
+    const { service } = createService(createDataSource());
 
     service.onModuleInit();
     service.onModuleDestroy();

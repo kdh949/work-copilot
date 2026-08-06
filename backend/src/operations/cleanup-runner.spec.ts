@@ -1,7 +1,5 @@
-import { BriefPublication } from '../publications/entities/brief-publication.entity';
 import { SourceChangeEvent } from '../webhooks/entities/source-change-event.entity';
 import { TransientEvidenceFragment } from '../work-briefs/entities/transient-evidence-fragment.entity';
-import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { runExpiredWorkCopilotCleanup } from './cleanup-runner';
 
 describe('runExpiredWorkCopilotCleanup', () => {
@@ -11,28 +9,33 @@ describe('runExpiredWorkCopilotCleanup', () => {
   const eventsRepository = {
     delete: jest.fn(),
   };
-  const draftsRepository = {
-    find: jest.fn(),
-    delete: jest.fn(),
-  };
-  const publicationsRepository = {
-    find: jest.fn(),
-    delete: jest.fn(),
+  const retentionManager = {
+    query: jest.fn(),
+    getRepository: jest.fn(),
   };
   const dataSource = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === TransientEvidenceFragment) return fragmentsRepository;
       if (entity === SourceChangeEvent) return eventsRepository;
-      if (entity === WorkBriefDraft) return draftsRepository;
-      if (entity === BriefPublication) return publicationsRepository;
       throw new Error('unregistered entity');
     }),
+    transaction: jest.fn(
+      async (callback: (manager: typeof retentionManager) => unknown) =>
+        callback(retentionManager),
+    ),
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    draftsRepository.find.mockResolvedValue([]);
-    publicationsRepository.find.mockResolvedValue([]);
+    retentionManager.query.mockImplementation((statement: string) => {
+      if (statement.includes('pg_try_advisory_xact_lock')) {
+        return Promise.resolve([{ locked: true }]);
+      }
+      if (statement.includes('SELECT draft."id"')) return Promise.resolve([]);
+      if (statement.includes('COUNT(*)::int'))
+        return Promise.resolve([{ count: 0 }]);
+      return Promise.reject(new Error(`Unexpected query: ${statement}`));
+    });
   });
 
   it('purges both TTL tables and the retention table, reporting only safe job metadata', async () => {
@@ -66,17 +69,21 @@ describe('runExpiredWorkCopilotCleanup', () => {
     });
   });
 
-  // The retention job needs entities the TTL jobs never asked for. Missing one
-  // fails at runtime in a cron process, where nobody is watching.
-  it('asks only for entities the cleanup process registers', async () => {
+  // The retention job needs a transaction-capable data source rather than
+  // independently injected repositories. Missing that capability fails only
+  // in the standalone cron process, where nobody is watching.
+  it('runs retention through the shared transaction boundary', async () => {
     fragmentsRepository.delete.mockResolvedValue({ affected: 0 });
     eventsRepository.delete.mockResolvedValue({ affected: 0 });
 
     const result = await runExpiredWorkCopilotCleanup(dataSource as never);
 
     expect(result.succeeded).toBe(true);
-    expect(dataSource.getRepository).toHaveBeenCalledWith(WorkBriefDraft);
-    expect(dataSource.getRepository).toHaveBeenCalledWith(BriefPublication);
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(dataSource.getRepository).toHaveBeenCalledWith(
+      TransientEvidenceFragment,
+    );
+    expect(dataSource.getRepository).toHaveBeenCalledWith(SourceChangeEvent);
   });
 
   it('uses the configured retention window when computing the cutoff', async () => {
@@ -89,18 +96,16 @@ describe('runExpiredWorkCopilotCleanup', () => {
       { WORK_BRIEF_DRAFT_RETENTION_DAYS: '30' },
     );
 
-    const [criteria] = draftsRepository.find.mock.calls[0] as [
-      { where: { deletedAt: { _value: Date } } },
-    ];
-    expect(criteria.where.deletedAt._value.toISOString()).toBe(
-      '2026-07-07T00:00:00.000Z',
-    );
+    const [, params] = retentionManager.query.mock.calls.find(
+      ([statement]: [string]) => statement.includes('SELECT draft."id"'),
+    ) as [string, [Date, number]];
+    expect(params).toEqual([new Date('2026-07-07T00:00:00.000Z'), 200]);
   });
 
   it('keeps the TTL jobs succeeding when the retention job fails', async () => {
     fragmentsRepository.delete.mockResolvedValue({ affected: 1 });
     eventsRepository.delete.mockResolvedValue({ affected: 1 });
-    draftsRepository.find.mockRejectedValue(
+    retentionManager.query.mockRejectedValue(
       new Error('brief content must never be logged'),
     );
 

@@ -1,8 +1,6 @@
 import { LessThanOrEqual, type DataSource, type Repository } from 'typeorm';
-import { BriefPublication } from '../publications/entities/brief-publication.entity';
 import { SourceChangeEvent } from '../webhooks/entities/source-change-event.entity';
 import { TransientEvidenceFragment } from '../work-briefs/entities/transient-evidence-fragment.entity';
-import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import {
   briefDraftRetentionCutoff,
   briefDraftRetentionDays,
@@ -37,7 +35,7 @@ type ExpiringRepository = Pick<Repository<ExpiringRecord>, 'delete'>;
  * separate branch instead of being forced into the same predicate.
  */
 export async function runExpiredWorkCopilotCleanup(
-  dataSource: Pick<DataSource, 'getRepository'>,
+  dataSource: Pick<DataSource, 'getRepository' | 'transaction'>,
   now = new Date(),
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<CleanupRunnerResult> {
@@ -70,8 +68,7 @@ export async function runExpiredWorkCopilotCleanup(
 
   try {
     const retention = await purgeDeletedBriefDrafts(
-      dataSource.getRepository(WorkBriefDraft),
-      dataSource.getRepository(BriefPublication),
+      dataSource,
       briefDraftRetentionCutoff(
         briefDraftRetentionDays(environment.WORK_BRIEF_DRAFT_RETENTION_DAYS),
         now,

@@ -1,9 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { BriefPublication } from '../publications/entities/brief-publication.entity';
-import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { CleanupHealthService } from './cleanup-health.service';
 import {
   briefDraftRetentionCutoff,
@@ -30,10 +28,7 @@ export class DeletedBriefDraftCleanupService
   private purgeTimer: NodeJS.Timeout | undefined;
 
   constructor(
-    @InjectRepository(WorkBriefDraft)
-    private readonly draftsRepository: Repository<WorkBriefDraft>,
-    @InjectRepository(BriefPublication)
-    private readonly publicationsRepository: Repository<BriefPublication>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly cleanupHealth: CleanupHealthService,
   ) {}
@@ -56,8 +51,7 @@ export class DeletedBriefDraftCleanupService
   async purgeExpired(now = new Date()): Promise<void> {
     try {
       const result = await purgeDeletedBriefDrafts(
-        this.draftsRepository,
-        this.publicationsRepository,
+        this.dataSource,
         briefDraftRetentionCutoff(this.retentionDays(), now),
       );
       this.cleanupHealth.recordSuccess(
