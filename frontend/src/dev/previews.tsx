@@ -9,9 +9,7 @@ const ComponentPreviews = () => {
             <ComponentPreview path="/Header">
                 <Header
                     title="Work Copilot"
-                    menu="posts"
                     user={null}
-                    onMenuClick={() => undefined}
                     onLogout={() => undefined}
                 />
             </ComponentPreview>

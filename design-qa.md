@@ -6,7 +6,7 @@
 - Implementation screenshot: `/Users/donghyunkim/WebstormProjects/dh-board-backend/design-qa-assets/work-brief-implementation-1440x1024.png`
 - Combined comparison: `/Users/donghyunkim/WebstormProjects/dh-board-backend/design-qa-assets/work-brief-comparison-final.png`
 - Mobile screenshot: `/Users/donghyunkim/WebstormProjects/dh-board-backend/design-qa-assets/work-brief-mobile-390x844.png`
-- URL: `http://127.0.0.1:5174/?preview=work-brief`
+- URL: `http://127.0.0.1:5174/dev/briefs-preview`
 
 ## 캡처 조건
 
