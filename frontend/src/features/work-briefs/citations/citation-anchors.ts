@@ -6,8 +6,17 @@
  * list, and a row scrolls back to the item that cites it. Threading refs
  * through every section to do that would couple them far harder than a name.
  */
+/**
+ * `encodeURIComponent` and not a character replacement.
+ *
+ * Replacing "everything unsafe" with `_` is not injective: `SPACE/42` and
+ * `SPACE_42` are different Confluence sources that would collapse onto the
+ * same id, and `getElementById` answers with whichever row is first in the
+ * document. A chip would then scroll to somebody else's evidence. Percent
+ * encoding is reversible, so two different evidence ids cannot meet.
+ */
 export const evidenceRowId = (evidenceId: string): string =>
-  `evidence-row-${evidenceId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+  `evidence-row-${encodeURIComponent(evidenceId)}`;
 
 const SECTION_KEYS: Record<string, string> = {
   제목: "title",

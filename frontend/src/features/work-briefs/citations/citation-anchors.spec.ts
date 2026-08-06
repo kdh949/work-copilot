@@ -3,13 +3,31 @@ import test from "node:test";
 import { citationAnchorId, evidenceRowId } from "./citation-anchors.ts";
 
 test("makes an evidence id safe to use as a DOM id", () => {
-  // Provider ids carry colons and slashes; both are legal in an id attribute
-  // but not in the CSS selectors that read one back.
-  assert.equal(evidenceRowId("jira:100"), "evidence-row-jira_100");
+  assert.equal(evidenceRowId("jira:100"), "evidence-row-jira%3A100");
   assert.equal(
     evidenceRowId("confluence:SPACE/42"),
-    "evidence-row-confluence_SPACE_42",
+    "evidence-row-confluence%3ASPACE%2F42",
   );
+});
+
+test("never gives two different evidence ids the same DOM id", () => {
+  // The pairs that a "replace unsafe characters with _" scheme collapses.
+  // getElementById answers with the first match, so a collision sends a chip
+  // to another evidence's row.
+  const collidingPairs = [
+    ["SPACE/42", "SPACE_42"],
+    ["A:B", "A_B"],
+    ["A B", "A_B"],
+    ["%2F", "/"],
+  ];
+
+  for (const [left, right] of collidingPairs) {
+    assert.notEqual(
+      evidenceRowId(left),
+      evidenceRowId(right),
+      `${left} and ${right} must not share a row id`,
+    );
+  }
 });
 
 test("numbers a list section and leaves the single-item sections bare", () => {
