@@ -266,6 +266,10 @@ export function WorkBriefsPage({
           setPublication(loaded.publication);
           resetNeedsReviewState(loaded.publication);
         }
+        if (loaded.readiness) {
+          setReadiness(loaded.readiness);
+          setReadinessStale(false);
+        }
       })
       .catch((error: unknown) => {
         if (requestRevision !== draftRouteRequestRevisionRef.current) return;

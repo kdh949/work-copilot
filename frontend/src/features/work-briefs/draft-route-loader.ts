@@ -1,12 +1,14 @@
 import type {
   BriefDraft,
   BriefPublication,
+  ReadinessAssessment,
   WorkBriefApiRequest,
 } from "./work-briefs.types";
 
 export type LoadedDraftRoute = {
   draft: BriefDraft;
   publication: BriefPublication | null;
+  readiness: ReadinessAssessment | null;
 };
 
 /**
@@ -24,10 +26,31 @@ export async function loadDraftRoute(
     const publication = await request<BriefPublication>(
       `/brief-drafts/${draftId}/publication`,
     );
-    return { draft, publication };
+    if (publication.draftVersion !== draft.optimisticVersion) {
+      return { draft, publication, readiness: null };
+    }
+
+    try {
+      const readiness = await request<ReadinessAssessment>(
+        `/brief-drafts/${draftId}/readiness`,
+      );
+      // This endpoint calculates from the live draft. Retain the check so a
+      // future cached implementation cannot enable a retry for an older
+      // version of the editor.
+      return {
+        draft,
+        publication,
+        readiness:
+          readiness.assessmentVersion === draft.optimisticVersion
+            ? readiness
+            : null,
+      };
+    } catch {
+      return { draft, publication, readiness: null };
+    }
   } catch {
     // A draft without any publication is the normal first-open state. The
     // editor will let the user begin readiness assessment from there.
-    return { draft, publication: null };
+    return { draft, publication: null, readiness: null };
   }
 }
