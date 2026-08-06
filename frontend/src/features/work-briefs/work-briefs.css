@@ -12,6 +12,27 @@
 .work-brief-selection { position: sticky; top: var(--header-height); display: flex; min-height: calc(100vh - var(--header-height)); max-height: calc(100vh - var(--header-height)); flex-direction: column; border-left: var(--border-width) solid var(--color-border-default); }
 .work-brief-main { min-width: 0; background: var(--color-surface-base); }
 
+/* Drafts already in progress. Sits above evidence selection so the first
+   thing on the screen is the work that already exists, not a blank issue-key
+   field that invites starting over. */
+.work-brief-draft-list { display: grid; gap: var(--space-4); margin: var(--space-6) var(--space-6) 0; padding: var(--space-5); }
+.work-brief-draft-list h2 { margin: 0; font-size: var(--font-size-16); }
+.work-brief-draft-list-header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.work-brief-draft-list-header span { color: var(--color-text-muted); font-size: var(--font-size-13); }
+.work-brief-draft-list-empty { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-13); }
+.work-brief-draft-list-items { display: grid; margin: 0; padding: 0; gap: var(--space-2); list-style: none; }
+.work-brief-draft-list-items > li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border-width) solid var(--color-border-subtle); border-radius: var(--radius-4); background: var(--color-surface-base); }
+.work-brief-draft-list-open { display: grid; min-width: 0; padding: 0; gap: 2px; border: 0; background: transparent; text-align: left; }
+.work-brief-draft-list-key { color: var(--color-text-muted); font-size: var(--font-size-12); font-weight: var(--font-weight-semibold); }
+.work-brief-draft-list-title { overflow: hidden; color: var(--color-text-strong); font-size: var(--font-size-14); font-weight: var(--font-weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.work-brief-draft-list-meta { color: var(--color-text-muted); font-size: var(--font-size-12); }
+.work-brief-draft-list-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* Deletion frees the Jira issue and cannot be undone by the user, so the
+   confirmation takes over the whole row rather than sitting in a corner. */
+.work-brief-draft-list-confirm { grid-column: 1 / -1; display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-3); background: var(--color-surface-subtle); }
+.work-brief-draft-list-confirm p { margin: 0; font-size: var(--font-size-13); }
+.work-brief-draft-list-confirm-note { color: var(--color-text-muted); line-height: var(--line-height-normal); }
+
 .work-brief-rail-heading { display: flex; align-items: center; gap: var(--space-3); padding-bottom: var(--space-5); }
 .work-brief-rail-heading > div { display: grid; gap: 2px; }
 .work-brief-rail-heading strong { font-size: var(--font-size-14); }

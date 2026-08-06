@@ -15,7 +15,12 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { Header } from "./components/Header";
-import { BRIEFS_PREVIEW_PATH, MENU_PATHS, menuFromPathname } from "./routes";
+import {
+  BRIEFS_PREVIEW_PATH,
+  MENU_PATHS,
+  draftIdFromPathname,
+  menuFromPathname,
+} from "./routes";
 import {
   Alert,
   Badge,
@@ -1670,6 +1675,14 @@ function App() {
           <WorkBriefsPage
             request={IS_WORK_BRIEF_PREVIEW ? previewWorkBriefRequest : request}
             onOpenIntegrations={() => void navigate(MENU_PATHS.integrations)}
+            draftId={draftIdFromPathname(location.pathname) ?? undefined}
+            onOpenDraft={(draftId, options) =>
+              void navigate(`${MENU_PATHS.workBriefs}/${draftId}`, options)
+            }
+            onDraftUnavailable={(reason) => {
+              notifyWarning(reason);
+              void navigate(MENU_PATHS.workBriefs, { replace: true });
+            }}
             initialIssueKey={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_ISSUE : undefined}
             initialEvidence={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_EVIDENCE : undefined}
           />

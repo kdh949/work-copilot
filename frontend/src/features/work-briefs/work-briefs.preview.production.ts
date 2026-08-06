@@ -41,5 +41,9 @@ const productionPreviewDraft: BriefDraft = {
   updatedAt: '1970-01-01T00:00:00.000Z',
 };
 
-export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>() =>
-  productionPreviewDraft as T;
+export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
+  path: string,
+) =>
+  (path === '/brief-drafts' || path.startsWith('/brief-drafts?')
+    ? { items: [], nextCursor: null }
+    : productionPreviewDraft) as T;
