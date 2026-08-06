@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import {
   ConfluenceWorkItemService,
   type ConfluenceDraftContext,
@@ -33,6 +33,7 @@ import {
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
 import { TransientEvidenceFragmentsService } from './transient-evidence-fragments.service';
+import { lockBriefDraft } from './brief-draft-lock';
 import {
   WorkBriefAiClientService,
   type WorkBriefOutput,
@@ -59,6 +60,7 @@ export class WorkBriefsService {
     private readonly publicationService: PublicationService,
     private readonly fragments: TransientEvidenceFragmentsService,
     private readonly audit: SafeAuditService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async createDraft(
@@ -217,34 +219,47 @@ export class WorkBriefsService {
     draftId: string,
     correlationId: string,
   ): Promise<void> {
-    // Not owned or already deleted both land here as 404, so the response
-    // cannot be used to probe whether a draft id exists.
-    const draft = await this.findOwnedDraft(userId, draftId);
-    const publication =
-      await this.publicationService.assessDraftDeletion(draftId);
+    const draft = await this.dataSource.transaction(async (manager) => {
+      await lockBriefDraft(manager, draftId);
+      const drafts = manager.getRepository(WorkBriefDraft);
+      // Not owned or already deleted both land here as 404, so the response
+      // cannot be used to probe whether a draft id exists.
+      const liveDraft = await drafts.findOneBy({
+        id: draftId,
+        createdByUserId: userId,
+      });
+      if (!liveDraft) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
+      const publication = await this.publicationService.assessDraftDeletion(
+        draftId,
+        manager,
+      );
 
-    if (publication.publishing) {
-      throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
-    }
-    if (publication.externalWritePerformed) {
-      // Deleting would free the issue for a new draft, and publishing that
-      // one would create a second Confluence page for work already
-      // published. Resume or retry the existing publication instead (R6).
-      throw new ConflictException({ code: 'DRAFT_HAS_PUBLICATION' });
-    }
+      if (publication.publishing) {
+        throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
+      }
+      if (publication.externalWritePerformed) {
+        // Deleting would free the issue for a new draft, and publishing that
+        // one would create a second Confluence page for work already
+        // published. Resume or retry the existing publication instead (R6).
+        throw new ConflictException({ code: 'DRAFT_HAS_PUBLICATION' });
+      }
 
-    const deleted = await this.draftsRepository.update(
-      { id: draftId, createdByUserId: userId, deletedAt: IsNull() },
-      { deletedAt: new Date() },
-    );
+      const deleted = await drafts.update(
+        { id: draftId, createdByUserId: userId, deletedAt: IsNull() },
+        { deletedAt: new Date() },
+      );
+      if (deleted.affected !== 1) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
 
-    if (deleted.affected !== 1) {
-      throw new NotFoundException('Brief draft was not found.');
-    }
+      // Soft delete does not fire the fragments' ON DELETE CASCADE, so the
+      // encrypted excerpts are removed explicitly in this same transaction.
+      await this.fragments.purgeDraft(draftId, manager);
+      return liveDraft;
+    });
 
-    // Soft delete does not fire the fragments' ON DELETE CASCADE, so the
-    // encrypted excerpts are removed explicitly.
-    await this.fragments.purgeDraft(draftId);
     // Draft id, issue key and profile only — never brief content.
     await this.audit.record({
       actorUserId: userId,

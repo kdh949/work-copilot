@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import {
+  EntityManager,
+  LessThanOrEqual,
+  MoreThan,
+  Repository,
+} from 'typeorm';
 import { WorkBriefContentGuard } from './work-brief-content-guard.service';
 import { TransientEvidenceCryptoService } from './transient-evidence-crypto.service';
 import { TransientEvidenceFragment } from './entities/transient-evidence-fragment.entity';
@@ -108,8 +113,14 @@ export class TransientEvidenceFragmentsService
    * soft-deleted draft would otherwise keep its encrypted excerpts around
    * until their TTL expired.  Deletion must not extend retention.
    */
-  async purgeDraft(draftId: string): Promise<number> {
-    const result = await this.fragmentsRepository.delete({ draftId });
+  async purgeDraft(
+    draftId: string,
+    manager?: Pick<EntityManager, 'getRepository'>,
+  ): Promise<number> {
+    const fragmentsRepository = manager
+      ? manager.getRepository(TransientEvidenceFragment)
+      : this.fragmentsRepository;
+    const result = await fragmentsRepository.delete({ draftId });
 
     return result.affected ?? 0;
   }

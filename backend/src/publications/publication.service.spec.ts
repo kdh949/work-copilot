@@ -1,8 +1,10 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
-import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
-import type { BriefPublication } from './entities/brief-publication.entity';
-import type { PublicationStep } from './entities/publication-step.entity';
+import { BriefCitationValidatorService } from '../work-briefs/brief-citation-validator.service';
+import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
+import { WorkBriefsService } from '../work-briefs/work-briefs.service';
+import { BriefPublication } from './entities/brief-publication.entity';
+import { PublicationStep } from './entities/publication-step.entity';
 import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
 import type { PublicationWriteResult } from './publication-write-gateway';
 import type {
@@ -103,7 +105,13 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   let failStepInsert = false;
 
   const draftsRepository = {
-    findOneBy: jest.fn(() => Promise.resolve(draft)),
+    findOneBy: jest.fn(() => Promise.resolve(draft.deletedAt ? null : draft)),
+    update: jest.fn(
+      (_criteria: unknown, values: Partial<WorkBriefDraft>) => {
+        Object.assign(draft, values);
+        return Promise.resolve({ affected: 1 });
+      },
+    ),
   };
   const profilesRepository = {
     findOneBy: jest.fn(() => Promise.resolve(profile)),
@@ -453,19 +461,25 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   const dataSource = {
     transaction: async (
       callback: (manager: {
+        query: jest.Mock;
         getRepository: (
           entity: unknown,
-        ) => typeof publicationsRepository | typeof stepsRepository;
+        ) =>
+          | typeof draftsRepository
+          | typeof publicationsRepository
+          | typeof stepsRepository;
       }) => unknown,
     ) => {
       const publicationSnapshot = [...publications];
       const stepSnapshot = [...steps];
       try {
         return await callback({
-          getRepository: jest
-            .fn()
-            .mockReturnValueOnce(publicationsRepository)
-            .mockReturnValueOnce(stepsRepository),
+          query: jest.fn().mockResolvedValue([]),
+          getRepository: jest.fn((entity: unknown) => {
+            if (entity === WorkBriefDraft) return draftsRepository;
+            if (entity === BriefPublication) return publicationsRepository;
+            return stepsRepository;
+          }),
         });
       } catch (error) {
         publications.splice(0, publications.length, ...publicationSnapshot);
@@ -500,6 +514,7 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     publicationsRepository,
     stepsRepository,
     dataSource,
+    draftsRepository,
     failStepInsert: () => {
       failStepInsert = true;
     },
@@ -575,6 +590,110 @@ async function publishChildTasks(
 }
 
 describe('PublicationService', () => {
+  it('lets a delete win the first-publication race without calling the write gateway', async () => {
+    const harness = createHarness();
+    const preview = await harness.service.previewConfluence(7, DRAFT_ID, 'corr');
+    const lockQuery = jest.fn().mockResolvedValue([]);
+    let transactionTail = Promise.resolve();
+    const lockingDataSource = {
+      transaction: async (
+        callback: (manager: {
+          query: typeof lockQuery;
+          getRepository: (entity: unknown) => unknown;
+        }) => Promise<unknown>,
+      ) => {
+        const previous = transactionTail;
+        let releaseTransaction: () => void = () => undefined;
+        transactionTail = new Promise<void>((resolve) => {
+          releaseTransaction = resolve;
+        });
+        await previous;
+        try {
+          return await callback({
+            query: lockQuery,
+            getRepository: (entity: unknown) => {
+              if (entity === WorkBriefDraft) return harness.draftsRepository;
+              if (entity === BriefPublication) {
+                return harness.publicationsRepository;
+              }
+              return harness.stepsRepository;
+            },
+          });
+        } finally {
+          releaseTransaction();
+        }
+      },
+    };
+    harness.dataSource.transaction = lockingDataSource.transaction as never;
+
+    let releasePreflight: (value: typeof preview) => void = () => undefined;
+    const preflightReached = new Promise<void>((resolve) => {
+      harness.previewService.confluence.mockImplementationOnce(
+        () =>
+          new Promise<typeof preview>((resolvePreview) => {
+            releasePreflight = resolvePreview;
+            resolve();
+          }),
+      );
+    });
+    let releaseFragmentPurge: () => void = () => undefined;
+    let markFragmentPurgeStarted: () => void = () => undefined;
+    const fragmentPurgeStarted = new Promise<void>((resolve) => {
+      markFragmentPurgeStarted = resolve;
+    });
+    const fragments = {
+      purgeDraft: jest.fn(
+        () =>
+          new Promise<void>((resolvePurge) => {
+            releaseFragmentPurge = resolvePurge;
+            markFragmentPurgeStarted();
+          }),
+      ),
+    };
+    const workBriefs = new WorkBriefsService(
+      harness.draftsRepository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      new BriefCitationValidatorService(),
+      harness.service,
+      fragments as never,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      lockingDataSource as never,
+    );
+    const writeGateway = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+
+    const publishPromise = harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        idempotencyKey: 'delete-race-key',
+      },
+      'corr',
+    );
+    await preflightReached;
+
+    const deletePromise = workBriefs.deleteDraft(7, DRAFT_ID, 'corr');
+
+    // Start the delete while publish still has only preflight data in memory.
+    // It soft-deletes inside its transaction, then deliberately waits before
+    // commit so the publish reservation has to wait for the same lock.
+    await fragmentPurgeStarted;
+    releasePreflight(preview);
+    releaseFragmentPurge();
+
+    await expect(deletePromise).resolves.toBeUndefined();
+    await expect(publishPromise).rejects.toBeInstanceOf(NotFoundException);
+    expect(writeGateway).not.toHaveBeenCalled();
+    expect(lockQuery).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`work-brief-draft:${DRAFT_ID}`],
+    );
+  });
+
   it('rolls back the publication when the initial Confluence step insert fails', async () => {
     const harness = createHarness([FIRST_TASK_ID]);
     harness.failStepInsert();

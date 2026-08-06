@@ -18,6 +18,7 @@ import type {
 } from '../work-briefs/brief-draft.types';
 import { WorkBriefContentGuard } from '../work-briefs/work-brief-content-guard.service';
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
+import { lockBriefDraft } from '../work-briefs/brief-draft-lock';
 import { BriefPublication } from './entities/brief-publication.entity';
 import { PublicationStep } from './entities/publication-step.entity';
 import {
@@ -72,6 +73,8 @@ type RetryInput = PhaseInput & { phase: PublicationPhase };
 type InitialPublication = {
   publication: BriefPublication;
   steps: PublicationStep[];
+  draft: WorkBriefDraft;
+  created: boolean;
 };
 
 type StepExecution =
@@ -236,6 +239,7 @@ export class PublicationService {
       transaction = await this.createInitialPublication(
         publication,
         approvalRevision,
+        userId,
       );
     } catch (error) {
       if (!this.isDuplicateKeyError(error)) {
@@ -258,9 +262,27 @@ export class PublicationService {
       );
       return this.present(recovered.publication, recovered.steps);
     }
+    if (!transaction.created) {
+      const recovered = await this.recoverPublicationFromSteps(
+        transaction.publication,
+        transaction.draft,
+        transaction.steps,
+      );
+      if (this.isEmptyPendingConfluencePublication(recovered)) {
+        return this.resumeEmptyConfluencePublication(
+          userId,
+          transaction.draft,
+          recovered.publication,
+          input,
+          correlationId,
+        );
+      }
+      return this.present(recovered.publication, recovered.steps);
+    }
+
     return this.runConfluence(
       transaction.publication,
-      draft,
+      transaction.draft,
       profile,
       transaction.steps,
       userId,
@@ -632,8 +654,17 @@ export class PublicationService {
    * also the invariant the 90-day retention job relies on when it refuses to
    * hard-delete drafts with external writes.
    */
-  async assessDraftDeletion(draftId: string): Promise<DraftDeletionAssessment> {
-    const publications = await this.publicationsRepository.find({
+  async assessDraftDeletion(
+    draftId: string,
+    manager?: Pick<EntityManager, 'getRepository'>,
+  ): Promise<DraftDeletionAssessment> {
+    const publicationsRepository = manager
+      ? manager.getRepository(BriefPublication)
+      : this.publicationsRepository;
+    const stepsRepository = manager
+      ? manager.getRepository(PublicationStep)
+      : this.stepsRepository;
+    const publications = await publicationsRepository.find({
       select: {
         id: true,
         draftId: true,
@@ -646,7 +677,7 @@ export class PublicationService {
     if (publications.length === 0) {
       return { publishing: false, externalWritePerformed: false };
     }
-    const steps = await this.stepsRepository.find({
+    const steps = await stepsRepository.find({
       select: {
         publicationId: true,
         status: true,
@@ -1103,6 +1134,7 @@ export class PublicationService {
   private async createInitialPublication(
     publication: BriefPublication,
     approvalRevision: number,
+    userId: number,
   ): Promise<InitialPublication> {
     const createStep = (repository: Repository<PublicationStep>) =>
       repository.create({
@@ -1124,8 +1156,52 @@ export class PublicationService {
       });
 
     return this.dataSource.transaction(async (manager: EntityManager) => {
+      await lockBriefDraft(manager, publication.draftId);
+      const drafts = manager.getRepository(WorkBriefDraft);
       const publications = manager.getRepository(BriefPublication);
       const steps = manager.getRepository(PublicationStep);
+      // The preflight happened outside the lock. Re-read the live row before
+      // reserving anything so a delete that won first cannot reach the write
+      // gateway with a stale in-memory draft.
+      const draft = await drafts.findOneBy({
+        id: publication.draftId,
+        createdByUserId: userId,
+      });
+      if (!draft) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
+      this.assertDraftVersion(draft, publication.draftVersion);
+
+      const existing = await publications.find({
+        where: { draftId: draft.id },
+      });
+      const existingSteps =
+        existing.length === 0
+          ? []
+          : await steps.find({
+              where: existing.map((candidate) => ({
+                publicationId: candidate.id,
+              })),
+            });
+      const matchingPublication = existing.find(
+        (candidate) =>
+          candidate.idempotencyKeyHash === publication.idempotencyKeyHash ||
+          candidate.draftVersion === publication.draftVersion,
+      );
+      if (matchingPublication) {
+        return {
+          publication: matchingPublication,
+          steps: existingSteps.filter(
+            (step) => step.publicationId === matchingPublication.id,
+          ),
+          draft,
+          created: false,
+        };
+      }
+      if (assessPublicationDeletionSafety(existing, existingSteps).publishing) {
+        throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
+      }
+
       const stored = await publications.save(publication);
       await steps.insert(createStep(steps));
       return {
@@ -1134,6 +1210,8 @@ export class PublicationService {
           where: { publicationId: stored.id },
           order: { createdAt: 'ASC' },
         }),
+        draft,
+        created: true,
       };
     });
   }

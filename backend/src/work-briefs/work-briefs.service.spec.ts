@@ -83,6 +83,16 @@ describe('WorkBriefsService', () => {
   };
   const fragments = { purgeDraft: jest.fn() };
   const audit = { record: jest.fn() };
+  const transactionManager = {
+    query: jest.fn().mockResolvedValue([]),
+    getRepository: jest.fn(() => repository),
+  };
+  const dataSource = {
+    transaction: jest.fn(
+      (callback: (manager: typeof transactionManager) => unknown) =>
+        Promise.resolve(callback(transactionManager)),
+    ),
+  };
   // Typed explicitly so the self-referential chaining mocks below do not
   // collapse to `any` and silently weaken every assertion made on them.
   type ListQueryBuilder = {
@@ -112,6 +122,7 @@ describe('WorkBriefsService', () => {
       publicationService as never,
       fragments as never,
       audit as never,
+      dataSource as never,
     );
   }
 
@@ -126,7 +137,8 @@ describe('WorkBriefsService', () => {
       externalWritePerformed: false,
     });
     fragments.purgeDraft.mockResolvedValue(0);
-    audit.record.mockResolvedValue(undefined);
+      audit.record.mockResolvedValue(undefined);
+      transactionManager.query.mockResolvedValue([]);
   });
 
   it('creates a masked draft whose every generated item cites real evidence', async () => {
@@ -775,7 +787,10 @@ describe('WorkBriefsService', () => {
         }),
       );
       expect(values.deletedAt).toBeInstanceOf(Date);
-      expect(fragments.purgeDraft).toHaveBeenCalledWith(draft.id);
+      expect(fragments.purgeDraft).toHaveBeenCalledWith(
+        draft.id,
+        transactionManager,
+      );
       expect(audit.record).toHaveBeenCalledWith({
         actorUserId: 7,
         action: 'BRIEF_DRAFT_DELETED',
