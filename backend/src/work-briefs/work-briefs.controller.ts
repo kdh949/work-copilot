@@ -1,11 +1,16 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -20,12 +25,14 @@ import { PublicationService } from '../publications/publication.service';
 import { ReadinessService } from '../readiness/readiness.service';
 import {
   CreateBriefDraftDto,
+  ListBriefDraftsDto,
   RefreshBriefDraftDto,
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
 import { WorkBriefsService } from './work-briefs.service';
 
 type WorkBriefRequest = AuthenticatedRequest & CorrelatedRequest;
+const parseUuid = new ParseUUIDPipe();
 
 @Controller()
 @UseGuards(SessionAuthGuard)
@@ -45,13 +52,28 @@ export class WorkBriefsController {
     );
   }
 
+  @Get('brief-drafts')
+  list(@Query() query: ListBriefDraftsDto, @Req() request: WorkBriefRequest) {
+    return this.workBriefsService.listDrafts(request.user.sub, query);
+  }
+
   @Get('brief-drafts/:id')
-  find(@Param('id') id: string, @Req() request: WorkBriefRequest) {
+  find(@Param('id', parseUuid) id: string, @Req() request: WorkBriefRequest) {
     return this.workBriefsService.findDraft(request.user.sub, id);
   }
 
+  @Delete('brief-drafts/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', parseUuid) id: string, @Req() request: WorkBriefRequest) {
+    return this.workBriefsService.deleteDraft(
+      request.user.sub,
+      id,
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
   @Get('brief-drafts/:id/readiness')
-  readiness(@Param('id') id: string, @Req() request: WorkBriefRequest) {
+  readiness(@Param('id', parseUuid) id: string, @Req() request: WorkBriefRequest) {
     return this.readinessService.assessDraft(
       request.user.sub,
       id,
@@ -61,7 +83,7 @@ export class WorkBriefsController {
 
   @Get('brief-drafts/:id/publication-preview')
   previewConfluencePublication(
-    @Param('id') id: string,
+    @Param('id', parseUuid) id: string,
     @Req() request: WorkBriefRequest,
   ) {
     return this.publicationService.previewConfluence(
@@ -73,7 +95,7 @@ export class WorkBriefsController {
 
   @Post('brief-drafts/:id/publish')
   publish(
-    @Param('id') id: string,
+    @Param('id', parseUuid) id: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: PublishBriefDraftDto,
     @Req() request: WorkBriefRequest,
@@ -93,14 +115,14 @@ export class WorkBriefsController {
   }
 
   @Get('brief-drafts/:id/publication')
-  publication(@Param('id') id: string, @Req() request: WorkBriefRequest) {
+  publication(@Param('id', parseUuid) id: string, @Req() request: WorkBriefRequest) {
     return this.publicationService.findLatest(request.user.sub, id);
   }
 
   @Get('brief-drafts/:id/publication/:publicationId/jira-preview')
   previewJiraPublication(
-    @Param('id') id: string,
-    @Param('publicationId') publicationId: string,
+    @Param('id', parseUuid) id: string,
+    @Param('publicationId', parseUuid) publicationId: string,
     @Req() request: WorkBriefRequest,
   ) {
     return this.publicationService.previewJira(
@@ -112,8 +134,8 @@ export class WorkBriefsController {
 
   @Post('brief-drafts/:id/publication/:publicationId/jira')
   publishJira(
-    @Param('id') id: string,
-    @Param('publicationId') publicationId: string,
+    @Param('id', parseUuid) id: string,
+    @Param('publicationId', parseUuid) publicationId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: PublishBriefDraftDto,
     @Req() request: WorkBriefRequest,
@@ -135,8 +157,8 @@ export class WorkBriefsController {
 
   @Get('brief-drafts/:id/publication/:publicationId/child-tasks-preview')
   previewChildTaskPublication(
-    @Param('id') id: string,
-    @Param('publicationId') publicationId: string,
+    @Param('id', parseUuid) id: string,
+    @Param('publicationId', parseUuid) publicationId: string,
     @Req() request: WorkBriefRequest,
   ) {
     return this.publicationService.previewChildTasks(
@@ -149,8 +171,8 @@ export class WorkBriefsController {
 
   @Post('brief-drafts/:id/publication/:publicationId/child-tasks')
   publishChildTasks(
-    @Param('id') id: string,
-    @Param('publicationId') publicationId: string,
+    @Param('id', parseUuid) id: string,
+    @Param('publicationId', parseUuid) publicationId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: PublishBriefDraftDto,
     @Req() request: WorkBriefRequest,
@@ -172,8 +194,8 @@ export class WorkBriefsController {
 
   @Post('brief-drafts/:id/publication/:publicationId/retry')
   retryPublication(
-    @Param('id') id: string,
-    @Param('publicationId') publicationId: string,
+    @Param('id', parseUuid) id: string,
+    @Param('publicationId', parseUuid) publicationId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: RetryPublicationDto,
     @Req() request: WorkBriefRequest,
@@ -196,7 +218,7 @@ export class WorkBriefsController {
 
   @Patch('brief-drafts/:id')
   update(
-    @Param('id') id: string,
+    @Param('id', parseUuid) id: string,
     @Body() dto: UpdateBriefDraftDto,
     @Req() request: WorkBriefRequest,
   ) {
@@ -205,7 +227,7 @@ export class WorkBriefsController {
 
   @Post('brief-drafts/:id/refresh')
   refresh(
-    @Param('id') id: string,
+    @Param('id', parseUuid) id: string,
     @Body() dto: RefreshBriefDraftDto,
     @Req() request: WorkBriefRequest,
   ) {

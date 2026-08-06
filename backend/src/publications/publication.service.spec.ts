@@ -1,8 +1,10 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { IntegrationProfile } from '../integrations/profiles/entities/integration-profile.entity';
-import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
-import type { BriefPublication } from './entities/brief-publication.entity';
-import type { PublicationStep } from './entities/publication-step.entity';
+import { BriefCitationValidatorService } from '../work-briefs/brief-citation-validator.service';
+import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
+import { WorkBriefsService } from '../work-briefs/work-briefs.service';
+import { BriefPublication } from './entities/brief-publication.entity';
+import { PublicationStep } from './entities/publication-step.entity';
 import { MockPublicationWriteGateway } from './mock-publication-write.gateway';
 import type { PublicationWriteResult } from './publication-write-gateway';
 import type {
@@ -64,6 +66,7 @@ function createDraft(
     policyVersion: 1,
     createdAt: new Date('2026-08-02T00:00:00.000Z'),
     updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+    deletedAt: null,
   };
 }
 
@@ -102,7 +105,13 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   let failStepInsert = false;
 
   const draftsRepository = {
-    findOneBy: jest.fn(() => Promise.resolve(draft)),
+    findOneBy: jest.fn(() => Promise.resolve(draft.deletedAt ? null : draft)),
+    update: jest.fn(
+      (_criteria: unknown, values: Partial<WorkBriefDraft>) => {
+        Object.assign(draft, values);
+        return Promise.resolve({ affected: 1 });
+      },
+    ),
   };
   const profilesRepository = {
     findOneBy: jest.fn(() => Promise.resolve(profile)),
@@ -136,6 +145,50 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
       Promise.resolve(
         publications.filter((item) => matches(item as never, where)),
+      ),
+    ),
+    // Stands in for the one joined publication/step query used by the draft
+    // list. It deliberately includes every publication for the draft because
+    // an older durable external result must not be hidden by a newer row.
+    query: jest.fn((_sql: string, [draftIds]: [string[]]) =>
+      Promise.resolve(
+        draftIds.flatMap((draftId) =>
+          publications
+            .filter((item) => item.draftId === draftId)
+            .sort(
+              (left, right) =>
+                right.createdAt.getTime() - left.createdAt.getTime(),
+            )
+            .flatMap((publication) => {
+              const publicationSteps = steps.filter(
+                (step) => step.publicationId === publication.id,
+              );
+              const row = {
+                id: publication.id,
+                draftId: publication.draftId,
+                status: publication.status,
+                executionMode: publication.executionMode,
+                confluenceContentId: publication.confluenceContentId,
+              };
+              return publicationSteps.length > 0
+                ? publicationSteps.map((step) => ({
+                    ...row,
+                    stepPublicationId: step.publicationId,
+                    stepStatus: step.status,
+                    stepProviderObjectId: step.providerObjectId,
+                    stepErrorCode: step.errorCode,
+                  }))
+                : [
+                    {
+                      ...row,
+                      stepPublicationId: null,
+                      stepStatus: null,
+                      stepProviderObjectId: null,
+                      stepErrorCode: null,
+                    },
+                  ];
+            }),
+        ),
       ),
     ),
     createQueryBuilder: jest.fn(() => {
@@ -260,8 +313,19 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
       };
       return builder;
     }),
-    find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
-      Promise.resolve(steps.filter((item) => matches(item as never, where))),
+    find: jest.fn(
+      ({
+        where,
+      }: {
+        where: Record<string, unknown> | Array<Record<string, unknown>>;
+      }) =>
+        Promise.resolve(
+          steps.filter((item) =>
+            (Array.isArray(where) ? where : [where]).some((criteria) =>
+              matches(item as never, criteria),
+            ),
+          ),
+        ),
     ),
   };
   const readinessService = {
@@ -397,19 +461,25 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
   const dataSource = {
     transaction: async (
       callback: (manager: {
+        query: jest.Mock;
         getRepository: (
           entity: unknown,
-        ) => typeof publicationsRepository | typeof stepsRepository;
+        ) =>
+          | typeof draftsRepository
+          | typeof publicationsRepository
+          | typeof stepsRepository;
       }) => unknown,
     ) => {
       const publicationSnapshot = [...publications];
       const stepSnapshot = [...steps];
       try {
         return await callback({
-          getRepository: jest
-            .fn()
-            .mockReturnValueOnce(publicationsRepository)
-            .mockReturnValueOnce(stepsRepository),
+          query: jest.fn().mockResolvedValue([]),
+          getRepository: jest.fn((entity: unknown) => {
+            if (entity === WorkBriefDraft) return draftsRepository;
+            if (entity === BriefPublication) return publicationsRepository;
+            return stepsRepository;
+          }),
         });
       } catch (error) {
         publications.splice(0, publications.length, ...publicationSnapshot);
@@ -444,6 +514,7 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
     publicationsRepository,
     stepsRepository,
     dataSource,
+    draftsRepository,
     failStepInsert: () => {
       failStepInsert = true;
     },
@@ -519,6 +590,110 @@ async function publishChildTasks(
 }
 
 describe('PublicationService', () => {
+  it('lets a delete win the first-publication race without calling the write gateway', async () => {
+    const harness = createHarness();
+    const preview = await harness.service.previewConfluence(7, DRAFT_ID, 'corr');
+    const lockQuery = jest.fn().mockResolvedValue([]);
+    let transactionTail = Promise.resolve();
+    const lockingDataSource = {
+      transaction: async (
+        callback: (manager: {
+          query: typeof lockQuery;
+          getRepository: (entity: unknown) => unknown;
+        }) => Promise<unknown>,
+      ) => {
+        const previous = transactionTail;
+        let releaseTransaction: () => void = () => undefined;
+        transactionTail = new Promise<void>((resolve) => {
+          releaseTransaction = resolve;
+        });
+        await previous;
+        try {
+          return await callback({
+            query: lockQuery,
+            getRepository: (entity: unknown) => {
+              if (entity === WorkBriefDraft) return harness.draftsRepository;
+              if (entity === BriefPublication) {
+                return harness.publicationsRepository;
+              }
+              return harness.stepsRepository;
+            },
+          });
+        } finally {
+          releaseTransaction();
+        }
+      },
+    };
+    harness.dataSource.transaction = lockingDataSource.transaction as never;
+
+    let releasePreflight: (value: typeof preview) => void = () => undefined;
+    const preflightReached = new Promise<void>((resolve) => {
+      harness.previewService.confluence.mockImplementationOnce(
+        () =>
+          new Promise<typeof preview>((resolvePreview) => {
+            releasePreflight = resolvePreview;
+            resolve();
+          }),
+      );
+    });
+    let releaseFragmentPurge: () => void = () => undefined;
+    let markFragmentPurgeStarted: () => void = () => undefined;
+    const fragmentPurgeStarted = new Promise<void>((resolve) => {
+      markFragmentPurgeStarted = resolve;
+    });
+    const fragments = {
+      purgeDraft: jest.fn(
+        () =>
+          new Promise<void>((resolvePurge) => {
+            releaseFragmentPurge = resolvePurge;
+            markFragmentPurgeStarted();
+          }),
+      ),
+    };
+    const workBriefs = new WorkBriefsService(
+      harness.draftsRepository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      new BriefCitationValidatorService(),
+      harness.service,
+      fragments as never,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      lockingDataSource as never,
+    );
+    const writeGateway = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+
+    const publishPromise = harness.service.publish(
+      7,
+      DRAFT_ID,
+      {
+        draftVersion: 3,
+        approved: true,
+        previewHash: preview.previewHash,
+        idempotencyKey: 'delete-race-key',
+      },
+      'corr',
+    );
+    await preflightReached;
+
+    const deletePromise = workBriefs.deleteDraft(7, DRAFT_ID, 'corr');
+
+    // Start the delete while publish still has only preflight data in memory.
+    // It soft-deletes inside its transaction, then deliberately waits before
+    // commit so the publish reservation has to wait for the same lock.
+    await fragmentPurgeStarted;
+    releasePreflight(preview);
+    releaseFragmentPurge();
+
+    await expect(deletePromise).resolves.toBeUndefined();
+    await expect(publishPromise).rejects.toBeInstanceOf(NotFoundException);
+    expect(writeGateway).not.toHaveBeenCalled();
+    expect(lockQuery).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`work-brief-draft:${DRAFT_ID}`],
+    );
+  });
+
   it('rolls back the publication when the initial Confluence step insert fails', async () => {
     const harness = createHarness([FIRST_TASK_ID]);
     harness.failStepInsert();
@@ -1779,5 +1954,147 @@ describe('PublicationService', () => {
 
     expect(confluence).not.toHaveBeenCalled();
     expect(harness.publications).toHaveLength(0);
+  });
+
+  describe('list and deletion reads', () => {
+    // R4: the draft list renders a publication badge per row. If that reused
+    // findLatest, recoverPublicationFromSteps would run — and reconcile — once
+    // per draft, turning a list render into N Atlassian calls.
+    it('summarizes the latest publication without running step recovery', async () => {
+      const harness = createHarness();
+      const published = await publishConfluence(harness);
+      const reconcile = jest.spyOn(harness.gateway, 'reconcileJiraChildTasks');
+      const upsert = jest.spyOn(harness.gateway, 'upsertConfluenceBrief');
+      harness.stepsRepository.find.mockClear();
+      harness.publicationsRepository.query.mockClear();
+
+      const summaries = await harness.service.findLatestStoredSummaries([
+        DRAFT_ID,
+      ]);
+
+      expect(summaries.get(DRAFT_ID)).toEqual({
+        draftId: DRAFT_ID,
+        id: published.id,
+        status: published.status,
+        // The harness publishes in mock mode, so nothing exists externally.
+        externalWritePerformed: false,
+      });
+      expect(harness.publicationsRepository.query).toHaveBeenCalledTimes(1);
+      expect(harness.stepsRepository.find).not.toHaveBeenCalled();
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it('reads publications for every draft id in one query', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publicationsRepository.query.mockClear();
+
+      const summaries = await harness.service.findLatestStoredSummaries([
+        DRAFT_ID,
+        '99999999-9999-4999-8999-999999999999',
+      ]);
+
+      expect(harness.publicationsRepository.query).toHaveBeenCalledTimes(1);
+      expect(summaries.size).toBe(1);
+    });
+
+    it('does not query at all for an empty page', async () => {
+      const harness = createHarness();
+      harness.publicationsRepository.query.mockClear();
+
+      await expect(
+        harness.service.findLatestStoredSummaries([]),
+      ).resolves.toEqual(new Map());
+      expect(harness.publicationsRepository.query).not.toHaveBeenCalled();
+    });
+
+    it('reports a mock-mode publication as safe to delete', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toEqual({ publishing: false, externalWritePerformed: false });
+    });
+
+    // R6: external write history is what makes deletion unsafe, and it must
+    // be detected across every publication of the draft rather than only the
+    // latest one — a later mock publication must not mask an earlier real page.
+    it('reports external write history from any publication of the draft', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].executionMode = 'real';
+      harness.publications[0].confluenceContentId = 'confluence-page-1';
+      harness.publications.push({
+        ...harness.publications[0],
+        id: 'publication-later',
+        executionMode: 'mock',
+        confluenceContentId: null,
+        createdAt: new Date(Date.now() + 1_000),
+      });
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+    });
+
+    it('fails closed when a real provider result reached a step before the aggregate', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].executionMode = 'real';
+      // Simulate a process exit after markSucceeded persisted this result and
+      // before the aggregate save copied it to confluenceContentId.
+      harness.publications[0].confluenceContentId = null;
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+      await expect(
+        harness.service.findLatestStoredSummaries([DRAFT_ID]),
+      ).resolves.toEqual(
+        new Map([
+          [
+            DRAFT_ID,
+            expect.objectContaining({ externalWritePerformed: true }),
+          ],
+        ]),
+      );
+    });
+
+    it('fails closed when step reconciliation is indeterminate', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].confluenceContentId = null;
+      Object.assign(harness.steps[0], {
+        status: 'NEEDS_REVIEW',
+        providerObjectId: null,
+        errorCode: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      });
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+    });
+
+    it('reports a running publication as blocking deletion', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].status = 'PUBLISHING';
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ publishing: true });
+    });
+
+    it('reports a reserved pending publication as blocking deletion', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].status = 'PENDING';
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ publishing: true });
+    });
   });
 });

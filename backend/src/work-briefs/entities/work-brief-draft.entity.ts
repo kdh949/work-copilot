@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
@@ -55,4 +56,14 @@ export class WorkBriefDraft {
 
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
+
+  // Soft delete.  Every TypeORM `find*` call on this repository excludes
+  // deleted drafts automatically, which covers the three separate
+  // `findOwnedDraft` helpers in WorkBriefsService, ReadinessService and
+  // PublicationService at once.
+  //
+  // `repository.update()` does NOT honour this filter — those criteria must
+  // carry `deletedAt: IsNull()` explicitly.
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 }

@@ -13,6 +13,7 @@ describe('SafeAuditService', () => {
     const service = new SafeAuditService(repository as never, metrics);
 
     await service.record({
+      actorUserId: 42,
       action: 'WEBHOOK_SHADOW_PROCESSED',
       profileId: '11111111-1111-4111-8111-111111111111',
       targetId: '100',
@@ -20,6 +21,7 @@ describe('SafeAuditService', () => {
       resultCode: 'REVIEW_REQUIRED',
     });
     await service.record({
+      actorUserId: 42,
       action: 'WEBHOOK_SHADOW_PROCESSED',
       profileId: '11111111-1111-4111-8111-111111111111',
       targetId: 'sk-proj-abcdefghijklmnopqrstuv',
@@ -28,6 +30,9 @@ describe('SafeAuditService', () => {
     });
 
     expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: 42 }),
+    );
     expect(JSON.stringify(repository.save.mock.calls)).not.toContain(
       'sk-proj-abcdefghijklmnopqrstuv',
     );

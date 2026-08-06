@@ -147,7 +147,7 @@ npm run dev:frontend
 | 서비스 로그인        | `KEYCLOAK_ISSUER`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`, `OIDC_ATTEMPT_ENCRYPTION_KEY` |
 | Jira·Confluence 연동 | `INTEGRATION_ENCRYPTION_KEY`, `INTEGRATION_CALLBACK_BASE_URL`, provider scope allowlist          |
 | AI 서비스 보호       | `AI_SERVICE_URL`, `AI_SERVICE_API_KEY`, `OPENAI_API_KEY`                                         |
-| 데이터 보존          | `TRANSIENT_CONTENT_ENCRYPTION_KEY`, `TRANSIENT_EVIDENCE_TTL_SECONDS`                             |
+| 데이터 보존          | `TRANSIENT_CONTENT_ENCRYPTION_KEY`, `TRANSIENT_EVIDENCE_TTL_SECONDS`, `WORK_BRIEF_DRAFT_RETENTION_DAYS` |
 
 관리자 권한은 Keycloak의 `work-copilot-admin` claim으로 판정합니다. `AI_SERVICE_API_KEY`는 NestJS와 FastAPI에 같은 값으로 설정해야 하며, OpenAI 키와 함께 `.env` 또는 배포 환경의 secret으로만 관리합니다.
 

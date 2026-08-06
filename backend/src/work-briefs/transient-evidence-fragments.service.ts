@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import {
+  EntityManager,
+  LessThanOrEqual,
+  MoreThan,
+  Repository,
+} from 'typeorm';
 import { WorkBriefContentGuard } from './work-brief-content-guard.service';
 import { TransientEvidenceCryptoService } from './transient-evidence-crypto.service';
 import { TransientEvidenceFragment } from './entities/transient-evidence-fragment.entity';
@@ -99,6 +104,25 @@ export class TransientEvidenceFragmentsService
         return { evidenceId: fragment.evidenceId, content };
       }),
     );
+  }
+
+  /**
+   * Hard-delete every fragment of one draft.
+   *
+   * The table's `ON DELETE CASCADE` only fires on a real row delete, so a
+   * soft-deleted draft would otherwise keep its encrypted excerpts around
+   * until their TTL expired.  Deletion must not extend retention.
+   */
+  async purgeDraft(
+    draftId: string,
+    manager?: Pick<EntityManager, 'getRepository'>,
+  ): Promise<number> {
+    const fragmentsRepository = manager
+      ? manager.getRepository(TransientEvidenceFragment)
+      : this.fragmentsRepository;
+    const result = await fragmentsRepository.delete({ draftId });
+
+    return result.affected ?? 0;
   }
 
   async purgeExpired(): Promise<void> {

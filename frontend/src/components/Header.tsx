@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, NavLink } from "react-router-dom";
 import { IconBrandJira, IconChevronDown, IconLogout } from "@tabler/icons-react";
+import { MENU_PATHS, type MenuName } from "../routes";
 
 type User = {
   id: number;
@@ -10,19 +12,9 @@ type User = {
   role: string;
 };
 
-export type MenuName =
-  | "posts"
-  | "notes"
-  | "workBriefs"
-  | "integrations"
-  | "admin"
-  | "login";
-
 type HeaderProps = {
   title: string;
-  menu: MenuName;
   user: User | null;
-  onMenuClick: (menu: MenuName) => void;
   onLogout: () => void;
 };
 
@@ -47,40 +39,47 @@ export function Header(props: HeaderProps) {
 
   return (
     <header className="header">
-      <button
-        type="button"
-        className="header-brand"
-        onClick={() => props.user && props.onMenuClick("workBriefs")}
-        aria-label={`${props.title} 홈`}
-      >
-        <span className="header-brand-mark" aria-hidden="true">
-          <IconBrandJira size={20} stroke={2.1} />
+      {props.user ? (
+        <Link
+          to={MENU_PATHS.workBriefs}
+          className="header-brand"
+          aria-label={`${props.title} 홈`}
+        >
+          <span className="header-brand-mark" aria-hidden="true">
+            <IconBrandJira size={20} stroke={2.1} />
+          </span>
+          <span>{props.title}</span>
+        </Link>
+      ) : (
+        <span className="header-brand">
+          <span className="header-brand-mark" aria-hidden="true">
+            <IconBrandJira size={20} stroke={2.1} />
+          </span>
+          <span>{props.title}</span>
         </span>
-        <span>{props.title}</span>
-      </button>
+      )}
 
       {props.user ? (
         <>
+          {/* NavLink derives the active state from the URL, so the header can
+              no longer disagree with the screen that is actually shown. */}
           <nav aria-label="주요 메뉴">
             {NAV_ITEMS.map((item) => (
-              <button
-                type="button"
+              <NavLink
                 key={item.menu}
-                className={props.menu === item.menu ? "active" : ""}
-                onClick={() => props.onMenuClick(item.menu)}
-                aria-current={props.menu === item.menu ? "page" : undefined}
+                to={MENU_PATHS[item.menu]}
+                className={({ isActive }) => (isActive ? "active" : "")}
               >
                 {item.label}
-              </button>
+              </NavLink>
             ))}
             {props.user.role === "admin" ? (
-              <button
-                type="button"
-                className={props.menu === "admin" ? "active" : ""}
-                onClick={() => props.onMenuClick("admin")}
+              <NavLink
+                to={MENU_PATHS.admin}
+                className={({ isActive }) => (isActive ? "active" : "")}
               >
                 연동 관리
-              </button>
+              </NavLink>
             ) : null}
           </nav>
 

@@ -8,6 +8,7 @@ import { RealPublicationStages1785782400000 } from '../database/migrations/20260
 import { OAuthWriteScopeFingerprint1785786000000 } from '../database/migrations/2026080401000-oauth-write-scope-fingerprint';
 import { PublicationStepRecovery1785789600000 } from '../database/migrations/2026080402000-publication-step-recovery';
 import { PublicationExecutionFencing1785873600000 } from '../database/migrations/2026080500000-publication-execution-fencing';
+import { BriefDraftSoftDelete1786000000000 } from '../database/migrations/2026080600000-brief-draft-soft-delete';
 
 type Environment = NodeJS.ProcessEnv;
 
@@ -59,6 +60,7 @@ export const createDatabaseOptions = (
       OAuthWriteScopeFingerprint1785786000000,
       PublicationStepRecovery1785789600000,
       PublicationExecutionFencing1785873600000,
+      BriefDraftSoftDelete1786000000000,
     ],
   };
 };

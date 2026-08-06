@@ -62,6 +62,34 @@ export type BriefDraft = {
   updatedAt: string;
 };
 
+/**
+ * A draft as it appears in the list. Narrower than `BriefDraft` on purpose:
+ * the server withholds the title and evidence count once source access has
+ * changed, and the response has no field to put them in.
+ */
+export type BriefDraftSummary = {
+  id: string;
+  sourceJiraKey: string;
+  title: string | null;
+  evidenceCount: number | null;
+  status: BriefDraft["status"];
+  freshnessStatus: BriefDraft["freshnessStatus"];
+  optimisticVersion: number;
+  blockers: BriefDraft["blockers"];
+  publication: {
+    id: string;
+    status: BriefPublication["status"];
+    externalWritePerformed: boolean;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BriefDraftListView = {
+  items: BriefDraftSummary[];
+  nextCursor: string | null;
+};
+
 export type ReadinessFinding = {
   code:
     | "COVERAGE_MISSING"

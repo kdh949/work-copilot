@@ -18,8 +18,14 @@ import type {
 } from '../work-briefs/brief-draft.types';
 import { WorkBriefContentGuard } from '../work-briefs/work-brief-content-guard.service';
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
+import { lockBriefDraft } from '../work-briefs/brief-draft-lock';
 import { BriefPublication } from './entities/brief-publication.entity';
 import { PublicationStep } from './entities/publication-step.entity';
+import {
+  assessPublicationDeletionSafety,
+  type StoredPublicationForDeletion,
+  type StoredPublicationStepForDeletion,
+} from './publication-deletion-safety';
 import {
   PUBLICATION_STEP_HEARTBEAT_INTERVAL_MS,
   PublicationStepClaimerService,
@@ -41,9 +47,11 @@ import {
 } from './publication-preview.service';
 import type {
   BriefPublicationView,
+  DraftDeletionAssessment,
   PublicationErrorCode,
   PublicationPhase,
   PublicationStatus,
+  StoredPublicationSummary,
 } from './publication.types';
 
 const CONFLUENCE_STEP = 'confluence_page';
@@ -65,6 +73,8 @@ type RetryInput = PhaseInput & { phase: PublicationPhase };
 type InitialPublication = {
   publication: BriefPublication;
   steps: PublicationStep[];
+  draft: WorkBriefDraft;
+  created: boolean;
 };
 
 type StepExecution =
@@ -229,6 +239,7 @@ export class PublicationService {
       transaction = await this.createInitialPublication(
         publication,
         approvalRevision,
+        userId,
       );
     } catch (error) {
       if (!this.isDuplicateKeyError(error)) {
@@ -251,9 +262,27 @@ export class PublicationService {
       );
       return this.present(recovered.publication, recovered.steps);
     }
+    if (!transaction.created) {
+      const recovered = await this.recoverPublicationFromSteps(
+        transaction.publication,
+        transaction.draft,
+        transaction.steps,
+      );
+      if (this.isEmptyPendingConfluencePublication(recovered)) {
+        return this.resumeEmptyConfluencePublication(
+          userId,
+          transaction.draft,
+          recovered.publication,
+          input,
+          correlationId,
+        );
+      }
+      return this.present(recovered.publication, recovered.steps);
+    }
+
     return this.runConfluence(
       transaction.publication,
-      draft,
+      transaction.draft,
       profile,
       transaction.steps,
       userId,
@@ -523,6 +552,144 @@ export class PublicationService {
       draft,
     );
     return this.present(recovered.publication, recovered.steps);
+  }
+
+  /**
+   * Latest stored publication per draft, in one query.
+   *
+   * Callers must have already scoped `draftIds` to the requesting user — this
+   * method performs no ownership check because it exists to serve a list that
+   * was itself filtered by `createdByUserId`.
+   *
+   * Unlike `findLatest` this never runs step recovery, so it issues no
+   * Atlassian calls no matter how many drafts are on the page (R4).
+   */
+  async findLatestStoredSummaries(
+    draftIds: string[],
+  ): Promise<Map<string, StoredPublicationSummary>> {
+    if (draftIds.length === 0) {
+      return new Map();
+    }
+
+    type StoredPublicationRow = StoredPublicationForDeletion & {
+      stepPublicationId: string | null;
+      stepStatus: PublicationStep['status'] | null;
+      stepProviderObjectId: string | null;
+      stepErrorCode: PublicationStep['errorCode'] | null;
+    };
+    const rows = await this.publicationsRepository.query<
+      StoredPublicationRow[]
+    >(
+      `SELECT publication."id",
+              publication."draftId",
+              publication."status",
+              publication."executionMode",
+              publication."confluenceContentId",
+              step."publicationId" AS "stepPublicationId",
+              step."status" AS "stepStatus",
+              step."providerObjectId" AS "stepProviderObjectId",
+              step."errorCode" AS "stepErrorCode"
+         FROM "brief_publications" publication
+         LEFT JOIN "publication_steps" step
+           ON step."publicationId" = publication."id"
+        WHERE publication."draftId" = ANY($1::uuid[])
+        ORDER BY publication."draftId", publication."createdAt" DESC, step."createdAt" ASC`,
+      [draftIds],
+    );
+    type StoredSummaryGroup = {
+      latest: StoredPublicationForDeletion;
+      publications: Map<string, StoredPublicationForDeletion>;
+      steps: StoredPublicationStepForDeletion[];
+    };
+    const grouped = new Map<string, StoredSummaryGroup>();
+
+    for (const row of rows) {
+      const publication: StoredPublicationForDeletion = {
+        id: row.id,
+        draftId: row.draftId,
+        status: row.status,
+        executionMode: row.executionMode,
+        confluenceContentId: row.confluenceContentId,
+      };
+      const current: StoredSummaryGroup = grouped.get(row.draftId) ?? {
+        latest: publication,
+        publications: new Map(),
+        steps: [],
+      };
+      current.publications.set(publication.id, publication);
+      if (row.stepPublicationId && row.stepStatus) {
+        current.steps.push({
+          publicationId: row.stepPublicationId,
+          status: row.stepStatus,
+          providerObjectId: row.stepProviderObjectId,
+          errorCode: row.stepErrorCode,
+        });
+      }
+      grouped.set(row.draftId, current);
+    }
+
+    return new Map(
+      [...grouped.entries()].map(([draftId, current]) => [
+        draftId,
+        {
+          draftId,
+          id: current.latest.id,
+          status: current.latest.status,
+          externalWritePerformed: assessPublicationDeletionSafety(
+            [...current.publications.values()],
+            current.steps,
+          ).externalWritePerformed,
+        },
+      ]),
+    );
+  }
+
+  /**
+   * Deletion guard for a single draft, from stored rows only.
+   *
+   * Every publication of the draft is scanned rather than just the latest one.
+   * A draft that once wrote to Confluence must stay undeletable even if a
+   * later mock publication sits on top of it, otherwise deleting it would let
+   * a fresh draft for the same issue create a duplicate page (R6).  This is
+   * also the invariant the 90-day retention job relies on when it refuses to
+   * hard-delete drafts with external writes.
+   */
+  async assessDraftDeletion(
+    draftId: string,
+    manager?: Pick<EntityManager, 'getRepository'>,
+  ): Promise<DraftDeletionAssessment> {
+    const publicationsRepository = manager
+      ? manager.getRepository(BriefPublication)
+      : this.publicationsRepository;
+    const stepsRepository = manager
+      ? manager.getRepository(PublicationStep)
+      : this.stepsRepository;
+    const publications = await publicationsRepository.find({
+      select: {
+        id: true,
+        draftId: true,
+        status: true,
+        executionMode: true,
+        confluenceContentId: true,
+      },
+      where: { draftId },
+    });
+    if (publications.length === 0) {
+      return { publishing: false, externalWritePerformed: false };
+    }
+    const steps = await stepsRepository.find({
+      select: {
+        publicationId: true,
+        status: true,
+        providerObjectId: true,
+        errorCode: true,
+      },
+      where: publications.map((publication) => ({
+        publicationId: publication.id,
+      })),
+    });
+
+    return assessPublicationDeletionSafety(publications, steps);
   }
 
   private async retryConfluence(
@@ -967,6 +1134,7 @@ export class PublicationService {
   private async createInitialPublication(
     publication: BriefPublication,
     approvalRevision: number,
+    userId: number,
   ): Promise<InitialPublication> {
     const createStep = (repository: Repository<PublicationStep>) =>
       repository.create({
@@ -988,8 +1156,52 @@ export class PublicationService {
       });
 
     return this.dataSource.transaction(async (manager: EntityManager) => {
+      await lockBriefDraft(manager, publication.draftId);
+      const drafts = manager.getRepository(WorkBriefDraft);
       const publications = manager.getRepository(BriefPublication);
       const steps = manager.getRepository(PublicationStep);
+      // The preflight happened outside the lock. Re-read the live row before
+      // reserving anything so a delete that won first cannot reach the write
+      // gateway with a stale in-memory draft.
+      const draft = await drafts.findOneBy({
+        id: publication.draftId,
+        createdByUserId: userId,
+      });
+      if (!draft) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
+      this.assertDraftVersion(draft, publication.draftVersion);
+
+      const existing = await publications.find({
+        where: { draftId: draft.id },
+      });
+      const existingSteps =
+        existing.length === 0
+          ? []
+          : await steps.find({
+              where: existing.map((candidate) => ({
+                publicationId: candidate.id,
+              })),
+            });
+      const matchingPublication = existing.find(
+        (candidate) =>
+          candidate.idempotencyKeyHash === publication.idempotencyKeyHash ||
+          candidate.draftVersion === publication.draftVersion,
+      );
+      if (matchingPublication) {
+        return {
+          publication: matchingPublication,
+          steps: existingSteps.filter(
+            (step) => step.publicationId === matchingPublication.id,
+          ),
+          draft,
+          created: false,
+        };
+      }
+      if (assessPublicationDeletionSafety(existing, existingSteps).publishing) {
+        throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
+      }
+
       const stored = await publications.save(publication);
       await steps.insert(createStep(steps));
       return {
@@ -998,6 +1210,8 @@ export class PublicationService {
           where: { publicationId: stored.id },
           order: { createdAt: 'ASC' },
         }),
+        draft,
+        created: true,
       };
     });
   }
@@ -1725,9 +1939,10 @@ export class PublicationService {
       draftVersion: publication.draftVersion,
       status: publication.status,
       executionMode: publication.executionMode,
-      externalWritePerformed:
-        publication.executionMode === 'real' &&
-        Boolean(publication.confluenceContentId),
+      externalWritePerformed: assessPublicationDeletionSafety(
+        [publication],
+        steps,
+      ).externalWritePerformed,
       confluencePage: publication.confluenceContentId
         ? {
             id: publication.confluenceContentId,

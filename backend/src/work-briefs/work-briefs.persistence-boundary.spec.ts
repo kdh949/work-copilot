@@ -27,4 +27,29 @@ describe('work brief persistence boundary', () => {
       /createIssue|createSubtask|remoteLink|transitionIssue|createPage|updatePage/,
     );
   });
+
+  // The list and delete paths added new constructor dependencies. A missing
+  // module import only fails at application boot, which no unit test reaches.
+  it('imports a module for every service the draft list and delete depend on', () => {
+    const moduleSource = readFileSync(
+      join(__dirname, 'work-briefs.module.ts'),
+      'utf8',
+    );
+
+    expect(moduleSource).toContain('PublicationModule');
+    expect(moduleSource).toContain('OperationsModule');
+    expect(moduleSource).toContain('TransientEvidenceFragmentsService');
+  });
+
+  it('reads publication state for the list without importing a write gateway', () => {
+    const serviceSource = readFileSync(
+      join(__dirname, 'work-briefs.service.ts'),
+      'utf8',
+    );
+
+    expect(serviceSource).toContain('findLatestStoredSummaries');
+    expect(serviceSource).not.toMatch(
+      /PUBLICATION_WRITE_GATEWAY|findLatest\(|recoverPublicationFromSteps/,
+    );
+  });
 });

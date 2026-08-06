@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import type { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import { FreshnessReviewService } from './freshness-review.service';
 
@@ -47,7 +48,7 @@ describe('FreshnessReviewService', () => {
     ).resolves.toEqual({ affectedDraftCount: 1 });
 
     expect(draftsRepository.update).toHaveBeenCalledWith(
-      { id: 'draft-1', profileId: PROFILE_ID },
+      { id: 'draft-1', profileId: PROFILE_ID, deletedAt: IsNull() },
       expect.objectContaining({
         status: 'review_required',
         freshnessStatus: 'review_required',
@@ -76,7 +77,7 @@ describe('FreshnessReviewService', () => {
     await service.markReviewRequired(PROFILE_ID, 'confluence', '200');
 
     expect(draftsRepository.update).toHaveBeenCalledWith(
-      { id: 'draft-1', profileId: PROFILE_ID },
+      { id: 'draft-1', profileId: PROFILE_ID, deletedAt: IsNull() },
       expect.objectContaining({ freshnessStatus: 'access_changed' }),
     );
   });

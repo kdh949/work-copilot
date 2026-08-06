@@ -8,7 +8,19 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Header, type MenuName } from "./components/Header";
+import {
+  Navigate,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
+import { Header } from "./components/Header";
+import {
+  BRIEFS_PREVIEW_PATH,
+  MENU_PATHS,
+  draftIdFromPathname,
+  menuFromPathname,
+} from "./routes";
 import {
   Alert,
   Badge,
@@ -37,7 +49,11 @@ const CHAT_SUGGESTIONS = [
 ];
 const WIKI_PAGE_SIZE = 12;
 let csrfToken = "";
-const IS_WORK_BRIEF_PREVIEW = import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "work-brief";
+// Read once at load so the preview screen can seed its initial state before the
+// router mounts. The development guard is what keeps it out of production; the
+// path itself is deliberately not resolvable by `menuFromPathname`.
+const IS_WORK_BRIEF_PREVIEW =
+  import.meta.env.DEV && window.location.pathname === BRIEFS_PREVIEW_PATH;
 
 type IntegrationProvider = "jira" | "confluence";
 type IntegrationCallbackStatus =
@@ -161,8 +177,40 @@ function integrationCallbackErrorMessage(
 }
 
 function App() {
-  const [menu, setMenu] = useState<MenuName>(IS_WORK_BRIEF_PREVIEW ? "workBriefs" : "login");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // The screen is derived from the URL rather than stored beside it. Nothing
+  // else in this file may set it directly.
+  const requestedMenu = IS_WORK_BRIEF_PREVIEW
+    ? "workBriefs"
+    : menuFromPathname(location.pathname);
   const [user, setUser] = useState<User | null>(IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_USER : null);
+  // A deep link must not bounce to /login before /auth/me has answered.
+  const [isSessionResolved, setIsSessionResolved] = useState(
+    IS_WORK_BRIEF_PREVIEW,
+  );
+  // The one place that decides a URL is not allowed to stay. Before routing,
+  // an unknown or unauthorized screen was simply unreachable; now it can be
+  // typed into the address bar, so it has to resolve somewhere.
+  const redirectTo = ((): string | null => {
+    if (IS_WORK_BRIEF_PREVIEW) return null;
+    // Anything not resolvable — including "/" — becomes a real screen.
+    if (requestedMenu === null) {
+      return user ? MENU_PATHS.posts : MENU_PATHS.login;
+    }
+    if (!isSessionResolved) return null;
+    if (!user) return requestedMenu === "login" ? null : MENU_PATHS.login;
+    if (requestedMenu === "login") return MENU_PATHS.posts;
+    // Without this a non-admin who types /admin gets a blank screen.
+    if (requestedMenu === "admin" && user.role !== "admin") {
+      return MENU_PATHS.posts;
+    }
+    return null;
+  })();
+  // A screen being redirected away from must not mount: its loaders would fire
+  // once against a session that is not allowed to see them.
+  const menu = redirectTo ? null : requestedMenu;
   const [message, setMessage] = useState<Notice>(null);
   // Kept stable so effect dependency inference still treats `showError` and the
   // other handlers that call them as stable.
@@ -300,7 +348,7 @@ function App() {
     setUser(null);
     setNotes([]);
     setIsChatOpen(false);
-    setMenu("login");
+    void navigate(MENU_PATHS.login, { replace: true });
   }
 
   const showError = useCallback(
@@ -595,9 +643,7 @@ function App() {
         await refreshCsrfToken();
         if (!isCurrent) return;
         setUser(me);
-        setMenu((currentMenu) =>
-          currentMenu === "login" ? "posts" : currentMenu,
-        );
+        setIsSessionResolved(true);
       })
       .catch(() => {
         if (!isCurrent) return;
@@ -605,7 +651,7 @@ function App() {
         setUser(null);
         setNotes([]);
         setIsChatOpen(false);
-        setMenu("login");
+        setIsSessionResolved(true);
       });
 
     return () => {
@@ -616,9 +662,8 @@ function App() {
   useEffect(() => {
     if (IS_WORK_BRIEF_PREVIEW) return;
 
-    const url = new URL(window.location.href);
-    const provider = url.searchParams.get("integration");
-    const status = url.searchParams.get("integration_status");
+    const provider = searchParams.get("integration");
+    const status = searchParams.get("integration_status");
 
     if (
       (provider !== "jira" && provider !== "confluence") ||
@@ -634,17 +679,23 @@ function App() {
       return;
     }
 
-    // The OAuth callback query is external navigation state that is consumed
-    // once, then removed from the address bar in this same effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMenu("integrations");
     const message = integrationCallbackErrorMessage(provider, status);
+    // The OAuth callback query is external navigation state, read once on
+    // arrival and cleared in the same effect, so this cannot cascade.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (message) notifyFailure(message);
 
-    url.searchParams.delete("integration");
-    url.searchParams.delete("integration_status");
-    window.history.replaceState({}, document.title, url);
-  }, [notifyFailure]);
+    // The provider still redirects to the app root, so this is also where the
+    // user is moved onto the integrations URL. `replace` keeps the consumed
+    // query out of history; the redirect URI itself is unchanged.
+    const remaining = new URLSearchParams(searchParams);
+    remaining.delete("integration");
+    remaining.delete("integration_status");
+    void navigate(
+      { pathname: MENU_PATHS.integrations, search: remaining.toString() },
+      { replace: true },
+    );
+  }, [navigate, notifyFailure, searchParams]);
 
   function startKeycloakLogin() {
     window.location.assign(`${API_BASE_URL}/auth/oidc/login`);
@@ -1182,7 +1233,7 @@ function App() {
       return;
     }
 
-    setMenu("posts");
+    void navigate(MENU_PATHS.posts);
     setIsChatOpen(false);
     setIsChatSignalVisible(false);
     await loadWikiDetail(source.postId, { syncPath: true });
@@ -1301,13 +1352,9 @@ function App() {
 
   return (
     <>
-      <Header
-        title="Work Copilot"
-        menu={menu}
-        user={user}
-        onMenuClick={setMenu}
-        onLogout={handleLogout}
-      />
+      <Header title="Work Copilot" user={user} onLogout={handleLogout} />
+
+      {redirectTo && <Navigate to={redirectTo} replace />}
 
       <main className={menu === "workBriefs" ? "app-main--workspace" : undefined}>
         {message && (
@@ -1627,7 +1674,15 @@ function App() {
         {menu === "workBriefs" && user && (
           <WorkBriefsPage
             request={IS_WORK_BRIEF_PREVIEW ? previewWorkBriefRequest : request}
-            onOpenIntegrations={() => setMenu("integrations")}
+            onOpenIntegrations={() => void navigate(MENU_PATHS.integrations)}
+            draftId={draftIdFromPathname(location.pathname) ?? undefined}
+            onOpenDraft={(draftId, options) =>
+              void navigate(`${MENU_PATHS.workBriefs}/${draftId}`, options)
+            }
+            onDraftUnavailable={(reason) => {
+              notifyWarning(reason);
+              void navigate(MENU_PATHS.workBriefs, { replace: true });
+            }}
             initialIssueKey={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_ISSUE : undefined}
             initialEvidence={IS_WORK_BRIEF_PREVIEW ? WORK_BRIEF_PREVIEW_EVIDENCE : undefined}
           />

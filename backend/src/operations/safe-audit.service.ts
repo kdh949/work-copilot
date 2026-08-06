@@ -5,6 +5,7 @@ import { SecurityAuditEvent } from '../integrations/profiles/entities/security-a
 import { WorkCopilotMetricsService } from './work-copilot-metrics.service';
 
 type SafeAuditInput = {
+  actorUserId: number | null;
   action: string;
   profileId: string | null;
   targetId: string | null;
@@ -39,7 +40,7 @@ export class SafeAuditService {
     try {
       await this.auditRepository.save(
         this.auditRepository.create({
-          actorUserId: null,
+          actorUserId: input.actorUserId,
           action: input.action,
           profileId: input.profileId,
           targetId: input.targetId,
@@ -60,6 +61,8 @@ export class SafeAuditService {
       SAFE_EVENT_CODE.test(input.action) &&
       SAFE_EVENT_CODE.test(input.resultCode) &&
       this.isSafeValue(input.correlationId) &&
+      (input.actorUserId === null ||
+        (Number.isSafeInteger(input.actorUserId) && input.actorUserId > 0)) &&
       (input.profileId === null || this.isSafeValue(input.profileId)) &&
       (input.targetId === null || this.isSafeValue(input.targetId))
     );

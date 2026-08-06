@@ -87,3 +87,37 @@ provider를 호출하지 않는다. 중단된 worker가 write를 이미 보냈�
 실제 Data Center contract suite는 자격 증명과 전용 staging 대상이 있을 때만
 별도로 실행한다. 일반 CI와 unit/integration test는 실제 Jira·Confluence에
 쓰지 않는다.
+
+## 삭제한 초안의 보존
+
+초안 삭제는 소프트 삭제다. `deletedAt`이 찍히면 이슈 점유만 풀리고 행은
+남는다. 게시 이력은 이렇게 보존되며, 게시 진행 중이거나 외부 쓰기가 이미
+발생한 초안은 애초에 삭제가 `409`로 거절된다.
+
+소프트 삭제된 초안은 `WORK_BRIEF_DRAFT_RETENTION_DAYS`(기본 90) 이후
+하드 삭제된다. **이 시점을 지나면 복구할 수 없다.** 사용자에게는 삭제 확인
+화면에서 "복구는 관리자 문의로만 가능하며 90일이 지나면 불가능하다"고
+안내하므로, 이 값을 줄이면 관리자가 제공할 수 있는 복구 창도 같이 줄어든다.
+
+보존 job은 두 곳에서 돈다.
+
+- API 프로세스의 시간당 타이머. `CleanupHealthService`에 결과를 보고하므로
+  `admin/work-copilot/health`의 `cleanup.jobs[deleted_brief_drafts]`에서
+  마지막 성공 시각을 볼 수 있다.
+- `cleanup` 컨테이너의 `cleanup-main`. API가 내려가 있어도 보존이 지켜진다.
+
+대부분의 실행은 `deletedCount: 0`이며 이것이 정상이다. 실패로 보지 않는다.
+
+### `skippedCount`가 0이 아닐 때
+
+job은 `executionMode = 'real'`이고 `confluenceContentId`가 있는 publication을
+가진 초안을 **건너뛰고 센다**. `brief_publications`가 `ON DELETE RESTRICT`라
+그냥 지우면 FK 위반으로 실행 전체가 실패하기 때문이기도 하지만, 더 중요한
+이유는 그런 초안이 정상 경로로는 소프트 삭제될 수 없다는 점이다. 삭제 API가
+`DRAFT_HAS_PUBLICATION`으로 막는다.
+
+따라서 `skippedCount > 0`은 DB를 직접 수정하는 등 애플리케이션 밖에서 행이
+바뀌었다는 뜻이고, health가 해당 job을 `degraded`로 표시한다. 조용히 지우면
+안 된다 — 그 초안의 이슈로 새 브리프를 만들어 게시하면 Confluence 페이지가
+중복 생성된다. 대상 초안을 찾아 Confluence 페이지 존재 여부를 먼저 확인하고,
+어떤 경로로 삭제 표시가 됐는지 확인한 뒤에 처리한다.

@@ -1,5 +1,6 @@
 import type {
   BriefDraft,
+  BriefDraftListView,
   BriefPublication,
   ChildTasksPublicationPreview,
   ConfluencePublicationPreview,
@@ -158,6 +159,44 @@ const previewDraft: BriefDraft = {
 };
 
 const draftPath = `/brief-drafts/${previewDraft.id}`;
+
+const previewDraftList: BriefDraftListView = {
+  items: [
+    {
+      id: previewDraft.id,
+      sourceJiraKey: previewDraft.sourceJiraKey,
+      title: previewDraft.content?.title.text ?? null,
+      evidenceCount: previewDraft.evidence.length,
+      status: previewDraft.status,
+      freshnessStatus: previewDraft.freshnessStatus,
+      optimisticVersion: previewDraft.optimisticVersion,
+      blockers: previewDraft.blockers,
+      publication: {
+        id: "preview-publication",
+        status: "CONFLUENCE_PUBLISHED",
+        externalWritePerformed: true,
+      },
+      createdAt: previewDraft.updatedAt,
+      updatedAt: previewDraft.updatedAt,
+    },
+    {
+      id: "5a0a2f2c-0000-4000-8000-000000000002",
+      sourceJiraKey: "PROJ-263",
+      // Access changed: the server withholds the title and the count, and the
+      // list has to survive that rather than invent a placeholder.
+      title: null,
+      evidenceCount: null,
+      status: "review_required",
+      freshnessStatus: "access_changed",
+      optimisticVersion: 2,
+      blockers: [{ code: "ACCESS_CHANGED" }],
+      publication: null,
+      createdAt: "2026-08-01T02:10:00.000Z",
+      updatedAt: "2026-08-01T02:10:00.000Z",
+    },
+  ],
+  nextCursor: null,
+};
 
 const readiness: ReadinessAssessment = {
   draftId: previewDraft.id,
@@ -333,6 +372,17 @@ export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
   if (path === "/brief-drafts" && method === "POST") {
     publication = null;
     return previewDraft as T;
+  }
+  if (path.startsWith("/brief-drafts?") || path === "/brief-drafts") {
+    return previewDraftList as T;
+  }
+  if (path === draftPath && method === "DELETE") {
+    // The fixture draft carries publication history, so the preview shows the
+    // refusal path rather than a delete that would never happen for real.
+    throw Object.assign(new Error("게시 이력 있음"), {
+      status: 409,
+      code: "DRAFT_HAS_PUBLICATION",
+    });
   }
   if (path.endsWith("/context")) {
     return {

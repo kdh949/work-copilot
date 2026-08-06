@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { IsNull } from 'typeorm';
 import { BriefCitationValidatorService } from './brief-citation-validator.service';
 import type { BriefContent } from './brief-draft.types';
 import type { WorkBriefDraft } from './entities/work-brief-draft.entity';
@@ -46,6 +51,7 @@ const createDraft = (
   policyVersion: 1,
   createdAt: new Date('2026-08-02T00:00:00.000Z'),
   updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+  deletedAt: null,
   ...overrides,
 });
 
@@ -58,6 +64,7 @@ describe('WorkBriefsService', () => {
       Promise<{ affected?: number }>,
       [unknown, Partial<WorkBriefDraft>]
     >(),
+    createQueryBuilder: jest.fn(),
   };
   const jiraWorkItemService = {
     collectIssueDraftContext: jest.fn(),
@@ -70,6 +77,40 @@ describe('WorkBriefsService', () => {
     generate: jest.fn(),
     sanitize: jest.fn(),
   };
+  const publicationService = {
+    findLatestStoredSummaries: jest.fn(),
+    assessDraftDeletion: jest.fn(),
+  };
+  const fragments = { purgeDraft: jest.fn() };
+  const audit = { record: jest.fn() };
+  const transactionManager = {
+    query: jest.fn().mockResolvedValue([]),
+    getRepository: jest.fn(() => repository),
+  };
+  const dataSource = {
+    transaction: jest.fn(
+      (callback: (manager: typeof transactionManager) => unknown) =>
+        Promise.resolve(callback(transactionManager)),
+    ),
+  };
+  // Typed explicitly so the self-referential chaining mocks below do not
+  // collapse to `any` and silently weaken every assertion made on them.
+  type ListQueryBuilder = {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    orderBy: jest.Mock;
+    addOrderBy: jest.Mock;
+    take: jest.Mock;
+    getMany: jest.Mock<Promise<WorkBriefDraft[]>, []>;
+  };
+  const queryBuilder: ListQueryBuilder = {
+    where: jest.fn(() => queryBuilder),
+    andWhere: jest.fn(() => queryBuilder),
+    orderBy: jest.fn(() => queryBuilder),
+    addOrderBy: jest.fn(() => queryBuilder),
+    take: jest.fn(() => queryBuilder),
+    getMany: jest.fn<Promise<WorkBriefDraft[]>, []>(),
+  };
 
   function createService(): WorkBriefsService {
     return new WorkBriefsService(
@@ -78,12 +119,26 @@ describe('WorkBriefsService', () => {
       confluenceWorkItemService as never,
       aiClient as never,
       new BriefCitationValidatorService(),
+      publicationService as never,
+      fragments as never,
+      audit as never,
+      dataSource as never,
     );
   }
 
   beforeEach(() => {
     jest.clearAllMocks();
     repository.findOneBy.mockResolvedValue(null);
+    repository.createQueryBuilder.mockReturnValue(queryBuilder);
+    queryBuilder.getMany.mockResolvedValue([]);
+    publicationService.findLatestStoredSummaries.mockResolvedValue(new Map());
+    publicationService.assessDraftDeletion.mockResolvedValue({
+      publishing: false,
+      externalWritePerformed: false,
+    });
+    fragments.purgeDraft.mockResolvedValue(0);
+      audit.record.mockResolvedValue(undefined);
+      transactionManager.query.mockResolvedValue([]);
   });
 
   it('creates a masked draft whose every generated item cites real evidence', async () => {
@@ -441,5 +496,397 @@ describe('WorkBriefsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  // R1 — `repository.update()` does not apply the soft delete filter, so a
+  // missing `deletedAt: IsNull()` criterion would resurrect a deleted draft
+  // without any type error to catch it.
+  it('scopes an edit to live drafts so a deleted draft cannot be resurrected', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    repository.update.mockResolvedValue({ affected: 1 });
+    aiClient.sanitize.mockResolvedValue([
+      initialContent.title.text,
+      initialContent.summary.text,
+      initialContent.requirements[0].text,
+      initialContent.risks[0].text,
+      initialContent.nextSteps[0].text,
+    ]);
+
+    await createService().updateDraft(7, current.id, {
+      optimisticVersion: 1,
+      content: initialContent,
+    });
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ deletedAt: IsNull() }),
+      expect.anything(),
+    );
+  });
+
+  it('scopes a refresh to live drafts so a deleted draft cannot be resurrected', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: '100',
+      sourceJiraKey: 'DEMO-1',
+      sourceJiraVersion: '2026-08-03T00:00:00.000Z',
+      evidence: [
+        {
+          evidence: {
+            ...current.evidence[0],
+            version: '2026-08-03T00:00:00.000Z',
+          },
+          content: 'new transient evidence',
+        },
+      ],
+    });
+    repository.update.mockResolvedValue({ affected: 1 });
+
+    await createService().refreshDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1 },
+      'correlation-id',
+    );
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ deletedAt: IsNull() }),
+      expect.anything(),
+    );
+  });
+
+  it('reports a deleted draft as not found when a stale tab saves', async () => {
+    // A soft-deleted draft is invisible to every `find*` call, so the update
+    // matches nothing and the follow-up lookup raises 404 rather than a
+    // version conflict.
+    repository.findOneBy.mockResolvedValueOnce(createDraft());
+    repository.update.mockResolvedValue({ affected: 0 });
+    repository.findOneBy.mockResolvedValueOnce(null);
+    aiClient.sanitize.mockResolvedValue([
+      initialContent.title.text,
+      initialContent.summary.text,
+      initialContent.requirements[0].text,
+      initialContent.risks[0].text,
+      initialContent.nextSteps[0].text,
+    ]);
+
+    await expect(
+      createService().updateDraft(7, createDraft().id, {
+        optimisticVersion: 1,
+        content: initialContent,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('reports a deleted draft as not found when a stale tab refreshes', async () => {
+    repository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      createService().refreshDraft(
+        7,
+        createDraft().id,
+        { optimisticVersion: 1 },
+        'correlation-id',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(jiraWorkItemService.collectIssueDraftContext).not.toHaveBeenCalled();
+  });
+
+  describe('listDrafts', () => {
+    it('scopes the list to the caller and to live drafts', async () => {
+      queryBuilder.getMany.mockResolvedValue([createDraft()]);
+
+      await createService().listDrafts(7, {});
+
+      expect(queryBuilder.where).toHaveBeenCalledWith(
+        'draft."createdByUserId" = :userId',
+        { userId: 7 },
+      );
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+        'draft."deletedAt" IS NULL',
+      );
+      expect(queryBuilder.orderBy).toHaveBeenCalledWith(
+        'draft."updatedAt"',
+        'DESC',
+      );
+      expect(queryBuilder.addOrderBy).toHaveBeenCalledWith(
+        'draft."id"',
+        'DESC',
+      );
+    });
+
+    // R5: the list must reproduce `present()`'s non-disclosure branch. Scan
+    // the serialized response rather than named fields so a future field
+    // cannot smuggle the title back in.
+    it('omits the title and evidence count of an access-changed draft', async () => {
+      queryBuilder.getMany.mockResolvedValue([
+        createDraft({
+          freshnessStatus: 'access_changed',
+          status: 'review_required',
+        }),
+      ]);
+
+      const list = await createService().listDrafts(7, {});
+
+      expect(list.items[0].title).toBeNull();
+      expect(list.items[0].evidenceCount).toBeNull();
+      expect(list.items[0].blockers).toEqual([{ code: 'ACCESS_CHANGED' }]);
+      expect(JSON.stringify(list)).not.toContain('배포 준비');
+      expect(JSON.stringify(list)).not.toContain('jira:100');
+    });
+
+    it('exposes the title and evidence count of a readable draft', async () => {
+      queryBuilder.getMany.mockResolvedValue([createDraft()]);
+
+      const list = await createService().listDrafts(7, {});
+
+      expect(list.items[0]).toMatchObject({
+        sourceJiraKey: 'DEMO-1',
+        title: '배포 준비',
+        evidenceCount: 1,
+        blockers: [],
+      });
+    });
+
+    // R4: reading publication state must not fan out into per-draft recovery,
+    // which can call Atlassian.
+    it('reads stored publication rows once for the whole page', async () => {
+      const first = createDraft();
+      const second = createDraft({
+        id: 'b1c1b8f0-0000-4000-8000-000000000002',
+      });
+      queryBuilder.getMany.mockResolvedValue([first, second]);
+      publicationService.findLatestStoredSummaries.mockResolvedValue(
+        new Map([
+          [
+            first.id,
+            {
+              draftId: first.id,
+              id: 'pub-1',
+              status: 'CONFLUENCE_PUBLISHED',
+              externalWritePerformed: true,
+            },
+          ],
+        ]),
+      );
+
+      const list = await createService().listDrafts(7, {});
+
+      expect(
+        publicationService.findLatestStoredSummaries,
+      ).toHaveBeenCalledTimes(1);
+      expect(publicationService.findLatestStoredSummaries).toHaveBeenCalledWith(
+        [first.id, second.id],
+      );
+      expect(list.items[0].publication).toEqual({
+        id: 'pub-1',
+        status: 'CONFLUENCE_PUBLISHED',
+        externalWritePerformed: true,
+      });
+      expect(list.items[1].publication).toBeNull();
+    });
+
+    it('returns a cursor only while more drafts remain', async () => {
+      const drafts = Array.from({ length: 3 }, (_unused, index) =>
+        createDraft({
+          id: `b1c1b8f0-0000-4000-8000-00000000000${index}`,
+          updatedAt: new Date(`2026-08-0${index + 1}T00:00:00.000Z`),
+        }),
+      );
+      queryBuilder.getMany.mockResolvedValue(drafts);
+
+      const page = await createService().listDrafts(7, { limit: 2 });
+
+      expect(queryBuilder.take).toHaveBeenCalledWith(3);
+      expect(page.items).toHaveLength(2);
+      expect(page.nextCursor).not.toBeNull();
+
+      queryBuilder.getMany.mockResolvedValue(drafts.slice(0, 2));
+      const lastPage = await createService().listDrafts(7, { limit: 2 });
+      expect(lastPage.nextCursor).toBeNull();
+    });
+
+    // R12: the cursor carries an id tiebreaker so drafts sharing an updatedAt
+    // are neither repeated nor skipped.
+    it('pages with a row-value keyset that includes the id tiebreaker', async () => {
+      const draft = createDraft({
+        updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+      });
+      queryBuilder.getMany.mockResolvedValue([
+        draft,
+        createDraft({ id: 'b1c1b8f0-0000-4000-8000-000000000009' }),
+      ]);
+      const first = await createService().listDrafts(7, { limit: 1 });
+      expect(first.nextCursor).not.toBeNull();
+      queryBuilder.getMany.mockResolvedValue([]);
+
+      await createService().listDrafts(7, {
+        limit: 1,
+        cursor: first.nextCursor ?? undefined,
+      });
+
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+        '(draft."updatedAt", draft."id") < (:cursorUpdatedAt, :cursorId)',
+        {
+          cursorUpdatedAt: draft.updatedAt,
+          cursorId: draft.id,
+        },
+      );
+    });
+
+    it('rejects a cursor that does not decode to a timestamp and id', async () => {
+      await expect(
+        createService().listDrafts(7, {
+          cursor: Buffer.from('not-a-cursor', 'utf8').toString('base64url'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(queryBuilder.getMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a decodable cursor whose id is not a UUID before querying Postgres', async () => {
+      await expect(
+        createService().listDrafts(7, {
+          cursor: Buffer.from(
+            '2026-08-02T00:00:00.000Z|not-a-uuid',
+            'utf8',
+          ).toString('base64url'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(queryBuilder.getMany).not.toHaveBeenCalled();
+    });
+
+    it('filters by status only when one is requested', async () => {
+      queryBuilder.getMany.mockResolvedValue([]);
+
+      await createService().listDrafts(7, { status: 'review_required' });
+
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+        'draft."status" = :status',
+        { status: 'review_required' },
+      );
+    });
+  });
+
+  describe('deleteDraft', () => {
+    it('soft-deletes, purges evidence fragments and records a content-free audit event', async () => {
+      const draft = createDraft();
+      repository.findOneBy.mockResolvedValue(draft);
+      repository.update.mockResolvedValue({ affected: 1 });
+
+      await createService().deleteDraft(7, draft.id, 'correlation-id');
+
+      const [criteria, values] = repository.update.mock.calls[0];
+      expect(criteria).toEqual(
+        expect.objectContaining({
+          id: draft.id,
+          createdByUserId: 7,
+          deletedAt: IsNull(),
+        }),
+      );
+      expect(values.deletedAt).toBeInstanceOf(Date);
+      expect(fragments.purgeDraft).toHaveBeenCalledWith(
+        draft.id,
+        transactionManager,
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: 7,
+        action: 'BRIEF_DRAFT_DELETED',
+        profileId: draft.profileId,
+        targetId: `draft:${draft.id}:issue:${draft.sourceJiraKey}`,
+        correlationId: 'correlation-id',
+        resultCode: 'SOFT_DELETED',
+      });
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
+        '배포 준비',
+      );
+    });
+
+    it('reports another user’s draft as not found without touching publications', async () => {
+      repository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        createService().deleteDraft(8, createDraft().id, 'correlation-id'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(publicationService.assessDraftDeletion).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete while a publication is running', async () => {
+      repository.findOneBy.mockResolvedValue(createDraft());
+      publicationService.assessDraftDeletion.mockResolvedValue({
+        publishing: true,
+        externalWritePerformed: false,
+      });
+
+      await expect(
+        createService().deleteDraft(7, createDraft().id, 'correlation-id'),
+      ).rejects.toMatchObject({
+        response: { code: 'PUBLICATION_IN_PROGRESS' },
+      });
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(fragments.purgeDraft).not.toHaveBeenCalled();
+    });
+
+    // R6: deleting would free the issue for a new draft whose publication
+    // would duplicate the Confluence page that already exists.
+    it('refuses to delete a draft that already wrote to Confluence', async () => {
+      repository.findOneBy.mockResolvedValue(createDraft());
+      publicationService.assessDraftDeletion.mockResolvedValue({
+        publishing: false,
+        externalWritePerformed: true,
+      });
+
+      await expect(
+        createService().deleteDraft(7, createDraft().id, 'correlation-id'),
+      ).rejects.toMatchObject({
+        response: { code: 'DRAFT_HAS_PUBLICATION' },
+      });
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(fragments.purgeDraft).not.toHaveBeenCalled();
+    });
+
+    it('does not purge fragments when the row was deleted concurrently', async () => {
+      repository.findOneBy.mockResolvedValue(createDraft());
+      repository.update.mockResolvedValue({ affected: 0 });
+
+      await expect(
+        createService().deleteDraft(7, createDraft().id, 'correlation-id'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(fragments.purgeDraft).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  it('tells the user a draft may belong to someone else instead of a bare conflict', async () => {
+    const existing = createDraft();
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: existing.profileId,
+      sourceJiraId: existing.sourceJiraId,
+      sourceJiraKey: existing.sourceJiraKey,
+      sourceJiraVersion: existing.sourceJiraVersion,
+      evidence: [{ evidence: existing.evidence[0], content: 'transient' }],
+    });
+    repository.findOneBy.mockResolvedValue(existing);
+
+    await expect(
+      createService().createDraft(
+        existing.createdByUserId,
+        {
+          sourceJiraKey: existing.sourceJiraKey,
+          selectedEvidenceIds: [existing.evidence[0].id],
+          instruction: '실행 브리프를 작성하세요.',
+        },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DRAFT_ALREADY_EXISTS',
+        message: expect.stringMatching(/another user/),
+      },
+    });
   });
 });

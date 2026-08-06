@@ -114,6 +114,10 @@ main {
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-tight);
   white-space: nowrap;
+  /* The brand and the nav items are links now that the URL is the source of
+     truth for the current screen. Keep them looking like the buttons they
+     replaced. */
+  text-decoration: none;
 }
 
 .header-brand-mark {
@@ -134,9 +138,12 @@ main {
   margin-inline: auto;
 }
 
-.header nav button {
+.header nav a {
   position: relative;
+  display: inline-flex;
+  align-items: center;
   height: 100%;
+  text-decoration: none;
   padding: var(--space-0) var(--space-4);
   background: var(--color-transparent);
   border: var(--space-0);
@@ -146,12 +153,12 @@ main {
   font-weight: var(--font-weight-medium);
 }
 
-.header nav button.active {
+.header nav a.active {
   background: var(--color-transparent);
   color: var(--color-text-inverse);
 }
 
-.header nav button.active::after {
+.header nav a.active::after {
   position: absolute;
   right: var(--space-4);
   bottom: var(--space-0);
@@ -186,7 +193,7 @@ main {
 @media (max-width: 760px) {
   .header { gap: var(--space-2); }
   .header nav { min-width: 0; justify-content: flex-start; overflow-x: auto; }
-  .header nav button { padding-inline: var(--space-3); white-space: nowrap; }
+  .header nav a { padding-inline: var(--space-3); white-space: nowrap; }
 }
 
 .app-message {
