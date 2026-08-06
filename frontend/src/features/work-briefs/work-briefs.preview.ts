@@ -147,10 +147,18 @@ const previewDraft: BriefDraft = {
       },
     ],
   },
-  evidence: WORK_BRIEF_PREVIEW_EVIDENCE.slice(0, 5).map((item) => ({
-    ...item,
-    aiStatus: "included" as const,
-  })),
+  evidence: WORK_BRIEF_PREVIEW_EVIDENCE.slice(0, 5).map((item, index) =>
+    // One excluded item with its model reason, so the design QA screen shows
+    // the state a real v2 draft produces.
+    index === 4
+      ? {
+          ...item,
+          aiStatus: "excluded" as const,
+          aiExclusionReason:
+            "재시도 정책과 직접 연결되는 내용이 없어 사용하지 않았습니다.",
+        }
+      : { ...item, aiStatus: "included" as const },
+  ),
   status: "draft",
   freshnessStatus: "current",
   optimisticVersion: 1,

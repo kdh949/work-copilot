@@ -13,6 +13,8 @@ export type WorkEvidence = {
   accessStatus: "accessible";
   dlpStatus: "not_evaluated";
   aiStatus?: "included" | "excluded";
+  /** Model-authored reason, present only on excluded evidence from schema v2. */
+  aiExclusionReason?: string;
   location?: string;
   tags?: string[];
   recommendationReasons?: Array<
