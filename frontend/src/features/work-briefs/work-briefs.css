@@ -231,6 +231,46 @@
   margin: var(--space-0);
 }
 
+/* An empty section the AI was expected to fill. Muted, but always present:
+   the reason it is empty decides whether the user edits or regenerates. */
+.work-brief-section-empty {
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-normal);
+}
+
+/* Regeneration overwrites hand-edited text, so the dialog sits inline above
+   the editor instead of as a corner popover that can be dismissed by accident. */
+.work-brief-regenerate {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-color: var(--color-action-200);
+  background: var(--color-surface-selected);
+}
+
+.work-brief-regenerate label {
+  display: grid;
+  gap: var(--space-1-5);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-medium);
+}
+
+.work-brief-regenerate-evidence {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  border: 0;
+}
+
+.work-brief-regenerate-evidence legend {
+  padding: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-12);
+}
+
 .work-brief-citation-editor,
 .work-brief-list-editor,
 .work-brief-child-task,
