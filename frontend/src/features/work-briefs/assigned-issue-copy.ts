@@ -1,5 +1,5 @@
 import type {
-  BriefDraftSummary,
+  AssignedIssueDraftLookupItem,
   JiraAssignedIssue,
   JiraAssignedIssueList,
 } from "./work-briefs.types";
@@ -11,16 +11,15 @@ export type AssignedIssueRow = {
 };
 
 /**
- * Match assigned issues against the drafts already on screen.
+ * Match assigned issues against the authoritative current-profile lookup.
  *
- * The pairing is done here rather than on the server: the draft list is
- * own-drafts-only and already loaded, so asking the API again would add a
- * query and a second, weaker copy of the visibility rule. A colleague's draft
- * stays invisible either way and still surfaces as the 409 on create.
+ * The paginated draft list is deliberately not an input: it can be stale,
+ * incomplete, or belong to another integration profile with the same Jira
+ * key. The lookup endpoint returns only the identities the picker may open.
  */
 export function matchAssignedIssues(
   issues: readonly JiraAssignedIssue[],
-  drafts: readonly BriefDraftSummary[],
+  drafts: readonly AssignedIssueDraftLookupItem[],
 ): AssignedIssueRow[] {
   const draftIdByIssueKey = new Map<string, string>();
   for (const draft of drafts) {

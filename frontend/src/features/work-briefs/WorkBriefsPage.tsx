@@ -21,7 +21,6 @@ import type {
   BriefPublication,
   BriefContent,
   BriefDraft,
-  BriefDraftSummary,
   ChildTask,
   ConfluenceSpaceList,
   ConfluenceSpaceOption,
@@ -41,6 +40,10 @@ import {
   spaceListNotice,
   spaceOptionLabel,
 } from "./confluence-space-copy";
+import {
+  loadConfluenceSpaces,
+  shouldLoadConfluenceSpaces,
+} from "./confluence-space-loading";
 import {
   canRegenerateDraft,
   emptySectionNotice,
@@ -193,7 +196,6 @@ export function WorkBriefsPage({
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(
     initialEvidence.filter((item) => item.aiStatus !== "excluded").map((item) => item.id),
   );
-  const [draftSummaries, setDraftSummaries] = useState<BriefDraftSummary[]>([]);
   const [query, setQuery] = useState("");
   const [documentType, setDocumentType] = useState("all");
   const [showJira, setShowJira] = useState(true);
@@ -233,6 +235,12 @@ export function WorkBriefsPage({
   const publicationRequestRevisionRef = useRef(0);
   const draftRouteRequestRevisionRef = useRef(0);
   const connectionRequestRevisionRef = useRef(0);
+  // Preserve one request result (including a failure) while this selection
+  // screen remains mounted. A shared promise also survives StrictMode's
+  // setup → cleanup → setup cycle without dropping the only response.
+  const confluenceSpacesRequestRef = useRef<Promise<ConfluenceSpaceList> | null>(
+    null,
+  );
   const [connections, setConnections] = useState<ConnectionSnapshot>({
     state: "loading",
   });
@@ -278,11 +286,21 @@ export function WorkBriefsPage({
   }, [loadConnections]);
 
   // The allowlist itself, so the space field is a choice rather than a key the
-  // user has to know. A failed read leaves the manual field in place.
+  // user has to know. It is intentionally lazy: a detail page and a closed
+  // source-options panel must not trigger up to 20 metadata reads.
   useEffect(() => {
+    if (draftId || !showSourceOptions) {
+      return;
+    }
     let active = true;
-    requestRef
-      .current<ConfluenceSpaceList>("/work-items/confluence/spaces")
+    const loading =
+      confluenceSpacesRequestRef.current ??
+      (shouldLoadConfluenceSpaces(draftId, showSourceOptions, false)
+        ? loadConfluenceSpaces(requestRef.current, loadConnections)
+        : null);
+    if (!loading) return;
+    confluenceSpacesRequestRef.current = loading;
+    loading
       .then((loaded) => {
         if (!active) return;
         setConfluenceSpaces(loaded.spaces);
@@ -294,7 +312,7 @@ export function WorkBriefsPage({
     return () => {
       active = false;
     };
-  }, []);
+  }, [draftId, loadConnections, showSourceOptions]);
 
   // Each setup gets its own revision. React StrictMode deliberately executes
   // setup → cleanup → setup, so a one-shot ref would discard the second setup
@@ -943,11 +961,10 @@ export function WorkBriefsPage({
           <BriefDraftList
             request={request}
             onOpen={(openedDraftId) => onOpenDraft?.(openedDraftId)}
-            onItemsChange={setDraftSummaries}
           />
           <AssignedIssueList
             request={request}
-            drafts={draftSummaries}
+            refreshConnections={loadConnections}
             onOpenDraft={(openedDraftId) => onOpenDraft?.(openedDraftId)}
             onSelectIssue={(selectedIssueKey) => {
               setIssueKey(selectedIssueKey);

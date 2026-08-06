@@ -108,6 +108,21 @@ export class CreateBriefDraftDto {
   instruction: string;
 }
 
+/**
+ * A bounded, current-profile lookup for the assigned-issue picker.  This is
+ * deliberately separate from the paginated draft list: the picker needs an
+ * authoritative answer for every issue currently on screen.
+ */
+export class LookupBriefDraftsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  sourceJiraKeys: string[];
+}
+
 export class UpdateBriefDraftDto {
   @IsInt()
   @Min(1)

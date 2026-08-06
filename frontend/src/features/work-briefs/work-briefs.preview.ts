@@ -383,6 +383,16 @@ export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
     publication = null;
     return previewDraft as T;
   }
+  if (path === "/brief-drafts/lookup" && method === "POST") {
+    return {
+      items: [
+        {
+          id: previewDraft.id,
+          sourceJiraKey: previewDraft.sourceJiraKey,
+        },
+      ],
+    } as T;
+  }
   if (path.startsWith("/brief-drafts?") || path === "/brief-drafts") {
     return previewDraftList as T;
   }

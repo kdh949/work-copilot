@@ -655,6 +655,7 @@ describe('PublicationService', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       new BriefCitationValidatorService(),
       harness.service,
       fragments as never,

@@ -3,18 +3,19 @@ import { Badge, Button } from "../../design-system/components";
 import {
   ASSIGNED_ISSUE_DRAFT_BADGE,
   assignedIssueEmptyText,
-  matchAssignedIssues,
 } from "./assigned-issue-copy";
+import {
+  loadAssignedIssueRows,
+  type AssignedIssueRows,
+} from "./assigned-issue-lookup";
 import type {
-  BriefDraftSummary,
   JiraAssignedIssueList,
   WorkBriefApiRequest,
 } from "./work-briefs.types";
 
 type AssignedIssueListProps = {
   request: WorkBriefApiRequest;
-  /** Drafts already loaded by the list, used to mark occupied issues. */
-  drafts: readonly BriefDraftSummary[];
+  refreshConnections: () => Promise<void>;
   onSelectIssue: (issueKey: string) => void;
   onOpenDraft: (draftId: string) => void;
 };
@@ -29,11 +30,12 @@ type AssignedIssueListProps = {
  */
 export function AssignedIssueList({
   request,
-  drafts,
+  refreshConnections,
   onSelectIssue,
   onOpenDraft,
 }: AssignedIssueListProps) {
   const [list, setList] = useState<JiraAssignedIssueList | null>(null);
+  const [rows, setRows] = useState<AssignedIssueRows["rows"]>([]);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
     "loading",
   );
@@ -41,17 +43,22 @@ export function AssignedIssueList({
   // `request` is re-created on every parent render, so the read is done
   // through a ref rather than depending on its identity.
   const requestRef = useRef(request);
+  const refreshConnectionsRef = useRef(refreshConnections);
   useEffect(() => {
     requestRef.current = request;
+    refreshConnectionsRef.current = refreshConnections;
   });
 
   useEffect(() => {
     let active = true;
-    requestRef
-      .current<JiraAssignedIssueList>("/work-items/jira/my-issues")
-      .then((loaded) => {
+    loadAssignedIssueRows(
+      requestRef.current,
+      refreshConnectionsRef.current,
+    )
+      .then(({ list: loaded, rows: loadedRows }) => {
         if (!active) return;
         setList(loaded);
+        setRows(loadedRows);
         setState("ready");
       })
       .catch(() => {
@@ -85,7 +92,6 @@ export function AssignedIssueList({
   }
 
   const emptyText = assignedIssueEmptyText(list);
-  const rows = matchAssignedIssues(list.issues, drafts);
 
   return (
     <section className="work-brief-assigned ds-card">

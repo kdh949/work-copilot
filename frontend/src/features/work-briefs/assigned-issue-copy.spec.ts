@@ -4,7 +4,10 @@ import {
   assignedIssueEmptyText,
   matchAssignedIssues,
 } from "./assigned-issue-copy.ts";
-import type { BriefDraftSummary, JiraAssignedIssue } from "./work-briefs.types.ts";
+import type {
+  AssignedIssueDraftLookupItem,
+  JiraAssignedIssue,
+} from "./work-briefs.types.ts";
 
 const issue = (issueKey: string): JiraAssignedIssue => ({
   issueKey,
@@ -14,8 +17,10 @@ const issue = (issueKey: string): JiraAssignedIssue => ({
   updatedAt: "2026-08-02T00:00:00.000+0000",
 });
 
-const draft = (id: string, sourceJiraKey: string): BriefDraftSummary =>
-  ({ id, sourceJiraKey }) as BriefDraftSummary;
+const draft = (
+  id: string,
+  sourceJiraKey: string,
+): AssignedIssueDraftLookupItem => ({ id, sourceJiraKey });
 
 test("marks the issues that already have one of my drafts", () => {
   const rows = matchAssignedIssues(

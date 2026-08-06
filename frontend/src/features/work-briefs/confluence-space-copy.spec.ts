@@ -30,6 +30,14 @@ test("always shows the key and says when the display name is missing", () => {
     }),
     "OPS (표시명 미조회)",
   );
+  assert.equal(
+    spaceOptionLabel({
+      spaceKey: "PAY",
+      name: null,
+      accessStatus: "unavailable",
+    }),
+    "PAY (표시명 확인 불가)",
+  );
 });
 
 test("keeps the manual key field as the answer whenever the list is missing", () => {

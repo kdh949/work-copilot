@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import type { NormalizedEvidence } from '../work-items/evidence/evidence-normalizer';
 import {
   ConfluenceWorkItemService,
@@ -14,12 +14,14 @@ import {
 } from '../work-items/confluence/confluence-work-item.service';
 import type { JiraDraftContext } from '../work-items/jira/jira-work-item.service';
 import { JiraWorkItemService } from '../work-items/jira/jira-work-item.service';
+import { IntegrationAccessPolicyService } from '../work-items/integration-access-policy.service';
 import { SafeAuditService } from '../operations/safe-audit.service';
 import { PublicationService } from '../publications/publication.service';
 import { BriefCitationValidatorService } from './brief-citation-validator.service';
 import type {
   BriefContent,
   BriefDraftListView,
+  BriefDraftLookupView,
   BriefDraftPublicationSummary,
   BriefDraftSummary,
   BriefDraftView,
@@ -31,6 +33,7 @@ import {
   CreateBriefDraftDto,
   DRAFT_LIST_DEFAULT_LIMIT,
   ListBriefDraftsDto,
+  LookupBriefDraftsDto,
   RefreshBriefDraftDto,
   RegenerateBriefDraftDto,
   UpdateBriefDraftDto,
@@ -59,6 +62,7 @@ export class WorkBriefsService {
     private readonly draftsRepository: Repository<WorkBriefDraft>,
     private readonly jiraWorkItemService: JiraWorkItemService,
     private readonly confluenceWorkItemService: ConfluenceWorkItemService,
+    private readonly accessPolicy: IntegrationAccessPolicyService,
     private readonly aiClient: WorkBriefAiClientService,
     private readonly citationValidator: BriefCitationValidatorService,
     private readonly publicationService: PublicationService,
@@ -204,6 +208,40 @@ export class WorkBriefsService {
       }),
       nextCursor:
         rows.length > limit ? this.encodeCursor(items[items.length - 1]) : null,
+    };
+  }
+
+  /**
+   * The assigned-issue picker cannot infer this from the paginated list: it
+   * needs a complete own-draft answer for the active integration profile.
+   * Returning only identities avoids turning the lookup into another draft
+   * presentation endpoint.
+   */
+  async lookupDraftsForAssignedIssues(
+    userId: number,
+    dto: LookupBriefDraftsDto,
+  ): Promise<BriefDraftLookupView> {
+    const sourceJiraKeys = [
+      ...new Set(dto.sourceJiraKeys.map((key) => key.trim().toUpperCase())),
+    ];
+    const profile = await this.accessPolicy.activeProfile();
+    const drafts = await this.draftsRepository.find({
+      where: {
+        createdByUserId: userId,
+        profileId: profile.id,
+        sourceJiraKey: In(sourceJiraKeys),
+        deletedAt: IsNull(),
+      },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+    });
+    const seenKeys = new Set<string>();
+
+    return {
+      items: drafts.flatMap((draft) => {
+        if (seenKeys.has(draft.sourceJiraKey)) return [];
+        seenKeys.add(draft.sourceJiraKey);
+        return [{ id: draft.id, sourceJiraKey: draft.sourceJiraKey }];
+      }),
     };
   }
 

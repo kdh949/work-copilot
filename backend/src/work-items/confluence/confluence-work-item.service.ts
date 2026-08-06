@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { IntegrationsOAuthService } from '../../integrations/oauth/integrations-oauth.service';
 import type { IntegrationProfile } from '../../integrations/profiles/entities/integration-profile.entity';
-import { AtlassianReadClientService } from '../atlassian-read-client.service';
+import {
+  AtlassianReadClientService,
+  type ProviderReadResult,
+} from '../atlassian-read-client.service';
 import {
   type EvidenceCollectionResponse,
   type NormalizedEvidence,
@@ -53,7 +56,9 @@ export type ConfluenceSpaceOption = {
   accessStatus:
     | EvidenceCollectionResponse['accessStatus']
     /** Beyond the metadata lookup budget; the key is still allowed. */
-    | 'not_requested';
+    | 'not_requested'
+    /** A metadata request failed after the allowlist had already admitted it. */
+    | 'unavailable';
 };
 
 export type ConfluenceSpaceList = {
@@ -117,11 +122,20 @@ export class ConfluenceWorkItemService {
     const lookup = async (): Promise<void> => {
       while (next < Math.min(spaces.length, MAX_SPACE_LOOKUPS)) {
         const target = spaces[next++];
-        const result = await this.readClient.getJson(
-          this.spaceUrl(profile, target.spaceKey),
-          this.accessPolicy.providerBaseUrl(profile, 'confluence'),
-          accessToken,
-        );
+        let result: ProviderReadResult;
+        try {
+          result = await this.readClient.getJson(
+            this.spaceUrl(profile, target.spaceKey),
+            this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+            accessToken,
+          );
+        } catch {
+          // Display metadata is optional.  The profile already established
+          // that this key is allowed, so a timeout or malformed response for
+          // one space must not make every other allowed space disappear.
+          target.accessStatus = 'unavailable';
+          continue;
+        }
 
         if (result.status !== 'ok') {
           // Still pickable: the profile allows it, this user just cannot read

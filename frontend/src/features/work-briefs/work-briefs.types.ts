@@ -98,7 +98,8 @@ export type ConfluenceSpaceOption = {
     | "accessible"
     | "access_limited"
     | "not_found"
-    | "not_requested";
+    | "not_requested"
+    | "unavailable";
 };
 
 export type ConfluenceSpaceList = {
@@ -117,6 +118,16 @@ export type JiraAssignedIssue = {
 export type JiraAssignedIssueList = {
   accessStatus: "accessible" | "access_limited" | "not_found";
   issues: JiraAssignedIssue[];
+};
+
+/** A current-profile, own-draft identity returned for assigned issues. */
+export type AssignedIssueDraftLookupItem = {
+  id: string;
+  sourceJiraKey: string;
+};
+
+export type AssignedIssueDraftLookup = {
+  items: AssignedIssueDraftLookupItem[];
 };
 
 export type BriefDraftListView = {

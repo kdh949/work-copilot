@@ -356,6 +356,51 @@ describe('ConfluenceWorkItemService', () => {
     expect(getJson).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps every other allowlisted space when one metadata request fails', async () => {
+    const multiSpaceProfile = {
+      ...profile,
+      allowedSpaceKeys: ['ENG', 'PAY', 'OPS'],
+    } as IntegrationProfile;
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(multiSpaceProfile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) =>
+          spaceKey.toUpperCase(),
+      ),
+      providerBaseUrl: jest.fn(() => multiSpaceProfile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, multiSpaceProfile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      if (url.pathname.endsWith('/space/PAY')) {
+        return Promise.reject(new Error('metadata timeout'));
+      }
+      const spaceKey = url.pathname.split('/').at(-1) as string;
+      return Promise.resolve({
+        status: 'ok' as const,
+        body: { key: spaceKey, name: `${spaceKey} 공간` },
+      });
+    });
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    await expect(service.listAllowedSpaces(1, 'corr-spaces')).resolves.toEqual({
+      spaces: [
+        { spaceKey: 'ENG', name: 'ENG 공간', accessStatus: 'accessible' },
+        { spaceKey: 'PAY', name: null, accessStatus: 'unavailable' },
+        { spaceKey: 'OPS', name: 'OPS 공간', accessStatus: 'accessible' },
+      ],
+    });
+    expect(getJson).toHaveBeenCalledTimes(3);
+  });
+
   it('does not label a space with a name the provider answered for another key', async () => {
     const accessPolicy = {
       activeProfile: jest.fn(() => Promise.resolve(profile)),
