@@ -588,9 +588,13 @@ describe('WorkBriefsService', () => {
     expect(repository.update).not.toHaveBeenCalled();
   });
 
-  it('does not regenerate when the Jira issue moved under a current draft', async () => {
+  it('marks a draft for review instead of regenerating on a moved issue', async () => {
     const current = createDraft();
-    repository.findOneBy.mockResolvedValue(current);
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
     jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
       accessStatus: 'accessible',
       profileId: current.profileId,
@@ -610,9 +614,15 @@ describe('WorkBriefsService', () => {
         'correlation-id',
       ),
     ).rejects.toMatchObject({
-      response: { code: 'SOURCE_REVIEW_REQUIRED' },
+      response: { code: 'SOURCE_REVIEW_REQUIRED', currentVersion: 2 },
     });
     expect(aiClient.generate).not.toHaveBeenCalled();
+    // Refusing without recording the change would leave the stored draft
+    // claiming to be current.
+    expect(current.freshnessStatus).toBe('review_required');
+    expect(current.status).toBe('review_required');
+    // Clearing the signal stays refreshDraft's job.
+    expect(current.sourceJiraVersion).toBe('2026-08-02T00:00:00.000Z');
   });
 
   it('rejects an optimistic-lock update when another tab has saved first', async () => {
