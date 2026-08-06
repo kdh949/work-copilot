@@ -41,4 +41,27 @@ describe('WorkItemsController', () => {
       'corr-42',
     );
   });
+
+  it('reads the assigned issue list for the session user only', async () => {
+    const listAssignedIssues = jest.fn(() => Promise.resolve({ issues: [] }));
+    const collectIssueEvidence = jest.fn(() =>
+      Promise.resolve({ evidence: [] }),
+    );
+    const controller = new WorkItemsController(
+      {
+        listAssignedIssues,
+        collectIssueEvidence,
+      } as unknown as JiraWorkItemService,
+      {} as ConfluenceWorkItemService,
+    );
+
+    await controller.jiraAssignedIssues({
+      user: { sub: 42 },
+      correlationId: 'corr-42',
+    } as never);
+
+    expect(listAssignedIssues).toHaveBeenCalledWith(42, 'corr-42');
+    // "my-issues" must not be read as an issue key by the context route.
+    expect(collectIssueEvidence).not.toHaveBeenCalled();
+  });
 });

@@ -19,6 +19,7 @@ import type {
 
 const ISSUE_KEY_PATTERN = /^([A-Z][A-Z0-9_]{0,31})-([1-9][0-9]*)$/;
 const MAX_TRANSIENT_EVIDENCE_CHARS = 8_000;
+const MAX_ASSIGNED_ISSUES = 20;
 
 export type TransientJiraDraftEvidence = {
   evidence: NormalizedEvidence;
@@ -43,6 +44,24 @@ export type EvidenceRecommendation = NormalizedEvidence & {
 export type JiraEvidenceCollectionResponse = EvidenceCollectionResponse & {
   recommendations?: EvidenceRecommendation[];
   recommendationAccessStatus?: EvidenceCollectionResponse['accessStatus'];
+};
+
+/**
+ * An issue the current user is working on, as the start-a-brief list shows it.
+ * Deliberately narrow: this is a picker, not evidence, so no description or
+ * excerpt is read here.
+ */
+export type JiraAssignedIssue = {
+  issueKey: string;
+  projectKey: string;
+  title: string;
+  url: string;
+  updatedAt: string;
+};
+
+export type JiraAssignedIssueList = {
+  accessStatus: EvidenceCollectionResponse['accessStatus'];
+  issues: JiraAssignedIssue[];
 };
 
 export type JiraReadinessEvidenceVersion = {
@@ -202,6 +221,58 @@ export class JiraWorkItemService {
     };
   }
 
+  /**
+   * The issues the user can start a brief from, so the screen no longer
+   * requires them to remember an issue key.
+   *
+   * Read with the user's own OAuth token, so Jira decides what they may see.
+   * The allowlist is applied twice on purpose: in the JQL, and again on every
+   * returned row. A JQL-only filter would leak a project the profile forbids
+   * the moment the query is edited.
+   */
+  async listAssignedIssues(
+    userId: number,
+    correlationId: string,
+  ): Promise<JiraAssignedIssueList> {
+    const profile = await this.accessPolicy.activeProfile();
+    const allowedProjectKeys = profile.allowedProjectKeys.filter((key) =>
+      this.isAllowedProject(profile, key),
+    );
+
+    if (allowedProjectKeys.length === 0) {
+      return { accessStatus: 'accessible', issues: [] };
+    }
+
+    const accessToken = await this.integrationsOAuthService.getAccessToken(
+      userId,
+      'jira',
+      correlationId,
+    );
+    const result = await this.readClient.getJson(
+      this.assignedIssuesUrl(profile, allowedProjectKeys),
+      this.accessPolicy.providerBaseUrl(profile, 'jira'),
+      accessToken,
+    );
+
+    if (result.status !== 'ok') {
+      return { accessStatus: result.status, issues: [] };
+    }
+
+    const issues: JiraAssignedIssue[] = [];
+    for (const item of this.searchIssues(result.body)) {
+      if (issues.length >= MAX_ASSIGNED_ISSUES) {
+        break;
+      }
+
+      const issue = this.toAssignedIssue(profile, item);
+      if (issue) {
+        issues.push(issue);
+      }
+    }
+
+    return { accessStatus: 'accessible', issues };
+  }
+
   async collectReadinessContext(
     userId: number,
     issueKeyValue: string,
@@ -336,6 +407,93 @@ export class JiraWorkItemService {
       this.accessPolicy.providerBaseUrl(profile, 'jira'),
       accessToken,
     );
+  }
+
+  private assignedIssuesUrl(
+    profile: IntegrationProfile,
+    allowedProjectKeys: string[],
+  ): URL {
+    // Jira Data Center REST search. `currentUser()` resolves to the OAuth
+    // token's own account, so no user identifier is sent from here.
+    // Source: https://developer.atlassian.com/server/jira/platform/rest/
+    const projects = allowedProjectKeys.map((key) => `"${key}"`).join(', ');
+    const query = new URLSearchParams({
+      jql: `assignee = currentUser() AND resolution = Unresolved AND project in (${projects}) ORDER BY updated DESC`,
+      fields: 'summary,project,updated',
+      maxResults: String(MAX_ASSIGNED_ISSUES),
+    });
+
+    return this.accessPolicy.providerUrl(
+      profile,
+      'jira',
+      `rest/api/2/search?${query.toString()}`,
+    );
+  }
+
+  private searchIssues(
+    body: Record<string, unknown>,
+  ): Record<string, unknown>[] {
+    const issues = body.issues;
+
+    return Array.isArray(issues)
+      ? issues.filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === 'object' && item !== null && !Array.isArray(item),
+        )
+      : [];
+  }
+
+  /**
+   * A row is dropped rather than raising, so one unexpected issue cannot empty
+   * the whole picker. A project outside the allowlist is exactly such a row.
+   */
+  private toAssignedIssue(
+    profile: IntegrationProfile,
+    body: Record<string, unknown>,
+  ): JiraAssignedIssue | null {
+    try {
+      const fields = this.record(body.fields, 'Jira issue is invalid.');
+      const project = this.record(fields.project, 'Jira issue is invalid.');
+      const projectKey = this.accessPolicy.assertAllowedProject(
+        profile,
+        this.string(project.key, 'Jira issue is invalid.'),
+      );
+      const issueKey = this.issueKey(
+        this.string(body.key, 'Jira issue is invalid.'),
+      );
+
+      if (this.projectKey(issueKey) !== projectKey) {
+        return null;
+      }
+
+      return {
+        issueKey,
+        projectKey,
+        title: this.string(fields.summary, 'Jira issue is invalid.'),
+        url: this.accessPolicy
+          .providerUrl(
+            profile,
+            'jira',
+            `browse/${encodeURIComponent(issueKey)}`,
+          )
+          .toString(),
+        updatedAt: this.string(fields.updated, 'Jira issue is invalid.'),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private isAllowedProject(
+    profile: IntegrationProfile,
+    projectKey: string,
+  ): boolean {
+    try {
+      this.accessPolicy.assertAllowedProject(profile, projectKey);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async readReadinessIssue(

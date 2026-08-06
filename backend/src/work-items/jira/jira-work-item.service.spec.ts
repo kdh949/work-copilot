@@ -474,4 +474,74 @@ describe('JiraWorkItemService', () => {
       'expand=projects.issuetypes.fields',
     );
   });
+
+  it('lists the assigned issues of the calling user within the allowed projects', async () => {
+    const { service, getJson, getAccessToken } = makeService();
+    getJson.mockImplementation(() =>
+      Promise.resolve({
+        status: 'ok' as const,
+        body: {
+          issues: [
+            {
+              id: '100',
+              key: 'ENG-1',
+              fields: {
+                project: { key: 'ENG' },
+                summary: 'Root issue',
+                updated: '2026-08-02T00:00:00.000+0000',
+              },
+            },
+            // Jira returned a project the profile forbids: dropped, and the
+            // rest of the list still renders.
+            {
+              id: '900',
+              key: 'OPS-9',
+              fields: {
+                project: { key: 'OPS' },
+                summary: 'Forbidden project issue',
+                updated: '2026-08-03T00:00:00.000+0000',
+              },
+            },
+            { id: '901', key: 'ENG-broken', fields: {} },
+          ],
+        },
+      }),
+    );
+
+    const result = await service.listAssignedIssues(1, 'corr-my-issues');
+
+    expect(result).toEqual({
+      accessStatus: 'accessible',
+      issues: [
+        {
+          issueKey: 'ENG-1',
+          projectKey: 'ENG',
+          title: 'Root issue',
+          url: 'https://jira.example.test/browse/ENG-1',
+          updatedAt: '2026-08-02T00:00:00.000+0000',
+        },
+      ],
+    });
+    expect(getAccessToken).toHaveBeenCalledWith(1, 'jira', 'corr-my-issues');
+
+    const [url] = getJson.mock.calls[0] as [URL];
+    const jql = url.searchParams.get('jql') ?? '';
+    expect(jql).toContain('assignee = currentUser()');
+    expect(jql).toContain('resolution = Unresolved');
+    expect(jql).toContain('project in ("ENG")');
+    // A picker never reads issue bodies.
+    expect(url.searchParams.get('fields')).toBe('summary,project,updated');
+  });
+
+  it('reports the provider status instead of an empty list when the read fails', async () => {
+    const { service, getJson } = makeService();
+    getJson.mockImplementation(() =>
+      Promise.resolve({ status: 'access_limited' as const }),
+    );
+
+    await expect(service.listAssignedIssues(1, 'corr')).resolves.toEqual({
+      accessStatus: 'access_limited',
+      issues: [],
+    });
+  });
 });

@@ -87,6 +87,20 @@ export type BriefDraftSummary = {
   updatedAt: string;
 };
 
+/** An issue the user can start a brief from. A picker row, not evidence. */
+export type JiraAssignedIssue = {
+  issueKey: string;
+  projectKey: string;
+  title: string;
+  url: string;
+  updatedAt: string;
+};
+
+export type JiraAssignedIssueList = {
+  accessStatus: "accessible" | "access_limited" | "not_found";
+  issues: JiraAssignedIssue[];
+};
+
 export type BriefDraftListView = {
   items: BriefDraftSummary[];
   nextCursor: string | null;

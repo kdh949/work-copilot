@@ -20,6 +20,14 @@
 .work-brief-draft-list-header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .work-brief-draft-list-header span { color: var(--color-text-muted); font-size: var(--font-size-13); }
 .work-brief-draft-list-empty { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-13); }
+
+/* The assigned-issue picker. Sits under the draft list: existing work first,
+   then what can be started without remembering an issue key. */
+.work-brief-assigned { display: grid; gap: var(--space-4); margin: var(--space-4) var(--space-6) 0; padding: var(--space-5); }
+.work-brief-assigned h2 { margin: 0; font-size: var(--font-size-16); }
+.work-brief-assigned-items { display: grid; margin: 0; padding: 0; gap: var(--space-2); list-style: none; }
+.work-brief-assigned-items > li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border-width) solid var(--color-border-subtle); border-radius: var(--radius-4); background: var(--color-surface-base); }
+.work-brief-assigned-item { display: grid; min-width: 0; gap: 2px; }
 .work-brief-draft-list-items { display: grid; margin: 0; padding: 0; gap: var(--space-2); list-style: none; }
 .work-brief-draft-list-items > li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border-width) solid var(--color-border-subtle); border-radius: var(--radius-4); background: var(--color-surface-base); }
 .work-brief-draft-list-open { display: grid; min-width: 0; padding: 0; gap: 2px; border: 0; background: transparent; text-align: left; }

@@ -21,6 +21,7 @@ import type {
   BriefPublication,
   BriefContent,
   BriefDraft,
+  BriefDraftSummary,
   ChildTask,
   EvidenceCitation,
   EvidenceCollection,
@@ -31,6 +32,7 @@ import type {
   WorkBriefApiRequest,
   WorkEvidence,
 } from "./work-briefs.types";
+import { AssignedIssueList } from "./AssignedIssueList";
 import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
 import {
@@ -179,6 +181,7 @@ export function WorkBriefsPage({
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(
     initialEvidence.filter((item) => item.aiStatus !== "excluded").map((item) => item.id),
   );
+  const [draftSummaries, setDraftSummaries] = useState<BriefDraftSummary[]>([]);
   const [query, setQuery] = useState("");
   const [documentType, setDocumentType] = useState("all");
   const [showJira, setShowJira] = useState(true);
@@ -378,8 +381,10 @@ export function WorkBriefsPage({
     void loadPublication(nextDraft.id, publicationRequestRevision);
   }
 
-  async function collectEvidence() {
-    const normalizedKey = issueKey.trim().toUpperCase();
+  async function collectEvidence(issueKeyOverride?: string) {
+    // The assigned-issue picker passes its key directly: `issueKey` state is
+    // set in the same event and is not readable here yet.
+    const normalizedKey = (issueKeyOverride ?? issueKey).trim().toUpperCase();
     if (!normalizedKey) {
       notifyWarning("Jira 이슈 키를 입력하세요.");
       return;
@@ -907,6 +912,16 @@ export function WorkBriefsPage({
           <BriefDraftList
             request={request}
             onOpen={(openedDraftId) => onOpenDraft?.(openedDraftId)}
+            onItemsChange={setDraftSummaries}
+          />
+          <AssignedIssueList
+            request={request}
+            drafts={draftSummaries}
+            onOpenDraft={(openedDraftId) => onOpenDraft?.(openedDraftId)}
+            onSelectIssue={(selectedIssueKey) => {
+              setIssueKey(selectedIssueKey);
+              void collectEvidence(selectedIssueKey);
+            }}
           />
           <div className="work-brief-workspace">
             <aside className="work-brief-source-rail" aria-label="근거 범위">

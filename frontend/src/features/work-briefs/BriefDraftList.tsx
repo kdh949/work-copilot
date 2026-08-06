@@ -21,6 +21,11 @@ type HttpError = Error & { status?: number; code?: string };
 type BriefDraftListProps = {
   request: WorkBriefApiRequest;
   onOpen: (draftId: string) => void;
+  /**
+   * The drafts currently loaded. The assigned-issue picker uses them to mark
+   * issues that already have a draft, so it never sends the user into a 409.
+   */
+  onItemsChange?: (items: BriefDraftSummary[]) => void;
 };
 
 const formatUpdatedAt = (value: string): string => {
@@ -40,7 +45,11 @@ const formatUpdatedAt = (value: string): string => {
  * Visibility is own-drafts-only, matching the server. A colleague's draft on
  * the same issue is not shown and surfaces only as the 409 on create.
  */
-export function BriefDraftList({ request, onOpen }: BriefDraftListProps) {
+export function BriefDraftList({
+  request,
+  onOpen,
+  onItemsChange,
+}: BriefDraftListProps) {
   const [items, setItems] = useState<BriefDraftSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
@@ -56,9 +65,17 @@ export function BriefDraftList({ request, onOpen }: BriefDraftListProps) {
   // `request` is re-created on every parent render, so the first page is read
   // through a ref rather than depending on its identity.
   const requestRef = useRef(request);
+  const onItemsChangeRef = useRef(onItemsChange);
   useEffect(() => {
     requestRef.current = request;
+    onItemsChangeRef.current = onItemsChange;
   });
+
+  // Publish after render rather than from each mutation site, so every path
+  // that changes the list — first page, next page, delete — stays in sync.
+  useEffect(() => {
+    onItemsChangeRef.current?.(items);
+  }, [items]);
 
   useEffect(() => {
     let isCurrent = true;
