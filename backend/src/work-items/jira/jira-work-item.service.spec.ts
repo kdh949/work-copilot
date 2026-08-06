@@ -544,4 +544,36 @@ describe('JiraWorkItemService', () => {
       issues: [],
     });
   });
+
+  it('answers an empty allowlist without reaching the provider at all', async () => {
+    const emptyProfile = {
+      ...profile,
+      allowedProjectKeys: [] as string[],
+    } as IntegrationProfile;
+    const getJson = jest.fn();
+    const getAccessToken = jest.fn();
+    const service = new JiraWorkItemService(
+      {
+        activeProfile: jest.fn(() => Promise.resolve(emptyProfile)),
+        assertAllowedProject: jest.fn(() => {
+          throw new ForbiddenException();
+        }),
+        providerBaseUrl: jest.fn(() => emptyProfile.jiraBaseUrl),
+        providerUrl: jest.fn(),
+      } as unknown as IntegrationAccessPolicyService,
+      { getJson } as unknown as AtlassianReadClientService,
+      { getAccessToken } as unknown as IntegrationsOAuthService,
+      undefined as never,
+    );
+
+    await expect(service.listAssignedIssues(1, 'corr')).resolves.toEqual({
+      accessStatus: 'accessible',
+      issues: [],
+    });
+    // An empty JQL `project in ()` is a syntax error, and asking for a token
+    // the profile can never use is a pointless external call: the empty answer
+    // has to be decided before either happens.
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(getJson).not.toHaveBeenCalled();
+  });
 });
