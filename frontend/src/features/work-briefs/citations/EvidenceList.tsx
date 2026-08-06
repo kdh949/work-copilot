@@ -28,6 +28,12 @@ export function EvidenceList({
    */
   content?: BriefContent | null;
 }) {
+  // Only the reverse-view list owns the row ids, because ids have to be unique
+  // in the document and more than one list can be mounted at once: opening the
+  // regeneration dialog puts a second evidence list on the page. With both
+  // labelled, `getElementById` answered with the dialog's copy and a chip in
+  // the editor scrolled into the dialog instead of the list behind it.
+  const anchored = content !== null;
   const labels = useMemo(() => evidenceRefLabels(evidence), [evidence]);
   // 15 evidence × 40 items is 600 steps; cheap enough to run per keystroke,
   // and there is no reason to.
@@ -39,7 +45,11 @@ export function EvidenceList({
         const places = usage.get(item.id);
         const summary = evidenceUsageSummary(places);
         return (
-          <li key={item.id} id={evidenceRowId(item.id)} tabIndex={-1}>
+          <li
+            key={item.id}
+            id={anchored ? evidenceRowId(item.id) : undefined}
+            tabIndex={anchored ? -1 : undefined}
+          >
             {!readonly && (
               <Checkbox
                 checked={selectedEvidenceIds.includes(item.id)}
@@ -52,14 +62,14 @@ export function EvidenceList({
                 {item.title}
               </a>
               <p>
-                {content ? (
+                {anchored ? (
                   <span className="work-brief-evidence-ref">
                     {labels.get(item.id)}
                   </span>
                 ) : null}
                 {item.provider} · v{item.version} · {item.excerptLength}자
               </p>
-              {content ? (
+              {anchored ? (
                 <p className="work-brief-evidence-usage">
                   {/* Read-only on purpose: unlinking lives in the popover
                       alone, so there is never a second place claiming
