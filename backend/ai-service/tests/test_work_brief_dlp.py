@@ -325,11 +325,91 @@ class WorkBriefGenerationTests(unittest.TestCase):
                 with self.assertRaises(WorkBriefError):
                     generate_work_brief(self.request("safe evidence"))
 
+    def test_rejects_unaccounted_evidence_and_copied_full_citation_sets(self) -> None:
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "요구사항 A"},
+                {"evidenceId": "jira:DEMO-2", "content": "요구사항 B"},
+            ],
+        )
+        all_evidence = ["jira:DEMO-1", "jira:DEMO-2"]
+        invalid_outputs = {
+            "unaccounted evidence": model_output(),
+            "copied full citation sets": model_output(
+                title=citation("배포 준비", all_evidence),
+                summary=citation("완료", all_evidence),
+                keyPoints=[citation("검증 완료", all_evidence)],
+                acceptanceCriteria=[citation("검증 결과가 기록된다", all_evidence)],
+                risks=[citation("일정 확인", all_evidence)],
+                nextSteps=[citation("테스트 실행", all_evidence)],
+                childTasks=[
+                    {
+                        "summary": "검증 기록 추가",
+                        "text": "검증 결과를 이슈에 남긴다",
+                        "evidenceIds": all_evidence,
+                    },
+                ],
+            ),
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label=label):
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+                    with patch(
+                        "work_brief.service.requests.post",
+                        return_value=valid_model_response(output),
+                    ):
+                        with self.assertRaises(WorkBriefError):
+                            generate_work_brief(request)
+
+    def test_rejects_requirements_without_linked_acceptance_and_child_task(self) -> None:
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "요구사항 A"},
+                {"evidenceId": "jira:DEMO-2", "content": "요구사항 B"},
+            ],
+        )
+        invalid_outputs = {
+            "second requirement is uncovered": model_output(
+                keyPoints=[
+                    citation("요구사항 A", ["jira:DEMO-1"]),
+                    citation("요구사항 B", ["jira:DEMO-2"]),
+                ],
+                acceptanceCriteria=[citation("A 검증", ["jira:DEMO-1"])],
+                childTasks=[
+                    {
+                        "summary": "A 작업",
+                        "text": "A를 수행한다",
+                        "evidenceIds": ["jira:DEMO-1"],
+                    },
+                ],
+            ),
+            "empty acceptance criteria": model_output(acceptanceCriteria=[]),
+            "empty child tasks": model_output(childTasks=[]),
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label=label):
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+                    with patch(
+                        "work_brief.service.requests.post",
+                        return_value=valid_model_response(output),
+                    ):
+                        with self.assertRaises(WorkBriefError):
+                            generate_work_brief(request)
+
     def test_keeps_per_item_citations_instead_of_one_shared_evidence_list(self) -> None:
         output = model_output(
             title=citation("배포 준비", ["jira:DEMO-1"]),
             keyPoints=[citation("검증 완료", ["jira:DEMO-2"])],
             acceptanceCriteria=[citation("검증 결과가 기록된다", ["jira:DEMO-2"])],
+            childTasks=[
+                {
+                    "summary": "검증 기록 추가",
+                    "text": "검증 결과를 이슈에 남긴다",
+                    "evidenceIds": ["jira:DEMO-2"],
+                },
+            ],
         )
         request = WorkBriefGenerateRequest(
             instruction="아래 근거로 실행 브리프를 만드세요.",

@@ -124,6 +124,84 @@ describe('WorkBriefAiClientService', () => {
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
+  it.each([
+    [
+      'a requirement without linked acceptance and child-task candidates',
+      {
+        ...validOutput,
+        keyPoints: [
+          { text: '요구사항 A', evidenceIds: ['jira:DEMO-1'] },
+          { text: '요구사항 B', evidenceIds: ['jira:DEMO-2'] },
+        ],
+        acceptanceCriteria: [
+          { text: 'A가 검증되었다', evidenceIds: ['jira:DEMO-1'] },
+        ],
+        childTasks: [
+          {
+            summary: 'A 작업',
+            text: 'A를 수행한다',
+            evidenceIds: ['jira:DEMO-1'],
+          },
+        ],
+      },
+    ],
+    ['unaccounted requested evidence', validOutput],
+    [
+      'every item copies the entire requested evidence set',
+      {
+        schemaVersion: 2,
+        title: {
+          text: '배포 준비',
+          evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'],
+        },
+        summary: {
+          text: '테스트를 완료합니다.',
+          evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'],
+        },
+        keyPoints: [
+          {
+            text: '요구사항 검토',
+            evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'],
+          },
+        ],
+        acceptanceCriteria: [
+          {
+            text: '요구사항이 검토되었다',
+            evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'],
+          },
+        ],
+        risks: [{ text: '일정', evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'] }],
+        nextSteps: [
+          { text: '검증', evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'] },
+        ],
+        childTasks: [
+          {
+            summary: '요구사항 검토',
+            text: '요구사항을 검토한다',
+            evidenceIds: ['jira:DEMO-1', 'jira:DEMO-2'],
+          },
+        ],
+        excludedEvidence: [],
+      },
+    ],
+  ])('rejects %s for multiple requested evidence', async (_label, payload) => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(payload),
+    });
+    const service = new WorkBriefAiClientService(
+      configService as never,
+      contentGuard as never,
+    );
+
+    await expect(
+      service.generate('create a brief', [
+        ...requestedEvidence,
+        { evidenceId: 'jira:DEMO-2', content: 'another source' },
+      ]),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('guards every model-authored string, including the schema v2 fields', async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: true,

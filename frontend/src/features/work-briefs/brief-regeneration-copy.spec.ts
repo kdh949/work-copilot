@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canRegenerateDraft,
+  canUndoRegeneration,
   emptySectionNotice,
   excludedEvidenceReason,
   isLegacyBriefContent,
@@ -51,9 +52,14 @@ test("points a refused regeneration at the action that works", () => {
     /최신 초안/,
   );
   assert.match(
-    regenerateFailureMessage({ status: 503 }),
-    /연결 상태/,
+    regenerateFailureMessage({ status: 409, code: "PUBLICATION_IN_PROGRESS" }),
+    /게시가 진행 중/,
   );
+  assert.match(
+    regenerateFailureMessage({ status: 409, code: "DRAFT_HAS_PUBLICATION" }),
+    /외부에 게시된/,
+  );
+  assert.match(regenerateFailureMessage({ status: 503 }), /연결 상태/);
 });
 
 test("requires a current draft that is not already busy", () => {
@@ -68,6 +74,23 @@ test("requires a current draft that is not already busy", () => {
       false,
     ),
     false,
+  );
+});
+
+test("does not offer a client-only undo after regeneration changes evidence", () => {
+  assert.equal(
+    canUndoRegeneration(
+      [{ id: "jira:A" }, { id: "jira:B" }],
+      [{ id: "jira:B" }],
+    ),
+    false,
+  );
+  assert.equal(
+    canUndoRegeneration(
+      [{ id: "jira:A" }, { id: "jira:B" }],
+      [{ id: "jira:B" }, { id: "jira:A" }],
+    ),
+    true,
   );
 });
 

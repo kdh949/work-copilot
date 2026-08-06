@@ -507,6 +507,219 @@ describe('WorkBriefsService', () => {
     );
   });
 
+  it.each([
+    [
+      'a reserved publication',
+      { publishing: true, externalWritePerformed: false },
+      'PUBLICATION_IN_PROGRESS',
+    ],
+    [
+      'an actual or indeterminate external write',
+      { publishing: false, externalWritePerformed: true },
+      'DRAFT_HAS_PUBLICATION',
+    ],
+  ])(
+    'does not regenerate a draft with %s',
+    async (_label, publicationSafety, code) => {
+      const current = createDraft();
+      repository.findOneBy.mockResolvedValue(current);
+      publicationService.assessDraftDeletion.mockResolvedValue(
+        publicationSafety,
+      );
+
+      await expect(
+        createService().regenerateDraft(
+          7,
+          current.id,
+          { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+          'correlation-id',
+        ),
+      ).rejects.toMatchObject({ response: { code } });
+
+      expect(aiClient.generate).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(transactionManager.query).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`work-brief-draft:${current.id}`],
+      );
+    },
+  );
+
+  it('blocks regeneration when publication reserves the draft during generation', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'transient evidence' },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(aiOutput());
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    publicationService.assessDraftDeletion
+      .mockResolvedValueOnce({
+        publishing: false,
+        externalWritePerformed: false,
+      })
+      // Simulates publish reserving PENDING between the short preflight lock
+      // and the post-AI persistence lock.
+      .mockResolvedValueOnce({
+        publishing: true,
+        externalWritePerformed: false,
+      });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_IN_PROGRESS' },
+    });
+
+    expect(publicationService.assessDraftDeletion).toHaveBeenCalledTimes(2);
+    expect(transactionManager.query).toHaveBeenCalledTimes(2);
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('marks every stored Confluence evidence version change for review before AI', async () => {
+    const confluenceEvidence = {
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+      title: '배포 결정',
+      version: '5',
+      excerptLength: 88,
+      accessStatus: 'accessible' as const,
+      dlpStatus: 'not_evaluated' as const,
+      aiStatus: 'included' as const,
+    };
+    const current = createDraft({
+      evidence: [createDraft().evidence[0], confluenceEvidence],
+    });
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'Jira transient evidence' },
+      ],
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      evidence: [{ ...confluenceEvidence, version: '6' }],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED', currentVersion: 2 },
+    });
+
+    expect(
+      confluenceWorkItemService.collectEvidenceMetadata,
+    ).toHaveBeenCalledWith(7, ['confluence:200'], 'correlation-id');
+    expect(current.freshnessStatus).toBe('review_required');
+    expect(current.evidence).toHaveLength(2);
+    expect(aiClient.generate).not.toHaveBeenCalled();
+  });
+
+  it('marks Jira and Confluence access loss instead of leaving a current draft', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockRejectedValue(
+      new ConflictException('Reconnect the integration to continue.'),
+    );
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'ACCESS_CHANGED', currentVersion: 2 },
+    });
+    expect(current.freshnessStatus).toBe('access_changed');
+    expect(current.evidence).toEqual([]);
+
+    const confluenceEvidence = {
+      ...createDraft().evidence[0],
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+    };
+    const withConfluence = createDraft({
+      evidence: [createDraft().evidence[0], confluenceEvidence],
+    });
+    repository.findOneBy.mockImplementation(() =>
+      Promise.resolve(withConfluence),
+    );
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(withConfluence, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: withConfluence.profileId,
+      sourceJiraId: withConfluence.sourceJiraId,
+      sourceJiraKey: withConfluence.sourceJiraKey,
+      sourceJiraVersion: withConfluence.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: withConfluence.evidence[0],
+          content: 'Jira transient evidence',
+        },
+      ],
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'access_limited',
+      profileId: null,
+      evidence: [],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        withConfluence.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'ACCESS_CHANGED', currentVersion: 2 },
+    });
+    expect(withConfluence.freshnessStatus).toBe('access_changed');
+    expect(withConfluence.evidence).toEqual([]);
+    expect(aiClient.generate).not.toHaveBeenCalled();
+  });
+
   it('regenerates with a changed evidence selection when one is given', async () => {
     const current = createDraft();
     const extraEvidence = {
@@ -811,11 +1024,9 @@ describe('WorkBriefsService', () => {
     );
 
     expect(refreshed.freshnessStatus).toBe('review_required');
-    expect(confluenceWorkItemService.collectEvidenceMetadata).toHaveBeenCalledWith(
-      7,
-      ['confluence:200'],
-      'correlation-id',
-    );
+    expect(
+      confluenceWorkItemService.collectEvidenceMetadata,
+    ).toHaveBeenCalledWith(7, ['confluence:200'], 'correlation-id');
   });
 
   it('hides prior content when the user no longer has source access', async () => {

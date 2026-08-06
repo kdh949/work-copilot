@@ -2,10 +2,33 @@ import type { BriefContent, BriefDraft, WorkEvidence } from "./work-briefs.types
 
 /** Shown before the request is sent. Regeneration is destructive by design. */
 export const REGENERATE_CONFIRM_NOTE =
-  "다시 생성하면 직접 고친 내용까지 서버가 만든 브리프로 모두 덮어씁니다. 되돌리기는 저장 전 1회만 가능합니다.";
+  "다시 생성하면 직접 고친 내용까지 서버가 만든 브리프로 모두 덮어씁니다. 근거 구성이 유지된 경우에만 저장 전 1회 되돌릴 수 있습니다.";
 
 export const REGENERATE_UNDO_NOTE =
   "다시 생성 직전 내용으로 되돌렸습니다. 저장해야 서버에 반영됩니다.";
+
+export const REGENERATE_EVIDENCE_CHANGED_NOTE =
+  "브리프를 다시 생성했습니다. 근거 구성이 바뀌어 이전 내용을 안전하게 되돌릴 수 없습니다.";
+
+/**
+ * A PATCH changes content but never the persisted evidence set. Therefore a
+ * client-only undo is safe only when regeneration preserves every evidence
+ * identity. A server-backed history would be needed to restore both fields.
+ */
+export function canUndoRegeneration(
+  previousEvidence: readonly Pick<WorkEvidence, "id">[],
+  regeneratedEvidence: readonly Pick<WorkEvidence, "id">[],
+): boolean {
+  const previousIds = new Set(previousEvidence.map((item) => item.id));
+  const regeneratedIds = new Set(regeneratedEvidence.map((item) => item.id));
+
+  return (
+    previousIds.size === previousEvidence.length &&
+    regeneratedIds.size === regeneratedEvidence.length &&
+    previousIds.size === regeneratedIds.size &&
+    [...previousIds].every((id) => regeneratedIds.has(id))
+  );
+}
 
 /**
  * Why regeneration was refused.
@@ -31,6 +54,12 @@ export function regenerateFailureMessage(error: {
   }
   if (error.code === "DRAFT_VERSION_CONFLICT") {
     return "초안이 다른 탭에서 변경되었습니다. 최신 초안을 불러온 뒤 다시 생성하세요.";
+  }
+  if (error.code === "PUBLICATION_IN_PROGRESS") {
+    return "게시가 진행 중이라 다시 생성할 수 없습니다. 게시 결과를 확인한 뒤 기존 게시 경로를 사용하세요.";
+  }
+  if (error.code === "DRAFT_HAS_PUBLICATION") {
+    return "이미 외부에 게시된 초안은 다시 생성할 수 없습니다. 기존 Confluence 페이지를 갱신하는 별도 경로가 필요합니다.";
   }
   return "브리프를 다시 생성하지 못했습니다. 초안 상태를 확인하세요.";
 }
