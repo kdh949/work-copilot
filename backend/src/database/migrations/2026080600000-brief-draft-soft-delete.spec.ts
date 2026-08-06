@@ -93,4 +93,40 @@ describe('BriefDraftSoftDelete migration', () => {
     expect(restore).toBeGreaterThan(purge);
     expect(dropColumn).toBeGreaterThan(restore);
   });
+
+  it('removes safe publication history before its soft-deleted draft', async () => {
+    const statements = await runStatements((queryRunner) =>
+      new BriefDraftSoftDelete1786000000000().down(queryRunner),
+    );
+    const publications = statements.findIndex((statement) =>
+      statement.includes('DELETE FROM "brief_publications" publication'),
+    );
+    const drafts = statements.findIndex((statement) =>
+      statement.includes(
+        'DELETE FROM "work_brief_drafts" WHERE "deletedAt" IS NOT NULL',
+      ),
+    );
+
+    expect(publications).toBeGreaterThanOrEqual(0);
+    expect(drafts).toBeGreaterThan(publications);
+  });
+
+  it('stops rollback before deleting a real, running, or indeterminate publication', async () => {
+    const sql = (
+      await runStatements((queryRunner) =>
+        new BriefDraftSoftDelete1786000000000().down(queryRunner),
+      )
+    ).join('\n');
+
+    const guard = sql.indexOf('BRIEF_DRAFT_SOFT_DELETE_ROLLBACK_BLOCKED');
+    const publications = sql.indexOf('DELETE FROM "brief_publications" publication');
+
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeLessThan(publications);
+    expect(sql).toContain("publication.\"executionMode\" = 'real'");
+    expect(sql).toContain("step.\"status\" = 'RUNNING'");
+    expect(sql).toContain(
+      "step.\"errorCode\" = 'PUBLICATION_RECONCILIATION_INDETERMINATE'",
+    );
+  });
 });
