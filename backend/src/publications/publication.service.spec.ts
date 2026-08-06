@@ -139,21 +139,48 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
         publications.filter((item) => matches(item as never, where)),
       ),
     ),
-    // Stands in for the DISTINCT ON ("draftId") ... ORDER BY "createdAt" DESC
-    // read used by the draft list.
+    // Stands in for the one joined publication/step query used by the draft
+    // list. It deliberately includes every publication for the draft because
+    // an older durable external result must not be hidden by a newer row.
     query: jest.fn((_sql: string, [draftIds]: [string[]]) =>
       Promise.resolve(
-        draftIds
-          .map((draftId) =>
-            publications
-              .filter((item) => item.draftId === draftId)
-              .sort(
-                (left, right) =>
-                  right.createdAt.getTime() - left.createdAt.getTime(),
-              )
-              .at(0),
-          )
-          .filter((item): item is BriefPublication => Boolean(item)),
+        draftIds.flatMap((draftId) =>
+          publications
+            .filter((item) => item.draftId === draftId)
+            .sort(
+              (left, right) =>
+                right.createdAt.getTime() - left.createdAt.getTime(),
+            )
+            .flatMap((publication) => {
+              const publicationSteps = steps.filter(
+                (step) => step.publicationId === publication.id,
+              );
+              const row = {
+                id: publication.id,
+                draftId: publication.draftId,
+                status: publication.status,
+                executionMode: publication.executionMode,
+                confluenceContentId: publication.confluenceContentId,
+              };
+              return publicationSteps.length > 0
+                ? publicationSteps.map((step) => ({
+                    ...row,
+                    stepPublicationId: step.publicationId,
+                    stepStatus: step.status,
+                    stepProviderObjectId: step.providerObjectId,
+                    stepErrorCode: step.errorCode,
+                  }))
+                : [
+                    {
+                      ...row,
+                      stepPublicationId: null,
+                      stepStatus: null,
+                      stepProviderObjectId: null,
+                      stepErrorCode: null,
+                    },
+                  ];
+            }),
+        ),
       ),
     ),
     createQueryBuilder: jest.fn(() => {
@@ -278,8 +305,19 @@ function createHarness(selectedTaskIds: string[] = [FIRST_TASK_ID]) {
       };
       return builder;
     }),
-    find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
-      Promise.resolve(steps.filter((item) => matches(item as never, where))),
+    find: jest.fn(
+      ({
+        where,
+      }: {
+        where: Record<string, unknown> | Array<Record<string, unknown>>;
+      }) =>
+        Promise.resolve(
+          steps.filter((item) =>
+            (Array.isArray(where) ? where : [where]).some((criteria) =>
+              matches(item as never, criteria),
+            ),
+          ),
+        ),
     ),
   };
   const readinessService = {
@@ -1882,10 +1920,58 @@ describe('PublicationService', () => {
       ).resolves.toMatchObject({ externalWritePerformed: true });
     });
 
+    it('fails closed when a real provider result reached a step before the aggregate', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].executionMode = 'real';
+      // Simulate a process exit after markSucceeded persisted this result and
+      // before the aggregate save copied it to confluenceContentId.
+      harness.publications[0].confluenceContentId = null;
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+      await expect(
+        harness.service.findLatestStoredSummaries([DRAFT_ID]),
+      ).resolves.toEqual(
+        new Map([
+          [
+            DRAFT_ID,
+            expect.objectContaining({ externalWritePerformed: true }),
+          ],
+        ]),
+      );
+    });
+
+    it('fails closed when step reconciliation is indeterminate', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].confluenceContentId = null;
+      Object.assign(harness.steps[0], {
+        status: 'NEEDS_REVIEW',
+        providerObjectId: null,
+        errorCode: 'PUBLICATION_RECONCILIATION_INDETERMINATE',
+      });
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ externalWritePerformed: true });
+    });
+
     it('reports a running publication as blocking deletion', async () => {
       const harness = createHarness();
       await publishConfluence(harness);
       harness.publications[0].status = 'PUBLISHING';
+
+      await expect(
+        harness.service.assessDraftDeletion(DRAFT_ID),
+      ).resolves.toMatchObject({ publishing: true });
+    });
+
+    it('reports a reserved pending publication as blocking deletion', async () => {
+      const harness = createHarness();
+      await publishConfluence(harness);
+      harness.publications[0].status = 'PENDING';
 
       await expect(
         harness.service.assessDraftDeletion(DRAFT_ID),

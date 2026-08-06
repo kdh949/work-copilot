@@ -21,6 +21,11 @@ import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity'
 import { BriefPublication } from './entities/brief-publication.entity';
 import { PublicationStep } from './entities/publication-step.entity';
 import {
+  assessPublicationDeletionSafety,
+  type StoredPublicationForDeletion,
+  type StoredPublicationStepForDeletion,
+} from './publication-deletion-safety';
+import {
   PUBLICATION_STEP_HEARTBEAT_INTERVAL_MS,
   PublicationStepClaimerService,
   type StepClaim,
@@ -53,17 +58,6 @@ const REMOTE_LINK_STEP = 'jira_remote_link';
 const SUMMARY_COMMENT_STEP = 'jira_summary_comment';
 const CHILD_TASK_STEP_PREFIX = 'jira_child_task:';
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
-
-/**
- * The single definition of "something exists in Atlassian because of this
- * publication".  Draft deletion and the list badge both depend on it, so it
- * must not be restated anywhere else.
- */
-const externalWritePerformed = (
-  publication: Pick<BriefPublication, 'executionMode' | 'confluenceContentId'>,
-): boolean =>
-  publication.executionMode === 'real' &&
-  Boolean(publication.confluenceContentId);
 
 type PhaseInput = {
   draftVersion: number;
@@ -555,30 +549,74 @@ export class PublicationService {
       return new Map();
     }
 
+    type StoredPublicationRow = StoredPublicationForDeletion & {
+      stepPublicationId: string | null;
+      stepStatus: PublicationStep['status'] | null;
+      stepProviderObjectId: string | null;
+      stepErrorCode: PublicationStep['errorCode'] | null;
+    };
     const rows = await this.publicationsRepository.query<
-      Array<
-        Pick<
-          BriefPublication,
-          'id' | 'draftId' | 'status' | 'executionMode' | 'confluenceContentId'
-        >
-      >
+      StoredPublicationRow[]
     >(
-      `SELECT DISTINCT ON ("draftId")
-              "draftId", "id", "status", "executionMode", "confluenceContentId"
-         FROM "brief_publications"
-        WHERE "draftId" = ANY($1::uuid[])
-        ORDER BY "draftId", "createdAt" DESC`,
+      `SELECT publication."id",
+              publication."draftId",
+              publication."status",
+              publication."executionMode",
+              publication."confluenceContentId",
+              step."publicationId" AS "stepPublicationId",
+              step."status" AS "stepStatus",
+              step."providerObjectId" AS "stepProviderObjectId",
+              step."errorCode" AS "stepErrorCode"
+         FROM "brief_publications" publication
+         LEFT JOIN "publication_steps" step
+           ON step."publicationId" = publication."id"
+        WHERE publication."draftId" = ANY($1::uuid[])
+        ORDER BY publication."draftId", publication."createdAt" DESC, step."createdAt" ASC`,
       [draftIds],
     );
+    type StoredSummaryGroup = {
+      latest: StoredPublicationForDeletion;
+      publications: Map<string, StoredPublicationForDeletion>;
+      steps: StoredPublicationStepForDeletion[];
+    };
+    const grouped = new Map<string, StoredSummaryGroup>();
+
+    for (const row of rows) {
+      const publication: StoredPublicationForDeletion = {
+        id: row.id,
+        draftId: row.draftId,
+        status: row.status,
+        executionMode: row.executionMode,
+        confluenceContentId: row.confluenceContentId,
+      };
+      const current: StoredSummaryGroup = grouped.get(row.draftId) ?? {
+        latest: publication,
+        publications: new Map(),
+        steps: [],
+      };
+      current.publications.set(publication.id, publication);
+      if (row.stepPublicationId && row.stepStatus) {
+        current.steps.push({
+          publicationId: row.stepPublicationId,
+          status: row.stepStatus,
+          providerObjectId: row.stepProviderObjectId,
+          errorCode: row.stepErrorCode,
+        });
+      }
+      grouped.set(row.draftId, current);
+    }
 
     return new Map(
-      rows.map((row) => [
-        row.draftId,
+      [...grouped.entries()].map(([draftId, current]) => [
+        draftId,
         {
-          draftId: row.draftId,
-          id: row.id,
-          status: row.status,
-          externalWritePerformed: externalWritePerformed(row),
+          draftId,
+          id: current.latest.id,
+          status: current.latest.status,
+          externalWritePerformed: assessPublicationDeletionSafety(
+            [...current.publications.values()],
+            current.steps,
+          ).externalWritePerformed,
         },
       ]),
     );
@@ -598,19 +636,29 @@ export class PublicationService {
     const publications = await this.publicationsRepository.find({
       select: {
         id: true,
+        draftId: true,
         status: true,
         executionMode: true,
         confluenceContentId: true,
       },
       where: { draftId },
     });
+    if (publications.length === 0) {
+      return { publishing: false, externalWritePerformed: false };
+    }
+    const steps = await this.stepsRepository.find({
+      select: {
+        publicationId: true,
+        status: true,
+        providerObjectId: true,
+        errorCode: true,
+      },
+      where: publications.map((publication) => ({
+        publicationId: publication.id,
+      })),
+    });
 
-    return {
-      publishing: publications.some(
-        (publication) => publication.status === 'PUBLISHING',
-      ),
-      externalWritePerformed: publications.some(externalWritePerformed),
-    };
+    return assessPublicationDeletionSafety(publications, steps);
   }
 
   private async retryConfluence(
@@ -1813,7 +1861,10 @@ export class PublicationService {
       draftVersion: publication.draftVersion,
       status: publication.status,
       executionMode: publication.executionMode,
-      externalWritePerformed: externalWritePerformed(publication),
+      externalWritePerformed: assessPublicationDeletionSafety(
+        [publication],
+        steps,
+      ).externalWritePerformed,
       confluencePage: publication.confluenceContentId
         ? {
             id: publication.confluenceContentId,
