@@ -866,6 +866,11 @@ describe('WorkBriefsService', () => {
         },
         'correlation-id',
       ),
-    ).rejects.toThrow(/another user/);
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DRAFT_ALREADY_EXISTS',
+        message: expect.stringMatching(/another user/),
+      },
+    });
   });
 });

@@ -32,6 +32,7 @@ import type {
   WorkEvidence,
 } from "./work-briefs.types";
 import { BriefDraftList } from "./BriefDraftList";
+import { createDraftFailureMessage } from "./brief-draft-error-copy";
 import { PublicationPanel, PublicationProgress } from "./PublicationPanel";
 import {
   canRunReadinessAssessment,
@@ -70,7 +71,7 @@ type WorkBriefsPageProps = {
   onDraftUnavailable?: (reason: string) => void;
 };
 
-type HttpError = Error & { status?: number };
+type HttpError = Error & { status?: number; code?: string };
 
 // Outcomes are toned so a completed action never renders as a warning.
 // `warning` asks the user to do something first; `danger` reports a failure.
@@ -458,10 +459,8 @@ export function WorkBriefsPage({
       openedDraftIdRef.current = created.id;
       applyDraft(created);
       onOpenDraft?.(created.id, { replace: true });
-    } catch {
-      notifyFailure(
-        "브리프를 생성하지 못했습니다. 연결 상태와 선택한 근거의 접근 권한을 확인하세요.",
-      );
+    } catch (error) {
+      notifyFailure(createDraftFailureMessage(error as HttpError));
     } finally {
       setIsSaving(false);
     }

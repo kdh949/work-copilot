@@ -129,7 +129,7 @@ export class WorkBriefsService {
       stored = await this.draftsRepository.save(draft);
     } catch (error) {
       if (this.isDuplicateDraftError(error)) {
-        throw new ConflictException(DRAFT_ALREADY_EXISTS_MESSAGE);
+        this.draftAlreadyExists();
       }
       throw error;
     }
@@ -532,8 +532,15 @@ export class WorkBriefsService {
       sourceJiraId,
     });
     if (existing) {
-      throw new ConflictException(DRAFT_ALREADY_EXISTS_MESSAGE);
+      this.draftAlreadyExists();
     }
+  }
+
+  private draftAlreadyExists(): never {
+    throw new ConflictException({
+      code: 'DRAFT_ALREADY_EXISTS',
+      message: DRAFT_ALREADY_EXISTS_MESSAGE,
+    });
   }
 
   private isDuplicateDraftError(error: unknown): boolean {
