@@ -26,6 +26,31 @@ test("flips above the trigger when the panel would run off the bottom", () => {
   assert.equal(position.top, 700 - 240 - 8);
 });
 
+test("keeps a panel that grew after opening inside the bottom edge", () => {
+  // The panel was 60px tall when it opened near the bottom; expanding the
+  // excluded-evidence section made it 360px. Nothing fires scroll or resize
+  // for that, so the position function has to answer with a clamp.
+  const anchor = { top: 634, left: 200, width: 120, height: 32 };
+
+  const small = popoverPosition(anchor, { width: 320, height: 60 }, viewport);
+  const grown = popoverPosition(anchor, { width: 320, height: 360 }, viewport);
+
+  assert.equal(small.top + 60 <= viewport.height, true);
+  assert.equal(grown.top + 360 <= viewport.height, true);
+});
+
+test("stays inside the viewport when neither side fits", () => {
+  const position = popoverPosition(
+    { top: 90, left: 200, width: 120, height: 32 },
+    { width: 320, height: 400 },
+    { width: 1000, height: 300 },
+  );
+
+  // Clamped to the top edge rather than left hanging below the fold: the
+  // panel scrolls internally, so its first row has to be the visible one.
+  assert.equal(position.top, 8);
+});
+
 test("stays below when flipping would run off the top instead", () => {
   // A viewport too short for the panel in either direction: the flip would
   // only trade a bottom overflow for a top one.

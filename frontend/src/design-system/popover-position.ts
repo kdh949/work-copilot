@@ -46,8 +46,18 @@ export function popoverPosition(
   const maxLeft = viewport.width - panel.width - EDGE_MARGIN;
   const left = Math.max(EDGE_MARGIN, Math.min(anchor.left, maxLeft));
 
+  // Clamped vertically as well as horizontally. Flipping alone is not enough:
+  // a panel that grows after opening (an expanded section, a wider search
+  // result) keeps its `top` and pushes its own footer past the bottom edge,
+  // and on a short viewport neither side fits so neither flip helps.
+  const maxTop = Math.max(
+    EDGE_MARGIN,
+    viewport.height - panel.height - EDGE_MARGIN,
+  );
+  const preferredTop = placement === "above" ? above : below;
+
   return {
-    top: placement === "above" ? above : below,
+    top: Math.max(EDGE_MARGIN, Math.min(preferredTop, maxTop)),
     // A panel wider than the viewport is clamped to the left edge rather than
     // to a negative `maxLeft`, so its start stays reachable.
     left: maxLeft < EDGE_MARGIN ? EDGE_MARGIN : left,

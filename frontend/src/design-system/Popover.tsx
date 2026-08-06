@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -12,6 +13,14 @@ import {
   type PopoverPosition,
 } from "./popover-position";
 import "./components.css";
+
+export type PopoverTriggerAttributes = {
+  "aria-controls": string;
+  "aria-expanded": boolean;
+  "aria-haspopup": "dialog";
+  popoverTarget?: string;
+  onClick: () => void;
+};
 
 type PopoverProps = {
   /** Unique id, used to wire the trigger to the panel. */
@@ -26,14 +35,10 @@ type PopoverProps = {
   /**
    * A second control that opens the same panel — the chip overflow, say.
    * It is given the wiring rather than a callback so the browser still owns
-   * opening where `popover` exists.
+   * opening where `popover` exists. Spread the attributes onto a `<button>`;
+   * `onClick` is what tells the panel which control to come back to.
    */
-  extraTrigger?: (attributes: {
-    "aria-controls": string;
-    "aria-expanded": boolean;
-    popoverTarget?: string;
-    onClick?: () => void;
-  }) => ReactNode;
+  extraTrigger?: (attributes: PopoverTriggerAttributes) => ReactNode;
   /** Overrides feature detection. Tests fix this to false; app code does not. */
   supported?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -68,27 +73,60 @@ export function Popover({
   );
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  /**
+   * The control that actually opened the panel.
+   *
+   * More than one button can open it, and the chips wrap, so the overflow chip
+   * is often on a different line from the main trigger. Anchoring and focus
+   * return both have to follow the button the user pressed — otherwise ESC
+   * lands the keyboard somewhere it never was.
+   */
+  const activeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * Recorded in the capture phase on the wrapper, so it lands before the
+   * button's own click handler and long before the browser queues `toggle`.
+   * Doing it here rather than in each trigger's `onClick` also keeps the
+   * attributes handed to `extraTrigger` free of refs.
+   */
+  const rememberTrigger = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const trigger = target?.closest<HTMLButtonElement>(
+      "button[aria-haspopup='dialog']",
+    );
+    if (trigger && !panelRef.current?.contains(trigger)) {
+      activeTriggerRef.current = trigger;
+    }
+  }, []);
   // Without `popover` the panel is open from the start: the user must be able
   // to reach the controls even though nothing can toggle a top layer.
   const [open, setOpen] = useState(!supported);
   const [position, setPosition] = useState<PopoverPosition | null>(null);
 
   const reposition = useCallback(() => {
-    const trigger = triggerRef.current;
+    const trigger = activeTriggerRef.current ?? triggerRef.current;
     const panel = panelRef.current;
     if (!trigger || !panel) return;
     const anchor = trigger.getBoundingClientRect();
-    setPosition(
-      popoverPosition(
-        {
-          top: anchor.top,
-          left: anchor.left,
-          width: anchor.width,
-          height: anchor.height,
-        },
-        { width: panel.offsetWidth, height: panel.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight },
-      ),
+    const next = popoverPosition(
+      {
+        top: anchor.top,
+        left: anchor.left,
+        width: anchor.width,
+        height: anchor.height,
+      },
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    // Same position means same object, so a measurement that changed nothing
+    // cannot re-render — and a ResizeObserver watching this panel cannot feed
+    // itself.
+    setPosition((current) =>
+      current &&
+      current.top === next.top &&
+      current.left === next.left &&
+      current.placement === next.placement
+        ? current
+        : next,
     );
   }, []);
 
@@ -101,6 +139,11 @@ export function Popover({
     setCloseRequests((count) => count + 1);
   }, [supported]);
 
+  /** Inline mode has no top layer to toggle, so the trigger does it. */
+  const toggleWhenUnsupported = useCallback(() => {
+    if (!supported) setOpen((current) => !current);
+  }, [supported]);
+
   useEffect(() => {
     if (closeRequests === 0) return;
     if (supported) {
@@ -108,7 +151,7 @@ export function Popover({
       panelRef.current?.hidePopover();
       return;
     }
-    triggerRef.current?.focus();
+    (activeTriggerRef.current ?? triggerRef.current)?.focus();
   }, [closeRequests, supported]);
 
   useEffect(() => {
@@ -132,7 +175,7 @@ export function Popover({
       // whatever the user clicked next would be worse than not restoring it.
       const active = document.activeElement;
       if (!active || active === document.body || panel.contains(active)) {
-        triggerRef.current?.focus();
+        (activeTriggerRef.current ?? triggerRef.current)?.focus();
       }
     };
 
@@ -164,6 +207,23 @@ export function Popover({
     };
   }, [open, supported, reposition]);
 
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !supported || !panel) return;
+    if (typeof ResizeObserver === "undefined") return;
+    // The panel grows on its own: expanding "AI가 제외한 근거", clearing the
+    // search, a title wrapping to a second line. Scroll and resize never fire
+    // for any of those, and a panel opened near the bottom pushes its own
+    // 닫기 button off screen as it grows.
+    const observer = new ResizeObserver(() => {
+      // The callback runs during layout; measuring back inside it is what
+      // makes observers loop. The next frame is late enough.
+      window.requestAnimationFrame(reposition);
+    });
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [open, supported, reposition]);
+
   return (
     <div
       className={[
@@ -173,13 +233,14 @@ export function Popover({
       ]
         .filter(Boolean)
         .join(" ")}
+      onClickCapture={rememberTrigger}
     >
       {extraTrigger?.({
         "aria-controls": id,
         "aria-expanded": open,
-        ...(supported
-          ? { popoverTarget: id }
-          : { onClick: () => setOpen((current) => !current) }),
+        "aria-haspopup": "dialog",
+        ...(supported ? { popoverTarget: id } : {}),
+        onClick: toggleWhenUnsupported,
       })}
       <button
         type="button"
@@ -190,9 +251,8 @@ export function Popover({
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={id}
-        {...(supported
-          ? { popoverTarget: id }
-          : { onClick: () => setOpen((current) => !current) })}
+        {...(supported ? { popoverTarget: id } : {})}
+        onClick={toggleWhenUnsupported}
       >
         {triggerLabel}
       </button>
