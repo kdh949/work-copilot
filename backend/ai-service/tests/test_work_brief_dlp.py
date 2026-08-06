@@ -28,6 +28,43 @@ def valid_model_response(output: dict) -> Mock:
     return response
 
 
+def citation(text: str, evidence_ids: list[str] | None = None) -> dict:
+    return {"text": text, "evidenceIds": evidence_ids or ["jira:DEMO-1"]}
+
+
+def model_output(**overrides: object) -> dict:
+    """A schema v2 response that passes every structural check."""
+    output = {
+        "schemaVersion": 2,
+        "title": citation("배포 준비"),
+        "summary": citation("완료"),
+        "keyPoints": [citation("검증 완료")],
+        "acceptanceCriteria": [citation("검증 결과가 기록된다")],
+        "risks": [citation("일정 확인")],
+        "nextSteps": [citation("테스트 실행")],
+        "childTasks": [
+            {
+                "summary": "검증 기록 추가",
+                "text": "검증 결과를 이슈에 남긴다",
+                "evidenceIds": ["jira:DEMO-1"],
+            },
+        ],
+        "excludedEvidence": [],
+    }
+    output.update(overrides)
+    return output
+
+
+def all_strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in all_strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in all_strings(item)]
+    return []
+
+
 class KoreanPiiRedactorTests(unittest.TestCase):
     def test_masks_korean_pii_with_consistent_placeholders(self) -> None:
         redactor = KoreanPiiRedactor()
@@ -103,14 +140,7 @@ class WorkBriefGenerationTests(unittest.TestCase):
 
     def test_sends_only_masked_input_to_tool_free_store_false_responses_api(self) -> None:
         raw_evidence = "담당자 user@example.com, 전화 010-1234-5678, 주민번호 900101-1234568"
-        output = {
-            "title": "배포 준비",
-            "summary": "[EMAIL_1]과 검토합니다.",
-            "keyPoints": ["검증 완료"],
-            "risks": ["일정 확인"],
-            "nextSteps": ["테스트 실행"],
-            "evidenceIds": ["jira:DEMO-1"],
-        }
+        output = model_output(summary=citation("[EMAIL_1]과 검토합니다."))
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
             with patch("work_brief.service.requests.post", return_value=valid_model_response(output)) as post:
                 result = generate_work_brief(self.request(raw_evidence))
@@ -123,17 +153,11 @@ class WorkBriefGenerationTests(unittest.TestCase):
         self.assertNotIn("tools", request_payload)
         self.assertEqual(request_payload["text"]["format"]["type"], "json_schema")
         self.assertTrue(request_payload["text"]["format"]["strict"])
-        self.assertEqual(result["evidenceIds"], ["jira:DEMO-1"])
+        self.assertEqual(result["schemaVersion"], 2)
+        self.assertEqual(result["title"]["evidenceIds"], ["jira:DEMO-1"])
 
     def test_uses_shared_openai_model_unless_work_brief_override_is_configured(self) -> None:
-        output = {
-            "title": "배포 준비",
-            "summary": "완료",
-            "keyPoints": ["검증 완료"],
-            "risks": ["없음"],
-            "nextSteps": ["공유"],
-            "evidenceIds": ["jira:DEMO-1"],
-        }
+        output = model_output()
         with patch.dict(
             os.environ,
             {
@@ -192,8 +216,66 @@ class WorkBriefGenerationTests(unittest.TestCase):
         post.assert_not_called()
 
     def test_rescans_model_output_and_keeps_placeholder_consistency(self) -> None:
-        output = {
-            "title": "user@example.com에 공유",
+        output = model_output(title=citation("user@example.com에 공유"))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+            with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
+                result = generate_work_brief(self.request("user@example.com의 요구사항"))
+
+        self.assertEqual(result["title"]["text"], "[EMAIL_1]에 공유")
+
+    def test_rescans_every_text_field_of_schema_v2_including_new_ones(self) -> None:
+        """Guards R8: a v2 field that skips the DLP re-scan leaks raw PII."""
+        planted = {
+            "title": "010-1111-2222",
+            "summary": "010-2222-3333",
+            "keyPoints": "010-3333-4444",
+            "acceptanceCriteria": "010-4444-5555",
+            "risks": "010-5555-6666",
+            "nextSteps": "010-6666-7777",
+            "childTaskSummary": "010-7777-8888",
+            "childTaskText": "010-8888-9999",
+            "excludedReason": "010-9999-0000",
+        }
+        output = model_output(
+            title=citation(planted["title"]),
+            summary=citation(planted["summary"]),
+            keyPoints=[citation(planted["keyPoints"])],
+            acceptanceCriteria=[citation(planted["acceptanceCriteria"])],
+            risks=[citation(planted["risks"])],
+            nextSteps=[citation(planted["nextSteps"])],
+            childTasks=[
+                {
+                    "summary": planted["childTaskSummary"],
+                    "text": planted["childTaskText"],
+                    "evidenceIds": ["jira:DEMO-1"],
+                },
+            ],
+            excludedEvidence=[
+                {"evidenceId": "jira:DEMO-2", "reason": planted["excludedReason"]},
+            ],
+        )
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "안전한 근거"},
+                {"evidenceId": "jira:DEMO-2", "content": "관련 없는 근거"},
+            ],
+        )
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+            with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
+                result = generate_work_brief(request)
+
+        serialized = json.dumps(result, ensure_ascii=False)
+        for raw_value in planted.values():
+            self.assertNotIn(raw_value, serialized)
+        self.assertTrue(
+            any("[PHONE_" in text for text in all_strings(result)),
+            "expected masked placeholders in the model output",
+        )
+
+    def test_rejects_a_v1_response_after_the_schema_v2_rollout(self) -> None:
+        legacy_output = {
+            "title": "배포 준비",
             "summary": "완료",
             "keyPoints": ["검증 완료"],
             "risks": ["없음"],
@@ -201,10 +283,151 @@ class WorkBriefGenerationTests(unittest.TestCase):
             "evidenceIds": ["jira:DEMO-1"],
         }
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
-            with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
-                result = generate_work_brief(self.request("user@example.com의 요구사항"))
+            with patch(
+                "work_brief.service.requests.post",
+                return_value=valid_model_response(legacy_output),
+            ):
+                with self.assertRaises(WorkBriefError):
+                    generate_work_brief(self.request("safe evidence"))
 
-        self.assertEqual(result["title"], "[EMAIL_1]에 공유")
+    def test_rejects_items_without_their_own_evidence(self) -> None:
+        invalid_outputs = {
+            "empty item citation": model_output(
+                acceptanceCriteria=[{"text": "검증 결과가 기록된다", "evidenceIds": []}],
+            ),
+            "unrequested item citation": model_output(
+                risks=[citation("일정 확인", ["confluence:unrequested"])],
+            ),
+            "duplicate item citation": model_output(
+                nextSteps=[citation("공유", ["jira:DEMO-1", "jira:DEMO-1"])],
+            ),
+            "blank item text": model_output(keyPoints=[citation("   ")]),
+            "wrong schema version": model_output(schemaVersion=1),
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label):
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+                    with patch(
+                        "work_brief.service.requests.post",
+                        return_value=valid_model_response(output),
+                    ):
+                        with self.assertRaises(WorkBriefError):
+                            generate_work_brief(self.request("safe evidence"))
+
+    def test_rejects_evidence_that_is_both_cited_and_excluded(self) -> None:
+        output = model_output(
+            excludedEvidence=[
+                {"evidenceId": "jira:DEMO-1", "reason": "본문이 요구사항과 무관합니다"},
+            ],
+        )
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+            with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
+                with self.assertRaises(WorkBriefError):
+                    generate_work_brief(self.request("safe evidence"))
+
+    def test_rejects_unaccounted_evidence_and_copied_full_citation_sets(self) -> None:
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "요구사항 A"},
+                {"evidenceId": "jira:DEMO-2", "content": "요구사항 B"},
+            ],
+        )
+        all_evidence = ["jira:DEMO-1", "jira:DEMO-2"]
+        invalid_outputs = {
+            "unaccounted evidence": model_output(),
+            "copied full citation sets": model_output(
+                title=citation("배포 준비", all_evidence),
+                summary=citation("완료", all_evidence),
+                keyPoints=[citation("검증 완료", all_evidence)],
+                acceptanceCriteria=[citation("검증 결과가 기록된다", all_evidence)],
+                risks=[citation("일정 확인", all_evidence)],
+                nextSteps=[citation("테스트 실행", all_evidence)],
+                childTasks=[
+                    {
+                        "summary": "검증 기록 추가",
+                        "text": "검증 결과를 이슈에 남긴다",
+                        "evidenceIds": all_evidence,
+                    },
+                ],
+            ),
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label=label):
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+                    with patch(
+                        "work_brief.service.requests.post",
+                        return_value=valid_model_response(output),
+                    ):
+                        with self.assertRaises(WorkBriefError):
+                            generate_work_brief(request)
+
+    def test_rejects_requirements_without_linked_acceptance_and_child_task(self) -> None:
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "요구사항 A"},
+                {"evidenceId": "jira:DEMO-2", "content": "요구사항 B"},
+            ],
+        )
+        invalid_outputs = {
+            "second requirement is uncovered": model_output(
+                keyPoints=[
+                    citation("요구사항 A", ["jira:DEMO-1"]),
+                    citation("요구사항 B", ["jira:DEMO-2"]),
+                ],
+                acceptanceCriteria=[citation("A 검증", ["jira:DEMO-1"])],
+                childTasks=[
+                    {
+                        "summary": "A 작업",
+                        "text": "A를 수행한다",
+                        "evidenceIds": ["jira:DEMO-1"],
+                    },
+                ],
+            ),
+            "empty acceptance criteria": model_output(acceptanceCriteria=[]),
+            "empty child tasks": model_output(childTasks=[]),
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label=label):
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+                    with patch(
+                        "work_brief.service.requests.post",
+                        return_value=valid_model_response(output),
+                    ):
+                        with self.assertRaises(WorkBriefError):
+                            generate_work_brief(request)
+
+    def test_keeps_per_item_citations_instead_of_one_shared_evidence_list(self) -> None:
+        output = model_output(
+            title=citation("배포 준비", ["jira:DEMO-1"]),
+            keyPoints=[citation("검증 완료", ["jira:DEMO-2"])],
+            acceptanceCriteria=[citation("검증 결과가 기록된다", ["jira:DEMO-2"])],
+            childTasks=[
+                {
+                    "summary": "검증 기록 추가",
+                    "text": "검증 결과를 이슈에 남긴다",
+                    "evidenceIds": ["jira:DEMO-2"],
+                },
+            ],
+        )
+        request = WorkBriefGenerateRequest(
+            instruction="아래 근거로 실행 브리프를 만드세요.",
+            evidence=[
+                {"evidenceId": "jira:DEMO-1", "content": "이슈 설명"},
+                {"evidenceId": "jira:DEMO-2", "content": "검증 요구사항"},
+            ],
+        )
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
+            with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
+                result = generate_work_brief(request)
+
+        self.assertEqual(result["title"]["evidenceIds"], ["jira:DEMO-1"])
+        self.assertEqual(result["keyPoints"][0]["evidenceIds"], ["jira:DEMO-2"])
+        self.assertNotEqual(
+            result["title"]["evidenceIds"],
+            result["keyPoints"][0]["evidenceIds"],
+        )
 
     def test_sanitizes_user_edited_text_without_an_openai_request(self) -> None:
         with patch("work_brief.service.requests.post") as post:
@@ -216,14 +439,7 @@ class WorkBriefGenerationTests(unittest.TestCase):
         post.assert_not_called()
 
     def test_rejects_unverified_model_evidence_ids(self) -> None:
-        output = {
-            "title": "배포 준비",
-            "summary": "완료",
-            "keyPoints": ["검증 완료"],
-            "risks": ["없음"],
-            "nextSteps": ["공유"],
-            "evidenceIds": ["confluence:unrequested"],
-        }
+        output = model_output(title=citation("배포 준비", ["confluence:unrequested"]))
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False):
             with patch("work_brief.service.requests.post", return_value=valid_model_response(output)):
                 with self.assertRaises(WorkBriefError):

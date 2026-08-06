@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import type { NormalizedEvidence } from '../work-items/evidence/evidence-normalizer';
 import {
   ConfluenceWorkItemService,
   type ConfluenceDraftContext,
@@ -36,6 +38,7 @@ import { TransientEvidenceFragmentsService } from './transient-evidence-fragment
 import { lockBriefDraft } from './brief-draft-lock';
 import {
   WorkBriefAiClientService,
+  type WorkBriefCitation,
   type WorkBriefOutput,
 } from './work-brief-ai-client.service';
 import { WorkBriefDraft } from './entities/work-brief-draft.entity';
@@ -106,12 +109,7 @@ export class WorkBriefsService {
       })),
     );
     const content = this.contentFromAi(output);
-    const evidence: StoredBriefEvidence[] = selectedEvidence.map((item) => ({
-      ...item.evidence,
-      aiStatus: output.evidenceIds.includes(item.evidence.id)
-        ? 'included'
-        : 'excluded',
-    }));
+    const evidence = this.evidenceFromAi(selectedEvidence, output, content);
 
     const draft = this.draftsRepository.create({
       profileId: context.profileId as string,
@@ -416,6 +414,7 @@ export class WorkBriefsService {
             ? stored.excerptLength
             : current.excerptLength,
         aiStatus: stored.aiStatus,
+        aiExclusionReason: stored.aiExclusionReason,
       };
     });
     const changed =
@@ -571,20 +570,58 @@ export class WorkBriefsService {
   }
 
   private contentFromAi(output: WorkBriefOutput): BriefContent {
-    const citation = (text: string): EvidenceCitation => ({
-      text,
-      evidenceIds: [...output.evidenceIds],
+    const citation = (item: WorkBriefCitation): EvidenceCitation => ({
+      text: item.text,
+      // Per item, as the model returned it.  Copying the full evidence list
+      // onto every item would make the readiness coverage check meaningless.
+      evidenceIds: [...item.evidenceIds],
     });
 
     return {
       title: citation(output.title),
       summary: citation(output.summary),
       requirements: output.keyPoints.map(citation),
-      acceptanceCriteria: [],
+      acceptanceCriteria: output.acceptanceCriteria.map(citation),
       risks: output.risks.map(citation),
       nextSteps: output.nextSteps.map(citation),
-      childTasks: [],
+      childTasks: output.childTasks.map((item) => ({
+        ...citation(item),
+        // The server owns the identifier, and child task creation stays an
+        // explicit last approval step: the model cannot pre-select anything.
+        clientTaskId: randomUUID(),
+        summary: item.summary,
+        selected: false,
+      })),
     };
+  }
+
+  /**
+   * Evidence the model cited anywhere is `included`; everything else is
+   * `excluded`, with the model's reason attached when it gave one.
+   */
+  private evidenceFromAi(
+    selectedEvidence: readonly { evidence: NormalizedEvidence }[],
+    output: WorkBriefOutput,
+    content: BriefContent,
+  ): StoredBriefEvidence[] {
+    const citedEvidenceIds = new Set(
+      this.allCitations(content).flatMap((item) => item.evidenceIds),
+    );
+    const exclusionReasons = new Map(
+      output.excludedEvidence.map((item) => [item.evidenceId, item.reason]),
+    );
+
+    return selectedEvidence.map((item) => {
+      const included = citedEvidenceIds.has(item.evidence.id);
+
+      return {
+        ...item.evidence,
+        aiStatus: included ? 'included' : 'excluded',
+        aiExclusionReason: included
+          ? undefined
+          : exclusionReasons.get(item.evidence.id),
+      };
+    });
   }
 
   private async maskContent(content: BriefContent): Promise<BriefContent> {
@@ -594,6 +631,9 @@ export class WorkBriefsService {
       ...content.childTasks.map((item) => item.summary),
     ];
     const maskedValues = await this.aiClient.sanitize(values);
+    // Child task summaries are appended after every citation text, so they are
+    // addressed by offset instead of the running citation index.
+    const summaryOffset = citations.length;
     let index = 0;
     const replaceCitation = <T extends EvidenceCitation>(citation: T): T => ({
       ...citation,
@@ -607,9 +647,9 @@ export class WorkBriefsService {
       acceptanceCriteria: content.acceptanceCriteria.map(replaceCitation),
       risks: content.risks.map(replaceCitation),
       nextSteps: content.nextSteps.map(replaceCitation),
-      childTasks: content.childTasks.map((childTask) => ({
+      childTasks: content.childTasks.map((childTask, taskIndex) => ({
         ...replaceCitation(childTask),
-        summary: maskedValues[index++],
+        summary: maskedValues[summaryOffset + taskIndex],
       })),
     };
   }
