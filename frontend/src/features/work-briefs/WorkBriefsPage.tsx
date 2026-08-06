@@ -9,12 +9,9 @@ import {
 } from "@tabler/icons-react";
 import {
   Alert,
-  Badge,
   Button,
   Checkbox,
   IconButton,
-  StatusIndicator,
-  TextArea,
 } from "../../design-system/components";
 import type {
   BriefPublication,
@@ -41,6 +38,19 @@ import {
   loadConfluenceSpaces,
   shouldLoadConfluenceSpaces,
 } from "./confluence-space-loading";
+import {
+  connectionsNeedingAction,
+  toConnectionSnapshot,
+  type ConnectionSnapshot,
+} from "./connection-snapshot";
+import { ConnectionSummary } from "./ConnectionSummary";
+import { EvidenceWorkspaceGroup } from "./EvidenceWorkspaceGroup";
+import { publicationPhaseLabel } from "./publication-copy";
+import { ReadinessPanel } from "./ReadinessPanel";
+import {
+  RegenerateDialog,
+  type RegeneratePrompt,
+} from "./RegenerateDialog";
 import { citationAnchorId } from "./citations/citation-anchors";
 import { ChildTaskEditor } from "./citations/ChildTaskEditor";
 import { CitationEditor } from "./citations/CitationEditor";
@@ -51,7 +61,6 @@ import {
   canUndoRegeneration,
   emptySectionNotice,
   regenerateFailureMessage,
-  REGENERATE_CONFIRM_NOTE,
   REGENERATE_EVIDENCE_CHANGED_NOTE,
   REGENERATE_UNDO_NOTE,
 } from "./brief-regeneration-copy";
@@ -65,12 +74,9 @@ import {
   withConnectionStatusRefresh,
 } from "./work-brief-guards";
 import {
-  connectionTone,
   providerLabel,
   statusCopy,
-  type ConnectionStatus,
   type IntegrationConnection,
-  type IntegrationProvider,
 } from "../integrations/connection-status";
 import "./work-briefs.css";
 
@@ -96,12 +102,6 @@ type WorkBriefsPageProps = {
 
 type HttpError = Error & { status?: number; code?: string };
 
-/** The open "다시 생성" dialog: what will be sent once the user confirms. */
-type RegeneratePrompt = {
-  instruction: string;
-  selectedEvidenceIds: string[];
-};
-
 // Outcomes are toned so a completed action never renders as a warning.
 // `warning` asks the user to do something first; `danger` reports a failure.
 export type Notice = {
@@ -109,33 +109,11 @@ export type Notice = {
   text: string;
 } | null;
 
-type ConnectionSnapshot =
-  | { state: "loading" }
-  | { state: "unavailable" }
-  | { state: "ready"; byProvider: Record<IntegrationProvider, ConnectionStatus> };
-
-const PROVIDER_ORDER: IntegrationProvider[] = ["jira", "confluence"];
-
-function toConnectionSnapshot(
-  loaded: IntegrationConnection[],
-): ConnectionSnapshot {
-  if (!Array.isArray(loaded)) return { state: "unavailable" };
-  const statusOf = (provider: IntegrationProvider): ConnectionStatus =>
-    loaded.find((connection) => connection.provider === provider)?.status ??
-    "authorization_required";
-  return {
-    state: "ready",
-    byProvider: { jira: statusOf("jira"), confluence: statusOf("confluence") },
-  };
-}
-
-function connectionsNeedingAction(
-  snapshot: ConnectionSnapshot,
-): IntegrationProvider[] {
-  if (snapshot.state !== "ready") return [];
-  return PROVIDER_ORDER.filter(
-    (provider) => snapshot.byProvider[provider] !== "connected",
-  );
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 const blockReason = (code: BriefDraft["blockers"][number]["code"]) =>
@@ -1333,341 +1311,6 @@ export function WorkBriefsPage({
           )}
         </section>
       )}
-    </section>
-  );
-}
-
-function ConnectionSummary({
-  snapshot,
-  onOpenIntegrations,
-}: {
-  snapshot: ConnectionSnapshot;
-  onOpenIntegrations?: () => void;
-}) {
-  return (
-    <section className="work-brief-connection">
-      <h3 className="sr-only">Jira · Confluence 연결 상태</h3>
-      {snapshot.state === "ready" ? (
-        <ul className="work-brief-connection-list">
-          {PROVIDER_ORDER.map((provider) => {
-            const status = snapshot.byProvider[provider];
-            return (
-              <li key={provider}>
-                <StatusIndicator tone={connectionTone(status)}>
-                  {providerLabel[provider]} · {statusCopy[status].label}
-                </StatusIndicator>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <StatusIndicator tone="neutral">
-          {snapshot.state === "loading"
-            ? "연결 상태 확인 중"
-            : "연결 상태를 확인할 수 없습니다"}
-        </StatusIndicator>
-      )}
-      <button type="button" onClick={onOpenIntegrations}>
-        연동 설정
-      </button>
-    </section>
-  );
-}
-
-function EvidenceWorkspaceGroup({
-  provider,
-  evidence,
-  selectedEvidenceIds,
-  onToggle,
-}: {
-  provider: "jira" | "confluence";
-  evidence: WorkEvidence[];
-  selectedEvidenceIds: string[];
-  onToggle: (id: string) => void;
-}) {
-  const label = provider === "jira" ? "Jira" : "Confluence";
-  return (
-    <section className="work-brief-evidence-group" aria-label={`${label} 근거`}>
-      <header>
-        <span className={`work-brief-source-icon work-brief-source-icon--${provider}`}>
-          {provider === "jira" ? <IconBrandJira size={16} /> : <IconStack2 size={16} />}
-        </span>
-        <strong>{label}</strong>
-        <span>{evidence.length}</span>
-      </header>
-      <ul>
-        {evidence.map((item) => (
-          <li key={item.id} className={selectedEvidenceIds.includes(item.id) ? "is-selected" : ""}>
-            <Checkbox checked={selectedEvidenceIds.includes(item.id)} onChange={() => onToggle(item.id)} label={<span className="sr-only">{item.title} 선택</span>} />
-            <div className="work-brief-evidence-copy">
-              <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
-              <span>{item.location ?? (provider === "jira" ? `프로젝트 / ${item.sourceId}` : `문서 / ${item.sourceId}`)}</span>
-              <div>
-                {(item.tags ?? (provider === "jira" ? ["이슈"] : ["문서"])).slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}
-                {item.recommendationReasons?.length ? (
-                  <em className="work-brief-recommendation">
-                    추천 · {item.recommendationReasons.map(recommendationLabel).join(", ")}
-                  </em>
-                ) : null}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function createIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function publicationPhaseLabel(phase: PublicationPhase): string {
-  switch (phase) {
-    case "confluence":
-      return "Confluence 페이지";
-    case "jira":
-      return "Jira 링크와 댓글";
-    case "child_tasks":
-      return "Jira 하위 작업";
-  }
-}
-
-function recommendationLabel(
-  reason: NonNullable<WorkEvidence["recommendationReasons"]>[number],
-): string {
-  switch (reason) {
-    case "source_jira":
-      return "기준 이슈";
-    case "linked_jira":
-      return "연결 이슈";
-    case "jira_issue":
-      return "Jira 키";
-    case "jira_summary":
-      return "Jira 요약";
-  }
-}
-
-const readinessStatusLabel: Record<ReadinessAssessment["status"], string> = {
-  READY: "게시 준비 완료",
-  NEEDS_ATTENTION: "검토 필요",
-  BLOCKED: "게시 차단",
-  ACCESS_LIMITED: "권한 확인 필요",
-};
-
-const readinessTone = (
-  status: ReadinessAssessment["status"],
-): "success" | "warning" | "danger" =>
-  status === "READY" ? "success" : status === "BLOCKED" ? "danger" : "warning";
-
-// Short category shown in place of the raw finding code. The code itself stays
-// reachable through the row's `title` for support enquiries.
-const readinessFindingTitle: Record<
-  ReadinessAssessment["findings"][number]["code"],
-  string
-> = {
-  COVERAGE_MISSING: "근거 연결",
-  CREATE_FIELD_MISSING: "Jira 필수 field",
-  CREATE_METADATA_ACCESS_LIMITED: "권한 확인",
-  CREATE_METADATA_UNAVAILABLE: "Jira metadata",
-  UNRESOLVED_BLOCKER: "미해결 blocker",
-  ACCESS_LIMITED_DEPENDENCY: "권한 확인",
-  FRESHNESS_REVIEW_REQUIRED: "근거 최신성",
-  ACCESS_CHANGED: "접근 권한 변경",
-  PROFILE_CHANGED: "연동 프로필",
-};
-
-function readinessFindingDescription(
-  finding: ReadinessAssessment["findings"][number],
-): string {
-  switch (finding.code) {
-    case "COVERAGE_MISSING": {
-      const missing = (finding.missing ?? [])
-        .map((item) =>
-          item === "child_task" ? "선택한 하위 작업" : "검증 근거",
-        )
-        .join(", ");
-      return `요구사항 ${(finding.requirementIndex ?? 0) + 1}: ${missing} 연결이 필요합니다.`;
-    }
-    case "CREATE_FIELD_MISSING":
-      return `Jira 생성 필수 field ${finding.fieldId ?? ""}의 템플릿 값을 설정하세요.`;
-    case "CREATE_METADATA_ACCESS_LIMITED":
-      return "현재 사용자 권한으로 Jira 생성 필수 field를 확인할 수 없습니다.";
-    case "CREATE_METADATA_UNAVAILABLE":
-      return "Jira 생성 metadata를 확인할 수 없습니다.";
-    case "UNRESOLVED_BLOCKER":
-      return "해결되지 않은 Jira blocker가 있습니다.";
-    case "ACCESS_LIMITED_DEPENDENCY":
-      return "연결된 blocker의 접근 권한을 확인할 수 없습니다.";
-    case "FRESHNESS_REVIEW_REQUIRED":
-      return "근거 버전이 변경되었거나 다시 검토해야 합니다.";
-    case "ACCESS_CHANGED":
-      return "원본 또는 선택 근거 접근 권한이 변경되었습니다.";
-    case "PROFILE_CHANGED":
-      return "초안 생성에 사용한 연동 프로필이 더 이상 활성 상태가 아닙니다.";
-  }
-}
-
-function ReadinessPanel({
-  assessment,
-  stale,
-}: {
-  assessment: ReadinessAssessment;
-  stale: boolean;
-}) {
-  return (
-    <section
-      className={`work-brief-readiness ds-card readiness-${stale ? "needs_attention" : assessment.status.toLowerCase()}`}
-      aria-label="통합 준비성 점검"
-    >
-      <header>
-        <div>
-          <p className="eyebrow">읽기 전용 점검</p>
-          <h3>
-            {stale ? "저장 후 다시 점검 필요" : readinessStatusLabel[assessment.status]}
-          </h3>
-        </div>
-        {/* A stale assessment describes content the server has not seen. */}
-        <Badge
-          tone={
-            stale
-              ? "warning"
-              : assessment.publishAllowed
-                ? "success"
-                : readinessTone(assessment.status)
-          }
-        >
-          {stale
-            ? "재점검 필요"
-            : assessment.publishAllowed
-              ? "게시 가능"
-              : "게시 차단"}
-        </Badge>
-      </header>
-      {stale && (
-        <Alert tone="warning" className="work-brief-blocker">
-          편집한 내용은 아직 점검하지 않았습니다. 초안을 저장하고 준비성 점검을
-          다시 실행하세요.
-        </Alert>
-      )}
-      {assessment.findings.length === 0 ? (
-        <p>
-          요구사항, 하위 작업, 검증 근거 및 Jira 생성 필수 field를 확인했습니다.
-        </p>
-      ) : (
-        <ul>
-          {assessment.findings.map((finding, index) => (
-            <li
-              key={`${finding.code}-${finding.fieldId ?? index}`}
-              title={finding.code}
-            >
-              <strong>{readinessFindingTitle[finding.code]}</strong>
-              <span>{readinessFindingDescription(finding)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {assessment.blockers.length > 0 && (
-        <ul className="work-brief-readiness-blockers">
-          {assessment.blockers.map((blocker, index) =>
-            blocker.kind === "visible_blocker" ? (
-              <li key={blocker.issueKey}>
-                <a href={blocker.url} target="_blank" rel="noreferrer">
-                  {blocker.issueKey}
-                </a>
-                {blocker.crossProject && " · 다른 프로젝트"}
-              </li>
-            ) : (
-              <li key={`access-limited-${index}`}>
-                연결된 blocker의 제목과 식별자는 권한 확인 전 표시하지 않습니다.
-              </li>
-            ),
-          )}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/**
- * The "다시 생성" confirmation.
- *
- * Regeneration overwrites hand-edited text, so the instruction, the evidence
- * selection and the overwrite warning are all in front of the user before the
- * request goes out.
- */
-function RegenerateDialog({
-  prompt,
-  evidence,
-  busy,
-  onChange,
-  onCancel,
-  onConfirm,
-}: {
-  prompt: RegeneratePrompt;
-  evidence: (WorkEvidence & { aiStatus?: "included" | "excluded" })[];
-  busy: boolean;
-  onChange: (prompt: RegeneratePrompt) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  function toggleEvidence(evidenceId: string) {
-    onChange({
-      ...prompt,
-      selectedEvidenceIds: prompt.selectedEvidenceIds.includes(evidenceId)
-        ? prompt.selectedEvidenceIds.filter((id) => id !== evidenceId)
-        : [...prompt.selectedEvidenceIds, evidenceId],
-    });
-  }
-
-  return (
-    <section
-      className="work-brief-regenerate ds-card"
-      role="dialog"
-      aria-label="브리프 다시 생성"
-    >
-      <h3>브리프 다시 생성</h3>
-      <Alert tone="warning" role="alert">
-        {REGENERATE_CONFIRM_NOTE}
-      </Alert>
-      <label>
-        생성 지시문
-        <TextArea
-          value={prompt.instruction}
-          rows={3}
-          onChange={(event) =>
-            onChange({ ...prompt, instruction: event.target.value })
-          }
-        />
-      </label>
-      <fieldset className="work-brief-regenerate-evidence">
-        <legend>사용할 근거 ({prompt.selectedEvidenceIds.length}건)</legend>
-        <EvidenceList
-          evidence={evidence}
-          selectedEvidenceIds={prompt.selectedEvidenceIds}
-          onToggle={toggleEvidence}
-        />
-      </fieldset>
-      <div className="button-row">
-        <Button
-          type="button"
-          onClick={onConfirm}
-          disabled={busy || prompt.instruction.trim().length === 0}
-        >
-          {busy ? "생성 중" : "덮어쓰고 다시 생성"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onCancel}
-          disabled={busy}
-        >
-          취소
-        </Button>
-      </div>
     </section>
   );
 }

@@ -352,6 +352,51 @@ export function evidenceUsage(content: BriefContent): Map<string, EvidenceUsage>
 - `popover` 미지원 환경(기능 검사를 강제로 false로 둔 테스트)에서 근거 편집이 여전히 가능하다.
 - 5-A 이후 `WorkBriefsPage.tsx`가 1,500행 아래로 내려간다.
 
+### 3.8 구현 결과 (2026-08-06)
+
+5-A~5-F에 5-G를 더해 모두 넣었다. 계획과 다르게 간 것과, 아직 열려 있는 것을 적는다.
+
+| 완료 기준 | 결과 |
+| --- | --- |
+| 닫힌 화면에 체크박스 0개 | **성립.** `CitationEditor`가 팝오버 밖에 렌더하는 것은 칩과 트리거뿐이다 |
+| 키보드 전 구간 + 포커스 복귀 | **구현했으나 자동 검증은 없다.** 프런트 테스트 러너가 `node --test`(DOM 없음)라 React 렌더 테스트를 붙일 수 없다. 위치 계산·지원 검사는 `popover-position.spec.ts`가 덮고, 포커스 시나리오는 `/dev/briefs-preview`에서 손으로 확인해야 한다 |
+| 스크린리더가 제목을 읽는다 | **성립.** 칩의 `aria-label`이 근거 제목이고, 번호는 시각 텍스트로만 남는다 |
+| excluded 기본 숨김 + 사유와 함께 선택 | **성립.** 팝오버 안 `<details>`, 레이블에 건수 |
+| 연결 0개 → "근거 없음" 칩 | **성립.** 프리뷰 픽스처의 완료 기준 3번이 이 상태다 |
+| 미사용 근거 → "사용되지 않음" | **성립.** 픽스처의 `jira:PROJ-238`이 이 상태다 |
+| 저장·게시 경로에 `E\d+` 부재 | **성립.** `evidence-refs.boundary.spec.ts`가 페이로드를 만드는 모듈이 `evidence-refs`를 import하지 못하게 막는다 |
+| `popover` 미지원 환경에서 편집 가능 | **성립.** `Popover`의 `supported` prop으로 검사 결과를 주입할 수 있고, 미지원이면 같은 패널이 흐름 안에 펼쳐진 채 렌더된다 |
+| 5-A 이후 `WorkBriefsPage.tsx` < 1,500행 | **성립: 1,316행.** 다만 5-A만으로는 1,666행이었고, 계획이 열거한 다섯 개는 인용 컴포넌트뿐이라 그 이상 줄일 수 없었다. 아래 5-G에서 나머지를 분리해 기준을 채웠다 |
+
+**5-G — 남은 분리 (계획에 없던 PR).** 5-A는 [R27](#42-위험-등록부-5단계) 때문에 인용 컴포넌트만
+옮기는 PR이었고, 문서가 "개선은 5-D 이후 별도 PR"로 허용한 자리가 여기다. 동작 변경은 0이다.
+
+| 옮긴 것 | 새 위치 | 왜 여기인가 |
+| --- | --- | --- |
+| `ConnectionSummary` | `ConnectionSummary.tsx` | — |
+| `ConnectionSnapshot`·`PROVIDER_ORDER`·`toConnectionSnapshot`·`connectionsNeedingAction` | `connection-snapshot.ts` | 순수 함수라 spec을 붙였다. "응답이 배열이 아니면 unavailable"과 "loading 중에는 아무것도 요구하지 않는다"는 지금까지 검증된 적이 없다 |
+| `EvidenceWorkspaceGroup` + `recommendationLabel` | `EvidenceWorkspaceGroup.tsx` | `recommendationLabel`은 이 컴포넌트에서만 쓴다 |
+| `ReadinessPanel` | `ReadinessPanel.tsx` | — |
+| 준비성 문구 4종 | `readiness-copy.ts` | 기존 `*-copy.ts` 관례를 따른다 |
+| `RegenerateDialog` + `RegeneratePrompt` | `RegenerateDialog.tsx` | 타입이 다이얼로그의 계약이라 같이 옮겼다 |
+| `publicationPhaseLabel` | `publication-copy.ts` | 이미 있던 게시 문구 모듈이다. 새 파일을 만들 이유가 없다 |
+
+`createIdempotencyKey`는 페이지에 남겼다 — 게시 요청을 만드는 쪽의 로직이고, 문구도 컴포넌트도
+아니라 옮길 곳이 마땅치 않다.
+
+계획에 없던 추가는 둘이다.
+
+- **`citations/citation-anchors.ts`** — 칩 → 근거 행, 사용처 → 항목의 양방향 스크롤은
+  컴포넌트 경계를 넘으므로 ref가 아니라 DOM id로 이었다. 모르는 섹션에는 `null`을 돌려
+  링크를 만들지 않는다(잘못된 곳으로 보내는 것보다 낫다).
+- **`Popover`의 `extraTrigger`** — `+N` 칩도 같은 패널을 열어야 하는데([3.3](#33-칩)),
+  버튼을 중첩할 수 없어 두 번째 트리거에 배선만 넘기는 구멍을 뒀다.
+  네이티브 `popovertarget`을 그대로 쓰므로 여는 주체는 여전히 브라우저다.
+
+**남은 일: `/dev/briefs-preview` 시각 확인.** 픽스처는 근거 15건(excluded 3, 미사용 1) ×
+요구사항 10개로 갱신됐고, 요구사항 10번은 링크 7개라 `+N` 접힘과 excluded 칩 우선 정렬이
+한 행에서 같이 보인다. 이 화면과 [design-qa.md](../design-qa.md) 갱신은 브라우저가 필요하다.
+
 ---
 
 ## 4. 위험 등록부
