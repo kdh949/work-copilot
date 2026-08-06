@@ -13,10 +13,8 @@ export type WorkEvidence = {
   accessStatus: "accessible";
   dlpStatus: "not_evaluated";
   aiStatus?: "included" | "excluded";
-  updatedAt?: string;
   location?: string;
   tags?: string[];
-  state?: "current" | "review" | "restricted";
   recommendationReasons?: Array<
     "source_jira" | "linked_jira" | "jira_issue" | "jira_summary"
   >;

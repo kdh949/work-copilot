@@ -9,10 +9,14 @@ import type {
   PublicationPreviews,
   ReadinessAssessment,
 } from "./work-briefs.types";
+import { canUsePublication } from "./work-brief-guards";
+import { stepErrorDescription, stepStatusLabel } from "./publication-copy";
 
 type PublicationPanelProps = {
   draft: BriefDraft;
   readiness: ReadinessAssessment;
+  /** True when the draft was edited after the assessment ran. */
+  readinessStale: boolean;
   publication: BriefPublication | null;
   previews: PublicationPreviews;
   approvals: Record<PublicationPhase, boolean>;
@@ -42,6 +46,7 @@ const publicationStatusLabel: Record<BriefPublication["status"], string> = {
 export function PublicationPanel({
   draft,
   readiness,
+  readinessStale,
   publication,
   previews,
   approvals,
@@ -51,8 +56,11 @@ export function PublicationPanel({
   onPrepare,
   onExecute,
 }: PublicationPanelProps) {
-  const publicationAllowed =
-    readiness.publishAllowed && draft.freshnessStatus === "current";
+  const publicationAllowed = canUsePublication(
+    draft,
+    readiness,
+    readinessStale,
+  );
   const phase = nextPhase(publication);
   const preview = phase ? previews[phase] : undefined;
   const status = publication?.status;
@@ -108,7 +116,9 @@ export function PublicationPanel({
 
       {!publicationAllowed ? (
         <Alert tone="warning" className="work-brief-blocker">
-          준비성 점검과 근거 freshness가 통과하기 전에는 게시할 수 없습니다.
+          {readinessStale
+            ? "편집한 내용을 저장하고 준비성 점검을 다시 실행해야 게시할 수 있습니다."
+            : "준비성 점검과 근거 freshness가 통과하기 전에는 게시할 수 없습니다."}
         </Alert>
       ) : phase ? (
         <PublicationPhaseApproval
@@ -355,16 +365,72 @@ function ChildTasksPreview({
   );
 }
 
+/**
+ * Progress-only view for steps that have already run. A saved edit can make
+ * this record a prior-version history item, but hiding it would make an
+ * externally published page look as if it had disappeared.
+ */
+export function PublicationProgress({
+  publication,
+  currentDraftVersion,
+}: {
+  publication: BriefPublication;
+  currentDraftVersion: number;
+}) {
+  const isCurrentDraft = publication.draftVersion === currentDraftVersion;
+
+  return (
+    <section className="work-brief-publication ds-card" aria-label="게시 진행 상황">
+      <header>
+        <div>
+          <p className="eyebrow">이미 실행된 단계</p>
+          <h3>{publicationStatusLabel[publication.status]}</h3>
+        </div>
+        <Badge tone={publicationTone(publication.status)}>
+          {publication.executionMode === "real" ? "실제 어댑터" : "mock 모드"}
+        </Badge>
+      </header>
+
+      {publication.confluencePage?.url ? (
+        <p className="work-brief-publication-link">
+          Confluence 페이지:{" "}
+          <a href={publication.confluencePage.url} target="_blank" rel="noreferrer">
+            열기
+          </a>
+          {publication.confluencePage.version
+            ? ` · v${publication.confluencePage.version}`
+            : ""}
+        </p>
+      ) : null}
+
+      {publication.steps.length ? (
+        <PublicationSteps publication={publication} />
+      ) : null}
+
+      <Alert tone="warning" className="work-brief-blocker">
+        {isCurrentDraft
+          ? "현재 초안 버전의 게시 이력입니다. 남은 단계를 진행하려면 준비성 점검을 다시 실행하세요."
+          : `이 기록은 초안 v${publication.draftVersion}의 게시 이력입니다. 현재 초안 v${currentDraftVersion}에서는 남은 단계를 이어서 진행할 수 없습니다. 준비성 점검 후 Confluence 게시부터 새 버전으로 시작하세요.`}
+      </Alert>
+    </section>
+  );
+}
+
 function PublicationSteps({ publication }: { publication: BriefPublication }) {
   return (
     <ul className="work-brief-publication-steps">
       {publication.steps.map((step) => (
-        <li key={step.key}>
+        <li key={step.key} title={step.errorCode ?? undefined}>
           <strong>{stepLabel(step.key)}</strong>
           <Badge tone={stepTone(step.status)}>
-            {step.status} · 시도 {step.attempts}회
+            {stepStatusLabel[step.status]}
+            {step.attempts > 1 ? ` · 시도 ${step.attempts}회` : ""}
           </Badge>
-          {step.errorCode ? <code>{step.errorCode}</code> : null}
+          {step.errorCode ? (
+            <span className="work-brief-step-error">
+              {stepErrorDescription[step.errorCode]}
+            </span>
+          ) : null}
         </li>
       ))}
     </ul>

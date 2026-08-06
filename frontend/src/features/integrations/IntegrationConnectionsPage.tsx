@@ -6,19 +6,13 @@ import {
   StatusIndicator,
 } from "../../design-system/components";
 import type { ApiRequest } from "../admin/integration-profile.types";
+import {
+  connectionTone,
+  statusCopy,
+  type IntegrationConnection,
+  type IntegrationProvider,
+} from "./connection-status";
 import "./integration-connections.css";
-
-type IntegrationProvider = "jira" | "confluence";
-type ConnectionStatus =
-  | "connected"
-  | "expired"
-  | "reauthorization_required"
-  | "authorization_required";
-
-type IntegrationConnection = {
-  provider: IntegrationProvider;
-  status: ConnectionStatus;
-};
 
 type AuthorizationResponse = {
   authorizationUrl: string;
@@ -44,25 +38,6 @@ const providers: Array<{
     description: "허용된 space의 페이지 근거만 읽습니다.",
   },
 ];
-
-const statusCopy: Record<ConnectionStatus, { label: string; detail: string }> = {
-  connected: {
-    label: "연결됨",
-    detail: "현재 사용자 권한으로 필요한 읽기 전용 요청을 수행할 수 있습니다.",
-  },
-  expired: {
-    label: "만료됨",
-    detail: "다시 연결하면 사용자 OAuth 권한을 갱신할 수 있습니다.",
-  },
-  reauthorization_required: {
-    label: "재연결 필요",
-    detail: "토큰을 갱신할 수 없습니다. 현재 사용자로 다시 승인하세요.",
-  },
-  authorization_required: {
-    label: "연결 필요",
-    detail: "아직 이 서비스에 대한 사용자 OAuth 권한이 없습니다.",
-  },
-};
 
 export function IntegrationConnectionsPage({
   request,
@@ -188,10 +163,8 @@ export function IntegrationConnectionsPage({
                 <p>{provider.description}</p>
               </div>
               <div className="integration-connection-status">
-                <Badge tone={isConnected ? "success" : "warning"}>
-                  {copy.label}
-                </Badge>
-                <StatusIndicator tone={isConnected ? "success" : "warning"}>
+                <Badge tone={connectionTone(status)}>{copy.label}</Badge>
+                <StatusIndicator tone={connectionTone(status)}>
                   {isConnected ? "연결 상태 정상" : "사용자 조치 필요"}
                 </StatusIndicator>
                 <p>{copy.detail}</p>
