@@ -33,6 +33,16 @@ import type {
 } from "./work-briefs.types";
 import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
+import {
+  canRegenerateDraft,
+  canUndoRegeneration,
+  emptySectionNotice,
+  excludedEvidenceReason,
+  regenerateFailureMessage,
+  REGENERATE_CONFIRM_NOTE,
+  REGENERATE_EVIDENCE_CHANGED_NOTE,
+  REGENERATE_UNDO_NOTE,
+} from "./brief-regeneration-copy";
 import { loadDraftRoute } from "./draft-route-loader";
 import { PublicationPanel, PublicationProgress } from "./PublicationPanel";
 import {
@@ -73,6 +83,12 @@ type WorkBriefsPageProps = {
 };
 
 type HttpError = Error & { status?: number; code?: string };
+
+/** The open "다시 생성" dialog: what will be sent once the user confirms. */
+type RegeneratePrompt = {
+  instruction: string;
+  selectedEvidenceIds: string[];
+};
 
 // Outcomes are toned so a completed action never renders as a warning.
 // `warning` asks the user to do something first; `danger` reports a failure.
@@ -178,6 +194,13 @@ export function WorkBriefsPage({
   const [isLoadingConfluenceEvidence, setIsLoadingConfluenceEvidence] =
     useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regeneratePrompt, setRegeneratePrompt] =
+    useState<RegeneratePrompt | null>(null);
+  // The content as it stood right before regeneration, kept for a single undo
+  // only when evidence identities do not change. A PATCH cannot restore a
+  // prior evidence set, so a client-only history would otherwise fail on save.
+  const [undoContent, setUndoContent] = useState<BriefContent | null>(null);
   const [message, setMessage] = useState<Notice>(null);
   const [conflict, setConflict] = useState(false);
   const [readiness, setReadiness] = useState<ReadinessAssessment | null>(null);
@@ -323,6 +346,8 @@ export function WorkBriefsPage({
     setDraft(nextDraft);
     setEditingContent(nextDraft.content);
     setConflict(false);
+    // The undo buffer belongs to one regeneration of one loaded draft.
+    setUndoContent(null);
     // Content changed, so the previous assessment and every previewHash-bound
     // approval are void. That reset is deliberate; only the *visibility* of
     // already-executed steps is restored elsewhere.
@@ -339,6 +364,8 @@ export function WorkBriefsPage({
     setDraft(null);
     setEditingContent(null);
     setConflict(false);
+    setUndoContent(null);
+    setRegeneratePrompt(null);
     setReadiness(null);
     setReadinessStale(false);
     setPublication(null);
@@ -553,13 +580,91 @@ export function WorkBriefsPage({
     }
   }
 
-  async function reloadDraft() {
+  function openRegeneratePrompt() {
+    if (!draft) return;
+    setRegeneratePrompt({
+      instruction,
+      // Excluded evidence is unchecked by default: the model already said it
+      // could not use it, and the user can put it back deliberately.
+      selectedEvidenceIds: draft.evidence
+        .filter((item) => item.aiStatus !== "excluded")
+        .map((item) => item.id),
+    });
+  }
+
+  async function regenerateDraft(prompt: RegeneratePrompt) {
+    if (!draft) return;
+    if (prompt.selectedEvidenceIds.length === 0) {
+      notifyWarning("근거를 하나 이상 선택하세요.");
+      return;
+    }
+
+    const previousContent = editingContent;
+    const previousEvidence = draft.evidence;
+    try {
+      setIsRegenerating(true);
+      clearMessage();
+      const next = await withConnectionStatusRefresh(
+        () =>
+          request<BriefDraft>(`/brief-drafts/${draft.id}/regenerate`, {
+            method: "POST",
+            body: JSON.stringify({
+              optimisticVersion: draft.optimisticVersion,
+              instruction: prompt.instruction,
+              selectedEvidenceIds: prompt.selectedEvidenceIds,
+            }),
+          }),
+        loadConnections,
+      );
+      setRegeneratePrompt(null);
+      const undoAvailable =
+        previousContent !== null &&
+        canUndoRegeneration(previousEvidence, next.evidence);
+      applyDraft(next);
+      if (undoAvailable) {
+        setUndoContent(previousContent);
+        notifySuccess(
+          "브리프를 다시 생성했습니다. 저장 전이라면 되돌릴 수 있습니다.",
+        );
+      } else {
+        setUndoContent(null);
+        notifySuccess(REGENERATE_EVIDENCE_CHANGED_NOTE);
+      }
+    } catch (error) {
+      const failure = error as HttpError;
+      if (failure.status === 409) {
+        // The server marks a moved draft for review in the same response, so
+        // the local copy is already out of date.
+        setConflict(true);
+        void reloadDraft({ silent: true });
+      }
+      notifyFailure(regenerateFailureMessage(failure));
+    } finally {
+      setIsRegenerating(false);
+    }
+  }
+
+  /** The single undo is only offered while its evidence set is still valid. */
+  function undoRegeneration() {
+    if (!undoContent) return;
+    editingRevisionRef.current += 1;
+    setEditingContent(undoContent);
+    setUndoContent(null);
+    setReadinessStale(true);
+    notifyWarning(REGENERATE_UNDO_NOTE);
+  }
+
+  async function reloadDraft(options: { silent?: boolean } = {}) {
     if (!draft) return;
     try {
       applyDraft(await request<BriefDraft>(`/brief-drafts/${draft.id}`));
-      notifySuccess("최신 초안을 불러왔습니다. 변경 내용을 다시 검토하세요.");
+      if (!options.silent) {
+        notifySuccess("최신 초안을 불러왔습니다. 변경 내용을 다시 검토하세요.");
+      }
     } catch {
-      notifyFailure("최신 초안을 불러오지 못했습니다.");
+      if (!options.silent) {
+        notifyFailure("최신 초안을 불러오지 못했습니다.");
+      }
     }
   }
 
@@ -956,10 +1061,29 @@ export function WorkBriefsPage({
                 variant="secondary"
                 size="sm"
                 onClick={refreshDraft}
-                disabled={isSaving}
+                disabled={isSaving || isRegenerating}
               >
                 근거 새로 고침
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={openRegeneratePrompt}
+                disabled={!canRegenerateDraft(draft, isSaving || isRegenerating)}
+              >
+                {isRegenerating ? "생성 중" : "다시 생성"}
+              </Button>
+              {undoContent && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={undoRegeneration}
+                >
+                  다시 생성 되돌리기
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="secondary"
@@ -974,13 +1098,24 @@ export function WorkBriefsPage({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={reloadDraft}
+                  onClick={() => void reloadDraft()}
                 >
                   최신 초안 불러오기
                 </Button>
               )}
             </div>
           </header>
+
+          {regeneratePrompt && (
+            <RegenerateDialog
+              prompt={regeneratePrompt}
+              evidence={draft.evidence}
+              busy={isRegenerating}
+              onChange={setRegeneratePrompt}
+              onCancel={() => setRegeneratePrompt(null)}
+              onConfirm={() => void regenerateDraft(regeneratePrompt)}
+            />
+          )}
 
           {draft.blockers.map((blocker) => (
             <Alert
@@ -1054,6 +1189,11 @@ export function WorkBriefsPage({
                 label="완료 기준"
                 items={editingContent.acceptanceCriteria}
                 evidence={editingEvidence}
+                emptyNotice={emptySectionNotice(
+                  "acceptanceCriteria",
+                  editingContent,
+                  draft.evidence,
+                )}
                 onChange={(acceptanceCriteria) =>
                   updateContent((current) => ({
                     ...current,
@@ -1080,6 +1220,11 @@ export function WorkBriefsPage({
               <ChildTaskEditor
                 items={editingContent.childTasks}
                 evidence={editingEvidence}
+                emptyNotice={emptySectionNotice(
+                  "childTasks",
+                  editingContent,
+                  draft.evidence,
+                )}
                 onChange={(childTasks) =>
                   updateContent((current) => ({ ...current, childTasks }))
                 }
@@ -1363,6 +1508,86 @@ function ReadinessPanel({
   );
 }
 
+/**
+ * The "다시 생성" confirmation.
+ *
+ * Regeneration overwrites hand-edited text, so the instruction, the evidence
+ * selection and the overwrite warning are all in front of the user before the
+ * request goes out.
+ */
+function RegenerateDialog({
+  prompt,
+  evidence,
+  busy,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  prompt: RegeneratePrompt;
+  evidence: (WorkEvidence & { aiStatus?: "included" | "excluded" })[];
+  busy: boolean;
+  onChange: (prompt: RegeneratePrompt) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  function toggleEvidence(evidenceId: string) {
+    onChange({
+      ...prompt,
+      selectedEvidenceIds: prompt.selectedEvidenceIds.includes(evidenceId)
+        ? prompt.selectedEvidenceIds.filter((id) => id !== evidenceId)
+        : [...prompt.selectedEvidenceIds, evidenceId],
+    });
+  }
+
+  return (
+    <section
+      className="work-brief-regenerate ds-card"
+      role="dialog"
+      aria-label="브리프 다시 생성"
+    >
+      <h3>브리프 다시 생성</h3>
+      <Alert tone="warning" role="alert">
+        {REGENERATE_CONFIRM_NOTE}
+      </Alert>
+      <label>
+        생성 지시문
+        <TextArea
+          value={prompt.instruction}
+          rows={3}
+          onChange={(event) =>
+            onChange({ ...prompt, instruction: event.target.value })
+          }
+        />
+      </label>
+      <fieldset className="work-brief-regenerate-evidence">
+        <legend>사용할 근거 ({prompt.selectedEvidenceIds.length}건)</legend>
+        <EvidenceList
+          evidence={evidence}
+          selectedEvidenceIds={prompt.selectedEvidenceIds}
+          onToggle={toggleEvidence}
+        />
+      </fieldset>
+      <div className="button-row">
+        <Button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy || prompt.instruction.trim().length === 0}
+        >
+          {busy ? "생성 중" : "덮어쓰고 다시 생성"}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onCancel}
+          disabled={busy}
+        >
+          취소
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function EvidenceList({
   evidence,
   selectedEvidenceIds = [],
@@ -1398,9 +1623,9 @@ function EvidenceList({
               <Badge tone="warning" className="work-brief-ai-excluded">
                 AI 제외
               </Badge>
-              <small>
-                AI가 생성한 초안에서 인용되지 않았습니다.
-              </small>
+              {/* The reason is the model's own text, already masked by the
+                  server. The source body itself stays hidden. */}
+              <small>{excludedEvidenceReason(item)}</small>
             </span>
           )}
         </li>
@@ -1478,11 +1703,14 @@ function CitationListEditor({
   label,
   items,
   evidence,
+  emptyNotice,
   onChange,
 }: {
   label: string;
   items: EvidenceCitation[];
   evidence: WorkEvidence[];
+  /** Why the section is empty, when the AI was expected to fill it. */
+  emptyNotice?: string | null;
   onChange: (items: EvidenceCitation[]) => void;
 }) {
   const defaultEvidenceIds = evidence
@@ -1504,6 +1732,9 @@ function CitationListEditor({
           항목 추가
         </Button>
       </div>
+      {items.length === 0 && emptyNotice ? (
+        <p className="work-brief-section-empty">{emptyNotice}</p>
+      ) : null}
       {items.map((item, index) => (
         <div className="work-brief-list-item" key={`${label}-${index}`}>
           <CitationEditor
@@ -1540,10 +1771,12 @@ function CitationListEditor({
 function ChildTaskEditor({
   items,
   evidence,
+  emptyNotice,
   onChange,
 }: {
   items: ChildTask[];
   evidence: WorkEvidence[];
+  emptyNotice?: string | null;
   onChange: (items: ChildTask[]) => void;
 }) {
   const defaultEvidenceIds = evidence
@@ -1571,6 +1804,9 @@ function ChildTaskEditor({
           하위 작업 추가
         </Button>
       </div>
+      {items.length === 0 && emptyNotice ? (
+        <p className="work-brief-section-empty">{emptyNotice}</p>
+      ) : null}
       {items.map((item, index) => (
         <div className="work-brief-child-task ds-card" key={item.clientTaskId}>
           <Checkbox

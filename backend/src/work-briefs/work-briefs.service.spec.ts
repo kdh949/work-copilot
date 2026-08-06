@@ -442,6 +442,402 @@ describe('WorkBriefsService', () => {
     );
   });
 
+  it('regenerates in place, bumps the version and re-reads the sources', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: current.evidence[0],
+          content: 'Jira original stays transient on regeneration too.',
+        },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        title: { text: '재작성된 배포 준비', evidenceIds: ['jira:100'] },
+      }),
+    );
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    let updateValues: Partial<WorkBriefDraft> | undefined;
+    repository.update.mockImplementation((_where, values) => {
+      updateValues = values;
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const regenerated = await createService().regenerateDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1, instruction: '더 간결하게 작성하세요.' },
+      'correlation-id',
+    );
+
+    expect(regenerated.content?.title.text).toBe('재작성된 배포 준비');
+    expect(regenerated.optimisticVersion).toBe(2);
+    expect(regenerated.content?.acceptanceCriteria).toHaveLength(1);
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ optimisticVersion: 1, deletedAt: IsNull() }),
+      expect.objectContaining({ optimisticVersion: 2 }),
+    );
+    // Excerpts are never stored, so regeneration re-reads with user OAuth.
+    expect(jiraWorkItemService.collectIssueDraftContext).toHaveBeenCalledWith(
+      7,
+      current.sourceJiraKey,
+      'correlation-id',
+    );
+    expect(JSON.stringify(updateValues)).not.toContain(
+      'Jira original stays transient on regeneration too.',
+    );
+  });
+
+  it.each([
+    [
+      'a reserved publication',
+      { publishing: true, externalWritePerformed: false },
+      'PUBLICATION_IN_PROGRESS',
+    ],
+    [
+      'an actual or indeterminate external write',
+      { publishing: false, externalWritePerformed: true },
+      'DRAFT_HAS_PUBLICATION',
+    ],
+  ])(
+    'does not regenerate a draft with %s',
+    async (_label, publicationSafety, code) => {
+      const current = createDraft();
+      repository.findOneBy.mockResolvedValue(current);
+      publicationService.assessDraftDeletion.mockResolvedValue(
+        publicationSafety,
+      );
+
+      await expect(
+        createService().regenerateDraft(
+          7,
+          current.id,
+          { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+          'correlation-id',
+        ),
+      ).rejects.toMatchObject({ response: { code } });
+
+      expect(aiClient.generate).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(transactionManager.query).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`work-brief-draft:${current.id}`],
+      );
+    },
+  );
+
+  it('blocks regeneration when publication reserves the draft during generation', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'transient evidence' },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(aiOutput());
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    publicationService.assessDraftDeletion
+      .mockResolvedValueOnce({
+        publishing: false,
+        externalWritePerformed: false,
+      })
+      // Simulates publish reserving PENDING between the short preflight lock
+      // and the post-AI persistence lock.
+      .mockResolvedValueOnce({
+        publishing: true,
+        externalWritePerformed: false,
+      });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PUBLICATION_IN_PROGRESS' },
+    });
+
+    expect(publicationService.assessDraftDeletion).toHaveBeenCalledTimes(2);
+    expect(transactionManager.query).toHaveBeenCalledTimes(2);
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('marks every stored Confluence evidence version change for review before AI', async () => {
+    const confluenceEvidence = {
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+      url: 'https://confluence.example.test/pages/viewpage.action?pageId=200',
+      title: '배포 결정',
+      version: '5',
+      excerptLength: 88,
+      accessStatus: 'accessible' as const,
+      dlpStatus: 'not_evaluated' as const,
+      aiStatus: 'included' as const,
+    };
+    const current = createDraft({
+      evidence: [createDraft().evidence[0], confluenceEvidence],
+    });
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'Jira transient evidence' },
+      ],
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      evidence: [{ ...confluenceEvidence, version: '6' }],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED', currentVersion: 2 },
+    });
+
+    expect(
+      confluenceWorkItemService.collectEvidenceMetadata,
+    ).toHaveBeenCalledWith(7, ['confluence:200'], 'correlation-id');
+    expect(current.freshnessStatus).toBe('review_required');
+    expect(current.evidence).toHaveLength(2);
+    expect(aiClient.generate).not.toHaveBeenCalled();
+  });
+
+  it('marks Jira and Confluence access loss instead of leaving a current draft', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockRejectedValue(
+      new ConflictException('Reconnect the integration to continue.'),
+    );
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'ACCESS_CHANGED', currentVersion: 2 },
+    });
+    expect(current.freshnessStatus).toBe('access_changed');
+    expect(current.evidence).toEqual([]);
+
+    const confluenceEvidence = {
+      ...createDraft().evidence[0],
+      id: 'confluence:200',
+      provider: 'confluence' as const,
+      sourceId: '200',
+    };
+    const withConfluence = createDraft({
+      evidence: [createDraft().evidence[0], confluenceEvidence],
+    });
+    repository.findOneBy.mockImplementation(() =>
+      Promise.resolve(withConfluence),
+    );
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(withConfluence, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: withConfluence.profileId,
+      sourceJiraId: withConfluence.sourceJiraId,
+      sourceJiraKey: withConfluence.sourceJiraKey,
+      sourceJiraVersion: withConfluence.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: withConfluence.evidence[0],
+          content: 'Jira transient evidence',
+        },
+      ],
+    });
+    confluenceWorkItemService.collectEvidenceMetadata.mockResolvedValue({
+      accessStatus: 'access_limited',
+      profileId: null,
+      evidence: [],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        withConfluence.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'ACCESS_CHANGED', currentVersion: 2 },
+    });
+    expect(withConfluence.freshnessStatus).toBe('access_changed');
+    expect(withConfluence.evidence).toEqual([]);
+    expect(aiClient.generate).not.toHaveBeenCalled();
+  });
+
+  it('regenerates with a changed evidence selection when one is given', async () => {
+    const current = createDraft();
+    const extraEvidence = {
+      ...current.evidence[0],
+      id: 'jira:101',
+      sourceId: '101',
+    };
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'first transient' },
+        { evidence: extraEvidence, content: 'second transient' },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        summary: { text: '테스트를 진행합니다.', evidenceIds: ['jira:101'] },
+      }),
+    );
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const regenerated = await createService().regenerateDraft(
+      7,
+      current.id,
+      {
+        optimisticVersion: 1,
+        instruction: '근거를 다시 골라 작성하세요.',
+        selectedEvidenceIds: ['jira:100', 'jira:101'],
+      },
+      'correlation-id',
+    );
+
+    expect(aiClient.generate).toHaveBeenCalledWith(
+      '근거를 다시 골라 작성하세요.',
+      expect.arrayContaining([
+        expect.objectContaining({ evidenceId: 'jira:101' }),
+      ]),
+    );
+    expect(regenerated.evidence.map((item) => item.id)).toEqual([
+      'jira:100',
+      'jira:101',
+    ]);
+  });
+
+  it('does not regenerate a stale draft or one at another version', async () => {
+    const stale = createDraft({
+      status: 'review_required',
+      freshnessStatus: 'review_required',
+    });
+    repository.findOneBy.mockResolvedValue(stale);
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        stale.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED' },
+    });
+
+    const current = createDraft({ optimisticVersion: 3 });
+    repository.findOneBy.mockResolvedValue(current);
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'DRAFT_VERSION_CONFLICT', currentVersion: 3 },
+    });
+    expect(aiClient.generate).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('marks a draft for review instead of regenerating on a moved issue', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: '2026-08-05T00:00:00.000Z',
+      evidence: [
+        { evidence: current.evidence[0], content: 'newer transient evidence' },
+      ],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED', currentVersion: 2 },
+    });
+    expect(aiClient.generate).not.toHaveBeenCalled();
+    // Refusing without recording the change would leave the stored draft
+    // claiming to be current.
+    expect(current.freshnessStatus).toBe('review_required');
+    expect(current.status).toBe('review_required');
+    // Clearing the signal stays refreshDraft's job.
+    expect(current.sourceJiraVersion).toBe('2026-08-02T00:00:00.000Z');
+  });
+
   it('rejects an optimistic-lock update when another tab has saved first', async () => {
     const current = createDraft({ optimisticVersion: 2 });
     repository.findOneBy.mockResolvedValueOnce(createDraft());
@@ -619,11 +1015,9 @@ describe('WorkBriefsService', () => {
     );
 
     expect(refreshed.freshnessStatus).toBe('review_required');
-    expect(confluenceWorkItemService.collectEvidenceMetadata).toHaveBeenCalledWith(
-      7,
-      ['confluence:200'],
-      'correlation-id',
-    );
+    expect(
+      confluenceWorkItemService.collectEvidenceMetadata,
+    ).toHaveBeenCalledWith(7, ['confluence:200'], 'correlation-id');
   });
 
   it('hides prior content when the user no longer has source access', async () => {
