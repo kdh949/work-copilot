@@ -41,6 +41,7 @@ import {
   loadConfluenceSpaces,
   shouldLoadConfluenceSpaces,
 } from "./confluence-space-loading";
+import { citationAnchorId } from "./citations/citation-anchors";
 import { ChildTaskEditor } from "./citations/ChildTaskEditor";
 import { CitationEditor } from "./citations/CitationEditor";
 import { CitationListEditor } from "./citations/CitationListEditor";
@@ -1239,6 +1240,7 @@ export function WorkBriefsPage({
               <EvidenceList evidence={editingEvidence} readonly />
               <CitationEditor
                 label="제목"
+                anchorId={citationAnchorId("제목", 0)}
                 citation={editingContent.title}
                 evidence={editingEvidence}
                 onChange={(title) =>
@@ -1247,6 +1249,7 @@ export function WorkBriefsPage({
               />
               <CitationEditor
                 label="요약"
+                anchorId={citationAnchorId("요약", 0)}
                 citation={editingContent.summary}
                 evidence={editingEvidence}
                 multiline

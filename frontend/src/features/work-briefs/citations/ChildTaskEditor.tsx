@@ -1,5 +1,6 @@
 import { Button, Checkbox, TextInput } from "../../../design-system/components";
 import type { ChildTask, WorkEvidence } from "../work-briefs.types";
+import { citationAnchorId } from "./citation-anchors";
 import { CitationEditor } from "./CitationEditor";
 import { emptyCitation } from "./empty-citation";
 
@@ -78,6 +79,7 @@ export function ChildTaskEditor({
           </label>
           <CitationEditor
             label="작업 근거"
+            anchorId={citationAnchorId("하위 작업", index + 1)}
             citation={item}
             evidence={evidence}
             onChange={(next) =>

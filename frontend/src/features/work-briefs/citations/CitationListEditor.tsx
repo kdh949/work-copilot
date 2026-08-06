@@ -1,5 +1,6 @@
 import { Button } from "../../../design-system/components";
 import type { EvidenceCitation, WorkEvidence } from "../work-briefs.types";
+import { citationAnchorId } from "./citation-anchors";
 import { CitationEditor } from "./CitationEditor";
 import { emptyCitation } from "./empty-citation";
 
@@ -43,6 +44,7 @@ export function CitationListEditor({
         <div className="work-brief-list-item" key={`${label}-${index}`}>
           <CitationEditor
             label={`${label} ${index + 1}`}
+            anchorId={citationAnchorId(label, index + 1)}
             citation={item}
             evidence={evidence}
             onChange={(next) =>
