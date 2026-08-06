@@ -1237,7 +1237,11 @@ export function WorkBriefsPage({
 
           {editingContent ? (
             <>
-              <EvidenceList evidence={editingEvidence} readonly />
+              <EvidenceList
+                evidence={editingEvidence}
+                content={editingContent}
+                readonly
+              />
               <CitationEditor
                 label="제목"
                 anchorId={citationAnchorId("제목", 0)}
