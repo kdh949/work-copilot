@@ -35,10 +35,12 @@ import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
 import {
   canRegenerateDraft,
+  canUndoRegeneration,
   emptySectionNotice,
   excludedEvidenceReason,
   regenerateFailureMessage,
   REGENERATE_CONFIRM_NOTE,
+  REGENERATE_EVIDENCE_CHANGED_NOTE,
   REGENERATE_UNDO_NOTE,
 } from "./brief-regeneration-copy";
 import { loadDraftRoute } from "./draft-route-loader";
@@ -196,8 +198,8 @@ export function WorkBriefsPage({
   const [regeneratePrompt, setRegeneratePrompt] =
     useState<RegeneratePrompt | null>(null);
   // The content as it stood right before regeneration, kept for a single undo
-  // (R10). A draft version history table is out of scope, so this lives in the
-  // client only and is dropped as soon as the draft is reloaded or saved.
+  // only when evidence identities do not change. A PATCH cannot restore a
+  // prior evidence set, so a client-only history would otherwise fail on save.
   const [undoContent, setUndoContent] = useState<BriefContent | null>(null);
   const [message, setMessage] = useState<Notice>(null);
   const [conflict, setConflict] = useState(false);
@@ -598,6 +600,7 @@ export function WorkBriefsPage({
     }
 
     const previousContent = editingContent;
+    const previousEvidence = draft.evidence;
     try {
       setIsRegenerating(true);
       clearMessage();
@@ -614,11 +617,19 @@ export function WorkBriefsPage({
         loadConnections,
       );
       setRegeneratePrompt(null);
+      const undoAvailable =
+        previousContent !== null &&
+        canUndoRegeneration(previousEvidence, next.evidence);
       applyDraft(next);
-      setUndoContent(previousContent);
-      notifySuccess(
-        "브리프를 다시 생성했습니다. 저장 전이라면 되돌릴 수 있습니다.",
-      );
+      if (undoAvailable) {
+        setUndoContent(previousContent);
+        notifySuccess(
+          "브리프를 다시 생성했습니다. 저장 전이라면 되돌릴 수 있습니다.",
+        );
+      } else {
+        setUndoContent(null);
+        notifySuccess(REGENERATE_EVIDENCE_CHANGED_NOTE);
+      }
     } catch (error) {
       const failure = error as HttpError;
       if (failure.status === 409) {
@@ -633,7 +644,7 @@ export function WorkBriefsPage({
     }
   }
 
-  /** The single undo. Restores the editor only; saving is still explicit. */
+  /** The single undo is only offered while its evidence set is still valid. */
   function undoRegeneration() {
     if (!undoContent) return;
     editingRevisionRef.current += 1;

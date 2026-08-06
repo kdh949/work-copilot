@@ -6,11 +6,12 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import type { NormalizedEvidence } from '../work-items/evidence/evidence-normalizer';
 import {
   ConfluenceWorkItemService,
   type ConfluenceDraftContext,
+  type ConfluenceEvidenceContext,
 } from '../work-items/confluence/confluence-work-item.service';
 import type { JiraDraftContext } from '../work-items/jira/jira-work-item.service';
 import { JiraWorkItemService } from '../work-items/jira/jira-work-item.service';
@@ -345,9 +346,9 @@ export class WorkBriefsService {
    *
    * The evidence excerpts are never stored, so this re-reads every source with
    * the user's own OAuth token exactly like `createDraft` does.  The user's
-   * manual edits are overwritten wholesale: the client keeps the pre-
-   * regeneration content for a single undo, and a draft version history table
-   * stays out of scope.
+   * manual edits are overwritten wholesale. A client-only undo is available
+   * only when the evidence set remains unchanged; restoring content against a
+   * different evidence set would fail citation validation on the next save.
    */
   async regenerateDraft(
     userId: number,
@@ -355,50 +356,47 @@ export class WorkBriefsService {
     dto: RegenerateBriefDraftDto,
     correlationId: string,
   ): Promise<BriefDraftView> {
-    const draft = await this.findOwnedDraft(userId, draftId);
-    if (draft.optimisticVersion !== dto.optimisticVersion) {
-      this.versionConflict(draft.optimisticVersion, dto.optimisticVersion);
-    }
-    if (draft.freshnessStatus !== 'current') {
-      // Same rule as saving: a draft whose sources moved has to be refreshed
-      // and re-reviewed before it is rewritten.
-      throw new ConflictException({
-        code:
-          draft.freshnessStatus === 'access_changed'
-            ? 'ACCESS_CHANGED'
-            : 'SOURCE_REVIEW_REQUIRED',
-      });
-    }
+    const draft = await this.lockedRegenerationDraft(
+      userId,
+      draftId,
+      dto.optimisticVersion,
+    );
 
     const selectedEvidenceIds = this.selectedEvidenceIds(
       dto.selectedEvidenceIds ?? draft.evidence.map((item) => item.id),
     );
-    const context = await this.jiraWorkItemService.collectIssueDraftContext(
+    const context = await this.collectRegenerationJiraContext(
       userId,
-      draft.sourceJiraKey,
+      draft,
+      dto.optimisticVersion,
       correlationId,
     );
-    if (context.profileId !== draft.profileId) {
-      throw new ConflictException(
-        'Selected Jira evidence is no longer accessible.',
+    const storedConfluenceEvidenceIds = draft.evidence
+      .filter((item) => item.provider === 'confluence')
+      .map((item) => item.id);
+    const confluenceMetadata =
+      context.accessStatus === 'accessible' &&
+      context.profileId === draft.profileId &&
+      storedConfluenceEvidenceIds.length > 0
+        ? await this.collectRegenerationConfluenceMetadata(
+            userId,
+            draft,
+            dto.optimisticVersion,
+            storedConfluenceEvidenceIds,
+            correlationId,
+          )
+        : null;
+    const freshnessStatus = this.regenerationFreshnessStatus(
+      draft,
+      context,
+      confluenceMetadata,
+    );
+    if (freshnessStatus) {
+      await this.rejectRegenerationForFreshness(
+        draft,
+        dto.optimisticVersion,
+        freshnessStatus,
       );
-    }
-    if (context.sourceJiraVersion !== draft.sourceJiraVersion) {
-      // The issue moved while the draft still looked current. Regenerating now
-      // would silently adopt the new version without the review step, so the
-      // draft is marked for review in the same request: refusing alone would
-      // leave the stored state claiming to be current. `sourceJiraVersion` is
-      // deliberately not advanced — clearing the signal is refreshDraft's job,
-      // after the owner re-reads every source.
-      const marked = await this.applyRefresh(draft, dto.optimisticVersion, {
-        evidence: draft.evidence,
-        freshnessStatus: 'review_required',
-        status: 'review_required',
-      });
-      throw new ConflictException({
-        code: 'SOURCE_REVIEW_REQUIRED',
-        currentVersion: marked.optimisticVersion,
-      });
     }
 
     const selectedJiraEvidence = this.selectedJiraEvidence(
@@ -431,31 +429,250 @@ export class WorkBriefsService {
     );
     const content = this.contentFromAi(output);
     const evidence = this.evidenceFromAi(selectedEvidence, output, content);
+    const maskedContent = await this.maskContent(content);
 
-    const updated = await this.draftsRepository.update(
-      {
-        id: draftId,
-        createdByUserId: userId,
-        optimisticVersion: dto.optimisticVersion,
-        deletedAt: IsNull(),
-      },
-      {
-        maskedBrief: await this.maskContent(content),
-        evidence,
-        optimisticVersion: dto.optimisticVersion + 1,
-        updatedAt: new Date(),
-      },
-    );
-    // The readiness cache keys on optimisticVersion, so the bump invalidates
-    // the previous assessment without touching readiness_assessments here.
-    await this.assertUpdateSucceeded(
+    await this.persistRegeneration(
       userId,
       draftId,
       dto.optimisticVersion,
-      updated.affected,
+      maskedContent,
+      evidence,
     );
-
+    // The readiness cache keys on optimisticVersion, so the bump invalidates
+    // the previous assessment without touching readiness_assessments here.
     return this.present(await this.findOwnedDraft(userId, draftId));
+  }
+
+  /**
+   * Reserve a short critical section before the expensive source reads and AI
+   * call. `persistRegeneration` repeats this check immediately before writing,
+   * because a publisher can reserve the draft while generation is in flight.
+   */
+  private async lockedRegenerationDraft(
+    userId: number,
+    draftId: string,
+    optimisticVersion: number,
+  ): Promise<WorkBriefDraft> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      await lockBriefDraft(manager, draftId);
+      const drafts = manager.getRepository(WorkBriefDraft);
+      const draft = await drafts.findOneBy({
+        id: draftId,
+        createdByUserId: userId,
+        deletedAt: IsNull(),
+      });
+      if (!draft) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
+      this.assertRegenerationDraftState(draft, optimisticVersion);
+      await this.assertRegenerationPublicationSafety(draftId, manager);
+      return draft;
+    });
+  }
+
+  private assertRegenerationDraftState(
+    draft: WorkBriefDraft,
+    optimisticVersion: number,
+  ): void {
+    if (draft.optimisticVersion !== optimisticVersion) {
+      this.versionConflict(draft.optimisticVersion, optimisticVersion);
+    }
+    if (draft.freshnessStatus !== 'current') {
+      // Same rule as saving: a draft whose sources moved has to be refreshed
+      // and re-reviewed before it is rewritten.
+      throw new ConflictException({
+        code:
+          draft.freshnessStatus === 'access_changed'
+            ? 'ACCESS_CHANGED'
+            : 'SOURCE_REVIEW_REQUIRED',
+      });
+    }
+  }
+
+  private async assertRegenerationPublicationSafety(
+    draftId: string,
+    manager: Pick<EntityManager, 'getRepository'>,
+  ): Promise<void> {
+    // The stored publication/step predicate is deliberately fail-closed: a
+    // reconciliation that cannot prove a provider write did not happen blocks
+    // mutation just like a known real Confluence write does.
+    const publication = await this.publicationService.assessDraftDeletion(
+      draftId,
+      manager,
+    );
+    if (publication.publishing) {
+      throw new ConflictException({ code: 'PUBLICATION_IN_PROGRESS' });
+    }
+    if (publication.externalWritePerformed) {
+      throw new ConflictException({ code: 'DRAFT_HAS_PUBLICATION' });
+    }
+  }
+
+  private async collectRegenerationJiraContext(
+    userId: number,
+    draft: WorkBriefDraft,
+    optimisticVersion: number,
+    correlationId: string,
+  ): Promise<JiraDraftContext> {
+    try {
+      return await this.jiraWorkItemService.collectIssueDraftContext(
+        userId,
+        draft.sourceJiraKey,
+        correlationId,
+      );
+    } catch (error) {
+      // OAuth reauthorization is a 409. Persisting access_changed here keeps
+      // the next read from misleadingly showing this draft as current.
+      if (error instanceof ConflictException) {
+        return this.rejectRegenerationForFreshness(
+          draft,
+          optimisticVersion,
+          'access_changed',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async collectRegenerationConfluenceMetadata(
+    userId: number,
+    draft: WorkBriefDraft,
+    optimisticVersion: number,
+    evidenceIds: readonly string[],
+    correlationId: string,
+  ): Promise<ConfluenceEvidenceContext> {
+    try {
+      return await this.confluenceWorkItemService.collectEvidenceMetadata(
+        userId,
+        evidenceIds,
+        correlationId,
+      );
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        return this.rejectRegenerationForFreshness(
+          draft,
+          optimisticVersion,
+          'access_changed',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private regenerationFreshnessStatus(
+    draft: WorkBriefDraft,
+    jiraContext: JiraDraftContext,
+    confluenceContext: ConfluenceEvidenceContext | null,
+  ): 'review_required' | 'access_changed' | null {
+    if (
+      jiraContext.accessStatus !== 'accessible' ||
+      !jiraContext.profileId ||
+      !jiraContext.sourceJiraId ||
+      !jiraContext.sourceJiraVersion ||
+      jiraContext.profileId !== draft.profileId ||
+      jiraContext.sourceJiraId !== draft.sourceJiraId ||
+      (confluenceContext !== null &&
+        (confluenceContext.accessStatus !== 'accessible' ||
+          confluenceContext.profileId !== draft.profileId))
+    ) {
+      return 'access_changed';
+    }
+
+    const currentEvidence = new Map(
+      [
+        ...jiraContext.evidence.map((item) => item.evidence),
+        ...(confluenceContext?.evidence ?? []),
+      ].map((item) => [item.id, item]),
+    );
+    const missingOrDifferentProvider = draft.evidence.some((stored) => {
+      const current = currentEvidence.get(stored.id);
+      return (
+        !current ||
+        current.id !== stored.id ||
+        current.provider !== stored.provider
+      );
+    });
+    if (missingOrDifferentProvider) {
+      return 'access_changed';
+    }
+
+    const versionChanged =
+      jiraContext.sourceJiraVersion !== draft.sourceJiraVersion ||
+      draft.evidence.some(
+        (stored) => currentEvidence.get(stored.id)?.version !== stored.version,
+      );
+    return versionChanged ? 'review_required' : null;
+  }
+
+  private async rejectRegenerationForFreshness(
+    draft: WorkBriefDraft,
+    optimisticVersion: number,
+    freshnessStatus: 'review_required' | 'access_changed',
+  ): Promise<never> {
+    // Refusing alone would leave the stored state claiming to be current.
+    // `sourceJiraVersion` is deliberately not advanced: refreshDraft owns the
+    // explicit review path that accepts a newer version.
+    const marked = await this.applyRefresh(draft, optimisticVersion, {
+      evidence: freshnessStatus === 'access_changed' ? [] : draft.evidence,
+      freshnessStatus,
+      status: 'review_required',
+    });
+    throw new ConflictException({
+      code:
+        freshnessStatus === 'access_changed'
+          ? 'ACCESS_CHANGED'
+          : 'SOURCE_REVIEW_REQUIRED',
+      currentVersion: marked.optimisticVersion,
+    });
+  }
+
+  private async persistRegeneration(
+    userId: number,
+    draftId: string,
+    optimisticVersion: number,
+    maskedBrief: BriefContent,
+    evidence: StoredBriefEvidence[],
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      await lockBriefDraft(manager, draftId);
+      const drafts = manager.getRepository(WorkBriefDraft);
+      const draft = await drafts.findOneBy({
+        id: draftId,
+        createdByUserId: userId,
+        deletedAt: IsNull(),
+      });
+      if (!draft) {
+        throw new NotFoundException('Brief draft was not found.');
+      }
+      this.assertRegenerationDraftState(draft, optimisticVersion);
+      await this.assertRegenerationPublicationSafety(draftId, manager);
+
+      const updated = await drafts.update(
+        {
+          id: draftId,
+          createdByUserId: userId,
+          optimisticVersion,
+          deletedAt: IsNull(),
+        },
+        {
+          maskedBrief,
+          evidence,
+          optimisticVersion: optimisticVersion + 1,
+          updatedAt: new Date(),
+        },
+      );
+      if (updated.affected !== 1) {
+        const latest = await drafts.findOneBy({
+          id: draftId,
+          createdByUserId: userId,
+          deletedAt: IsNull(),
+        });
+        if (!latest) {
+          throw new NotFoundException('Brief draft was not found.');
+        }
+        this.versionConflict(latest.optimisticVersion, optimisticVersion);
+      }
+    });
   }
 
   async refreshDraft(
