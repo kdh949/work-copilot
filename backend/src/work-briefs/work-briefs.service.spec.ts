@@ -442,6 +442,179 @@ describe('WorkBriefsService', () => {
     );
   });
 
+  it('regenerates in place, bumps the version and re-reads the sources', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        {
+          evidence: current.evidence[0],
+          content: 'Jira original stays transient on regeneration too.',
+        },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        title: { text: '재작성된 배포 준비', evidenceIds: ['jira:100'] },
+      }),
+    );
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    let updateValues: Partial<WorkBriefDraft> | undefined;
+    repository.update.mockImplementation((_where, values) => {
+      updateValues = values;
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const regenerated = await createService().regenerateDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1, instruction: '더 간결하게 작성하세요.' },
+      'correlation-id',
+    );
+
+    expect(regenerated.content?.title.text).toBe('재작성된 배포 준비');
+    expect(regenerated.optimisticVersion).toBe(2);
+    expect(regenerated.content?.acceptanceCriteria).toHaveLength(1);
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ optimisticVersion: 1, deletedAt: IsNull() }),
+      expect.objectContaining({ optimisticVersion: 2 }),
+    );
+    // Excerpts are never stored, so regeneration re-reads with user OAuth.
+    expect(jiraWorkItemService.collectIssueDraftContext).toHaveBeenCalledWith(
+      7,
+      current.sourceJiraKey,
+      'correlation-id',
+    );
+    expect(JSON.stringify(updateValues)).not.toContain(
+      'Jira original stays transient on regeneration too.',
+    );
+  });
+
+  it('regenerates with a changed evidence selection when one is given', async () => {
+    const current = createDraft();
+    const extraEvidence = {
+      ...current.evidence[0],
+      id: 'jira:101',
+      sourceId: '101',
+    };
+    repository.findOneBy.mockImplementation(() => Promise.resolve(current));
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: current.sourceJiraVersion,
+      evidence: [
+        { evidence: current.evidence[0], content: 'first transient' },
+        { evidence: extraEvidence, content: 'second transient' },
+      ],
+    });
+    aiClient.generate.mockResolvedValue(
+      aiOutput({
+        summary: { text: '테스트를 진행합니다.', evidenceIds: ['jira:101'] },
+      }),
+    );
+    aiClient.sanitize.mockImplementation((values: string[]) =>
+      Promise.resolve(values),
+    );
+    repository.update.mockImplementation((_where, values) => {
+      Object.assign(current, values);
+      return Promise.resolve({ affected: 1 });
+    });
+
+    const regenerated = await createService().regenerateDraft(
+      7,
+      current.id,
+      {
+        optimisticVersion: 1,
+        instruction: '근거를 다시 골라 작성하세요.',
+        selectedEvidenceIds: ['jira:100', 'jira:101'],
+      },
+      'correlation-id',
+    );
+
+    expect(aiClient.generate).toHaveBeenCalledWith(
+      '근거를 다시 골라 작성하세요.',
+      expect.arrayContaining([
+        expect.objectContaining({ evidenceId: 'jira:101' }),
+      ]),
+    );
+    expect(regenerated.evidence.map((item) => item.id)).toEqual([
+      'jira:100',
+      'jira:101',
+    ]);
+  });
+
+  it('does not regenerate a stale draft or one at another version', async () => {
+    const stale = createDraft({
+      status: 'review_required',
+      freshnessStatus: 'review_required',
+    });
+    repository.findOneBy.mockResolvedValue(stale);
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        stale.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED' },
+    });
+
+    const current = createDraft({ optimisticVersion: 3 });
+    repository.findOneBy.mockResolvedValue(current);
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'DRAFT_VERSION_CONFLICT', currentVersion: 3 },
+    });
+    expect(aiClient.generate).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('does not regenerate when the Jira issue moved under a current draft', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: current.sourceJiraId,
+      sourceJiraKey: current.sourceJiraKey,
+      sourceJiraVersion: '2026-08-05T00:00:00.000Z',
+      evidence: [
+        { evidence: current.evidence[0], content: 'newer transient evidence' },
+      ],
+    });
+
+    await expect(
+      createService().regenerateDraft(
+        7,
+        current.id,
+        { optimisticVersion: 1, instruction: '다시 작성하세요.' },
+        'correlation-id',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'SOURCE_REVIEW_REQUIRED' },
+    });
+    expect(aiClient.generate).not.toHaveBeenCalled();
+  });
+
   it('rejects an optimistic-lock update when another tab has saved first', async () => {
     const current = createDraft({ optimisticVersion: 2 });
     repository.findOneBy.mockResolvedValueOnce(createDraft());

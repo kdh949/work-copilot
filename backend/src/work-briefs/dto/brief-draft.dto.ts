@@ -118,6 +118,26 @@ export class UpdateBriefDraftDto {
   content: BriefContentDto;
 }
 
+export class RegenerateBriefDraftDto {
+  @IsInt()
+  @Min(1)
+  optimisticVersion: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2_000)
+  instruction: string;
+
+  /** Omitted keeps the draft's current evidence selection. */
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(255, { each: true })
+  selectedEvidenceIds?: string[];
+}
+
 export class RefreshBriefDraftDto {
   @IsInt()
   @Min(1)

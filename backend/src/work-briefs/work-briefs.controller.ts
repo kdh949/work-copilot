@@ -27,6 +27,7 @@ import {
   CreateBriefDraftDto,
   ListBriefDraftsDto,
   RefreshBriefDraftDto,
+  RegenerateBriefDraftDto,
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
 import { WorkBriefsService } from './work-briefs.service';
@@ -223,6 +224,20 @@ export class WorkBriefsController {
     @Req() request: WorkBriefRequest,
   ) {
     return this.workBriefsService.updateDraft(request.user.sub, id, dto);
+  }
+
+  @Post('brief-drafts/:id/regenerate')
+  regenerate(
+    @Param('id', parseUuid) id: string,
+    @Body() dto: RegenerateBriefDraftDto,
+    @Req() request: WorkBriefRequest,
+  ) {
+    return this.workBriefsService.regenerateDraft(
+      request.user.sub,
+      id,
+      dto,
+      request.correlationId ?? 'missing-correlation-id',
+    );
   }
 
   @Post('brief-drafts/:id/refresh')
