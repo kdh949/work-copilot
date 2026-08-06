@@ -103,7 +103,141 @@ export const WORK_BRIEF_PREVIEW_EVIDENCE: WorkEvidence[] = [
     location: "CS / 응대 기준",
     tags: ["고객 응대"],
   },
+  // From here on the fixture exists to make the citation UI fail visibly if it
+  // regresses: 15 evidence against 10 requirements is the size that made the
+  // per-item checkbox list unusable in the first place.
+  {
+    id: "jira:PROJ-255",
+    provider: "jira",
+    sourceId: "PROJ-255",
+    url: "#PROJ-255",
+    title: "결제 재시도 큐 백프레셔 처리",
+    version: "14",
+    excerptLength: 402,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "결제 플랫폼 / 인프라",
+    tags: ["큐", "성능"],
+  },
+  {
+    id: "jira:PROJ-249",
+    provider: "jira",
+    sourceId: "PROJ-249",
+    url: "#PROJ-249",
+    title: "중복 결제 방지 멱등키 설계",
+    version: "23",
+    excerptLength: 517,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "결제 플랫폼 / 백엔드",
+    tags: ["멱등성"],
+  },
+  {
+    id: "jira:PROJ-238",
+    provider: "jira",
+    sourceId: "PROJ-238",
+    url: "#PROJ-238",
+    // Cited by nothing on purpose: the "사용되지 않음" badge has to have a row
+    // to appear on.
+    title: "결제 알림 문구 개선",
+    version: "3",
+    excerptLength: 190,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "결제 플랫폼 / 프런트",
+    tags: ["문구"],
+  },
+  {
+    id: "confluence:PAY-27",
+    provider: "confluence",
+    sourceId: "PAY-27",
+    url: "#PAY-27",
+    title: "결제 상태 전이 다이어그램",
+    version: "8",
+    excerptLength: 640,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "PAY / 설계",
+    tags: ["상태 머신"],
+  },
+  {
+    id: "confluence:PAY-19",
+    provider: "confluence",
+    sourceId: "PAY-19",
+    url: "#PAY-19",
+    title: "결제 지표 대시보드 정의",
+    version: "16",
+    excerptLength: 455,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "PAY / 지표",
+    tags: ["지표"],
+  },
+  {
+    id: "confluence:OPS-77",
+    provider: "confluence",
+    sourceId: "OPS-77",
+    url: "#OPS-77",
+    title: "장애 등급 판정 기준",
+    version: "31",
+    excerptLength: 388,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "OPS / 장애",
+    tags: ["장애"],
+  },
+  {
+    id: "confluence:OPS-54",
+    provider: "confluence",
+    sourceId: "OPS-54",
+    url: "#OPS-54",
+    title: "야간 배포 승인 절차",
+    version: "5",
+    excerptLength: 276,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    location: "OPS / 배포",
+    tags: ["배포"],
+  },
+  {
+    id: "confluence:CS-11",
+    provider: "confluence",
+    sourceId: "CS-11",
+    url: "#CS-11",
+    title: "환불 요청 처리 SLA",
+    version: "7",
+    excerptLength: 301,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    aiStatus: "excluded",
+    location: "CS / SLA",
+    tags: ["환불"],
+  },
+  {
+    id: "confluence:ARCH-08",
+    provider: "confluence",
+    sourceId: "ARCH-08",
+    url: "#ARCH-08",
+    title: "사내 아키텍처 원칙",
+    version: "44",
+    excerptLength: 812,
+    accessStatus: "accessible",
+    dlpStatus: "not_evaluated",
+    aiStatus: "excluded",
+    location: "ARCH / 원칙",
+    tags: ["아키텍처"],
+  },
 ];
+
+/** The reasons the model gave for the three excluded fixture items. */
+const PREVIEW_EXCLUSION_REASONS: Record<string, string> = {
+  "confluence:CS-18":
+    "재시도 정책과 직접 연결되는 내용이 없어 사용하지 않았습니다.",
+  "confluence:CS-11":
+    "환불 SLA는 이 브리프의 재시도 범위 밖이라 사용하지 않았습니다.",
+  "confluence:ARCH-08":
+    "일반 원칙 문서라 이 작업의 구체적 근거가 되지 못했습니다.",
+};
 
 const previewDraft: BriefDraft = {
   id: "preview-draft-1",
@@ -123,17 +257,76 @@ const previewDraft: BriefDraft = {
         text: "오류 코드별 재시도 횟수를 정의합니다.",
         evidenceIds: ["jira:PROJ-271"],
       },
+      {
+        text: "재시도 대상 오류와 즉시 실패 오류를 구분합니다.",
+        evidenceIds: ["jira:PROJ-271", "confluence:PAY-42"],
+      },
+      {
+        text: "재시도 간 지수 백오프 간격을 정합니다.",
+        evidenceIds: ["jira:PROJ-255", "confluence:PAY-42"],
+      },
+      {
+        text: "중복 결제를 막을 멱등키 범위를 정의합니다.",
+        evidenceIds: ["jira:PROJ-249"],
+      },
+      {
+        text: "재시도 큐의 최대 적재량과 배압 동작을 정합니다.",
+        evidenceIds: ["jira:PROJ-255"],
+      },
+      {
+        text: "결제 상태 전이에 재시도 상태를 추가합니다.",
+        evidenceIds: ["confluence:PAY-27", "confluence:PAY-42"],
+      },
+      {
+        text: "PG사별 오류 응답 매핑 표를 유지합니다.",
+        evidenceIds: ["confluence:PAY-31", "jira:PROJ-271"],
+      },
+      {
+        text: "재시도 성공률과 소진율을 지표로 남깁니다.",
+        evidenceIds: ["confluence:PAY-19"],
+      },
+      {
+        text: "재시도 소진 시 장애 등급 판정 기준을 따릅니다.",
+        evidenceIds: ["confluence:OPS-77", "jira:PROJ-263"],
+      },
+      {
+        // Seven links: the row folds into "+N" and the excluded chip has to
+        // stay in front of the fold.
+        text: "정책 변경은 야간 배포 승인 절차를 거칩니다.",
+        evidenceIds: [
+          "confluence:OPS-54",
+          "confluence:OPS-77",
+          "confluence:PAY-42",
+          "confluence:PAY-31",
+          "jira:PROJ-284",
+          "jira:PROJ-263",
+          "confluence:ARCH-08",
+        ],
+      },
     ],
     acceptanceCriteria: [
       {
         text: "정책에 따른 자동 재시도 결과를 확인합니다.",
         evidenceIds: ["confluence:PAY-42"],
       },
+      {
+        text: "동일 주문에 대한 중복 승인이 발생하지 않습니다.",
+        evidenceIds: ["jira:PROJ-249", "confluence:PAY-27"],
+      },
+      {
+        // No links at all: the "근거 없음" chip has to have somewhere to show.
+        text: "재시도 지표가 대시보드에 노출됩니다.",
+        evidenceIds: [],
+      },
     ],
     risks: [
       {
         text: "PG사별 응답 차이를 검토합니다.",
         evidenceIds: ["confluence:PAY-31"],
+      },
+      {
+        text: "재시도 폭주가 PG사 한도를 넘길 수 있습니다.",
+        evidenceIds: ["jira:PROJ-255", "confluence:OPS-77"],
       },
     ],
     nextSteps: [
@@ -149,15 +342,14 @@ const previewDraft: BriefDraft = {
       },
     ],
   },
-  evidence: WORK_BRIEF_PREVIEW_EVIDENCE.slice(0, 5).map((item, index) =>
-    // One excluded item with its model reason, so the design QA screen shows
-    // the state a real v2 draft produces.
-    index === 4
+  // Excluded items keep their model reason, so the design QA screen shows the
+  // state a real v2 draft produces.
+  evidence: WORK_BRIEF_PREVIEW_EVIDENCE.map((item) =>
+    PREVIEW_EXCLUSION_REASONS[item.id]
       ? {
           ...item,
           aiStatus: "excluded" as const,
-          aiExclusionReason:
-            "재시도 정책과 직접 연결되는 내용이 없어 사용하지 않았습니다.",
+          aiExclusionReason: PREVIEW_EXCLUSION_REASONS[item.id],
         }
       : { ...item, aiStatus: "included" as const },
   ),

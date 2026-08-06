@@ -1,4 +1,15 @@
-import type { PublicationStep } from "./work-briefs.types";
+import type { PublicationPhase, PublicationStep } from "./work-briefs.types";
+
+export function publicationPhaseLabel(phase: PublicationPhase): string {
+  switch (phase) {
+    case "confluence":
+      return "Confluence 페이지";
+    case "jira":
+      return "Jira 링크와 댓글";
+    case "child_tasks":
+      return "Jira 하위 작업";
+  }
+}
 
 export const stepStatusLabel: Record<PublicationStep["status"], string> = {
   PENDING: "대기",

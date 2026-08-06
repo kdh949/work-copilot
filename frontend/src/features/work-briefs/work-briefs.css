@@ -490,6 +490,129 @@
   margin: var(--space-0);
 }
 
+/* The whole evidence link set for one item: chips, then the edit trigger.
+   Everything else about the link set lives behind the trigger, which is the
+   point — a checkbox per evidence per item does not fit on a screen. */
+.work-brief-citation-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.work-brief-chip {
+  position: relative;
+  padding: var(--space-0-5) var(--space-2);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-12);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--line-height-tight);
+  cursor: pointer;
+}
+
+button.work-brief-chip:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-default);
+}
+
+.work-brief-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.work-brief-chip--warning {
+  border-color: var(--color-border-warning);
+  background: var(--color-surface-warning);
+  color: var(--color-text-warning);
+}
+
+/* Not a link to anywhere: an empty link set has to look like a statement. */
+.work-brief-chip--empty {
+  border-color: var(--color-border-warning);
+  background: var(--color-surface-warning);
+  color: var(--color-text-warning);
+  cursor: default;
+}
+
+/* `title=` never appears for a keyboard user, so the tooltip is drawn and
+   shown on focus as well as hover. The accessible name is on aria-label. */
+.work-brief-chip[data-tooltip]:hover::after,
+.work-brief-chip[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 30;
+  max-width: 18rem;
+  width: max-content;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-3);
+  background: var(--color-text-default);
+  color: var(--color-surface-base);
+  font-size: var(--font-size-12);
+  white-space: normal;
+  pointer-events: none;
+}
+
+.work-brief-citation-picker {
+  display: grid;
+  gap: var(--space-2-5);
+}
+
+.work-brief-citation-picker .ds-checkbox {
+  margin: var(--space-0);
+}
+
+.work-brief-citation-search .ds-input {
+  width: 100%;
+}
+
+.work-brief-citation-excluded > summary {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-13);
+  cursor: pointer;
+}
+
+.work-brief-citation-excluded[open] {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.work-brief-evidence-ref {
+  margin-right: var(--space-1-5);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-brief-evidence-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.work-brief-usage-link {
+  padding: var(--space-0) var(--space-1);
+  border: var(--space-0);
+  background: none;
+  color: var(--color-text-link);
+  font-size: var(--font-size-13);
+  cursor: pointer;
+}
+
+.work-brief-usage-link:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.work-brief-usage-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .work-brief-list-item {
   display: grid;
   gap: var(--space-1-5);

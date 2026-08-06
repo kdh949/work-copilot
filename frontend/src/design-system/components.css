@@ -294,3 +294,61 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+.ds-popover {
+  position: relative;
+  display: inline-flex;
+}
+
+.ds-popover__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-3);
+  background: var(--color-surface-base);
+  color: var(--color-text-default);
+  font-size: var(--font-size-12);
+  cursor: pointer;
+}
+
+.ds-popover__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Positioned from JS in viewport coordinates: `position: fixed` is what the
+   computed top/left mean, and the top layer keeps it above the editor. */
+.ds-popover__panel:popover-open {
+  position: fixed;
+  margin: 0;
+  width: min(24rem, calc(100vw - var(--space-4)));
+  max-height: min(24rem, 70vh);
+  overflow-y: auto;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-4);
+  background: var(--color-surface-base);
+  box-shadow: var(--shadow-floating);
+}
+
+/* No `popover` support: the same panel, expanded in the flow. It takes real
+   space rather than floating, because nothing here can layer it above the
+   editor, and it is never `display: none` by default, or the controls become
+   unreachable in exactly the browsers that have no other way in. */
+.ds-popover--inline {
+  display: block;
+}
+
+.ds-popover__panel--inline {
+  margin-top: var(--space-1);
+  width: min(24rem, calc(100vw - var(--space-4)));
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-default);
+  border-radius: var(--radius-4);
+  background: var(--color-surface-base);
+  box-shadow: var(--shadow-floating);
+}
