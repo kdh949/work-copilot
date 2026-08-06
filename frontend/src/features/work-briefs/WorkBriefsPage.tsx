@@ -23,6 +23,8 @@ import type {
   BriefDraft,
   BriefDraftSummary,
   ChildTask,
+  ConfluenceSpaceList,
+  ConfluenceSpaceOption,
   EvidenceCitation,
   EvidenceCollection,
   ReadinessAssessment,
@@ -35,6 +37,10 @@ import type {
 import { AssignedIssueList } from "./AssignedIssueList";
 import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
+import {
+  spaceListNotice,
+  spaceOptionLabel,
+} from "./confluence-space-copy";
 import {
   canRegenerateDraft,
   emptySectionNotice,
@@ -177,6 +183,12 @@ export function WorkBriefsPage({
     WorkEvidence[]
   >(initialEvidence.filter((item) => item.provider === "confluence"));
   const [confluenceSpaceKey, setConfluenceSpaceKey] = useState("");
+  const [confluenceSpaces, setConfluenceSpaces] = useState<
+    ConfluenceSpaceOption[]
+  >([]);
+  const [confluenceSpaceState, setConfluenceSpaceState] = useState<
+    "loading" | "ready" | "unavailable"
+  >("loading");
   const [confluenceQuery, setConfluenceQuery] = useState("");
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(
     initialEvidence.filter((item) => item.aiStatus !== "excluded").map((item) => item.id),
@@ -264,6 +276,25 @@ export function WorkBriefsPage({
   useEffect(() => {
     void loadConnections();
   }, [loadConnections]);
+
+  // The allowlist itself, so the space field is a choice rather than a key the
+  // user has to know. A failed read leaves the manual field in place.
+  useEffect(() => {
+    let active = true;
+    requestRef
+      .current<ConfluenceSpaceList>("/work-items/confluence/spaces")
+      .then((loaded) => {
+        if (!active) return;
+        setConfluenceSpaces(loaded.spaces);
+        setConfluenceSpaceState("ready");
+      })
+      .catch(() => {
+        if (active) setConfluenceSpaceState("unavailable");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Each setup gets its own revision. React StrictMode deliberately executes
   // setup → cleanup → setup, so a one-shot ref would discard the second setup
@@ -974,7 +1005,27 @@ export function WorkBriefsPage({
               {showSourceOptions ? (
                 <section className="work-brief-source-options">
                   <label htmlFor="brief-confluence-space">Confluence space</label>
-                  <input id="brief-confluence-space" value={confluenceSpaceKey} placeholder="예: ENG" onChange={(event) => setConfluenceSpaceKey(event.target.value)} />
+                  {confluenceSpaces.length > 0 ? (
+                    <select
+                      id="brief-confluence-space"
+                      value={confluenceSpaceKey}
+                      onChange={(event) => setConfluenceSpaceKey(event.target.value)}
+                    >
+                      <option value="">space 선택</option>
+                      {confluenceSpaces.map((space) => (
+                        <option key={space.spaceKey} value={space.spaceKey}>
+                          {spaceOptionLabel(space)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input id="brief-confluence-space" value={confluenceSpaceKey} placeholder="예: ENG" onChange={(event) => setConfluenceSpaceKey(event.target.value)} />
+                  )}
+                  {spaceListNotice(confluenceSpaceState, confluenceSpaces) ? (
+                    <p className="work-brief-source-options-note">
+                      {spaceListNotice(confluenceSpaceState, confluenceSpaces)}
+                    </p>
+                  ) : null}
                   <label htmlFor="brief-confluence-query">검색어</label>
                   <input id="brief-confluence-query" value={confluenceQuery} placeholder="예: 배포 결정" onChange={(event) => setConfluenceQuery(event.target.value)} />
                   <Button type="button" size="sm" onClick={() => void collectConfluenceEvidence()} disabled={isLoadingConfluenceEvidence || isLoadingEvidence}>{isLoadingConfluenceEvidence ? "검색 중" : "문서 검색"}</Button>

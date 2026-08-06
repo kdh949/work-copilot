@@ -302,4 +302,93 @@ describe('ConfluenceWorkItemService', () => {
     });
     expect(JSON.stringify(result)).not.toContain('비공개 페이지');
   });
+
+  it('lists the allowlisted spaces with names and never a space outside it', async () => {
+    const multiSpaceProfile = {
+      ...profile,
+      allowedSpaceKeys: ['ENG', 'PAY', 'bad key'],
+    } as IntegrationProfile;
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(multiSpaceProfile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) => {
+          const normalized = spaceKey.trim().toUpperCase();
+          if (!/^[A-Z][A-Z0-9_]{0,31}$/.test(normalized)) {
+            throw new Error('invalid space key');
+          }
+          return normalized;
+        },
+      ),
+      providerBaseUrl: jest.fn(() => profile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, profile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const getJson = jest.fn((url: URL) => {
+      if (url.pathname.endsWith('/space/ENG')) {
+        return Promise.resolve({
+          status: 'ok' as const,
+          // A name for another space must not be adopted.
+          body: { key: 'ENG', name: '엔지니어링' },
+        });
+      }
+      return Promise.resolve({ status: 'access_limited' as const });
+    });
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      { getJson } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.listAllowedSpaces(1, 'corr-spaces');
+
+    expect(result).toEqual({
+      spaces: [
+        { spaceKey: 'ENG', name: '엔지니어링', accessStatus: 'accessible' },
+        // Allowed by the profile, unreadable for this user: still pickable,
+        // and honest about why it has no name.
+        { spaceKey: 'PAY', name: null, accessStatus: 'access_limited' },
+      ],
+    });
+    expect(getJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not label a space with a name the provider answered for another key', async () => {
+    const accessPolicy = {
+      activeProfile: jest.fn(() => Promise.resolve(profile)),
+      assertAllowedSpace: jest.fn(
+        (_profile: IntegrationProfile, spaceKey: string) =>
+          spaceKey.toUpperCase(),
+      ),
+      providerBaseUrl: jest.fn(() => profile.confluenceBaseUrl),
+      providerUrl: jest.fn(
+        (_profile: IntegrationProfile, _provider: 'confluence', path: string) =>
+          new URL(path, profile.confluenceBaseUrl),
+      ),
+    } as unknown as IntegrationAccessPolicyService;
+    const service = new ConfluenceWorkItemService(
+      accessPolicy,
+      {
+        getJson: jest.fn(() =>
+          Promise.resolve({
+            status: 'ok' as const,
+            body: { key: 'HR', name: '인사 공간' },
+          }),
+        ),
+      } as unknown as AtlassianReadClientService,
+      {
+        getAccessToken: jest.fn(() => Promise.resolve('token-user-a')),
+      } as unknown as IntegrationsOAuthService,
+    );
+
+    const result = await service.listAllowedSpaces(1, 'corr-spaces');
+
+    expect(result.spaces).toEqual([
+      { spaceKey: 'ENG', name: null, accessStatus: 'accessible' },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('인사 공간');
+  });
 });

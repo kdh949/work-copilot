@@ -52,6 +52,14 @@ export class WorkItemsController {
     return this.jiraContext(issueKey, request);
   }
 
+  @Get('confluence/spaces')
+  confluenceSpaces(@Req() request: WorkItemRequest) {
+    return this.confluenceWorkItemService.listAllowedSpaces(
+      request.user.sub,
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
   @Get('confluence/spaces/:spaceKey/search')
   confluenceSearch(
     @Param('spaceKey') spaceKey: string,

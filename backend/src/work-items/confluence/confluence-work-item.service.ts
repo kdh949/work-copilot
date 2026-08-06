@@ -15,6 +15,8 @@ const MAX_TRANSIENT_EVIDENCE_CHARS = 8_000;
 const MAX_RECOMMENDATION_TERMS = 3;
 const MAX_RECOMMENDATION_REQUESTS = 12;
 const MAX_RECOMMENDATION_CONCURRENCY = 3;
+const MAX_SPACE_LOOKUPS = 20;
+const MAX_SPACE_LOOKUP_CONCURRENCY = 3;
 
 export type EvidenceRecommendationReason = 'jira_issue' | 'jira_summary';
 
@@ -38,6 +40,26 @@ export type ConfluenceEvidenceContext = {
   evidence: NormalizedEvidence[];
 };
 
+/**
+ * A space the active profile allows, as the publish/search picker shows it.
+ *
+ * `name` needs the user's own token, and a user may legitimately not have it,
+ * so the key is always present and the display name is optional. The list is
+ * the allowlist itself — a space outside it never appears here.
+ */
+export type ConfluenceSpaceOption = {
+  spaceKey: string;
+  name: string | null;
+  accessStatus:
+    | EvidenceCollectionResponse['accessStatus']
+    /** Beyond the metadata lookup budget; the key is still allowed. */
+    | 'not_requested';
+};
+
+export type ConfluenceSpaceList = {
+  spaces: ConfluenceSpaceOption[];
+};
+
 export type ConfluenceDraftContext = {
   accessStatus: EvidenceCollectionResponse['accessStatus'];
   profileId: string | null;
@@ -51,6 +73,83 @@ export class ConfluenceWorkItemService {
     private readonly readClient: AtlassianReadClientService,
     private readonly integrationsOAuthService: IntegrationsOAuthService,
   ) {}
+
+  /**
+   * The spaces a user may pick from: the profile allowlist, with display names
+   * read using their own token.
+   *
+   * The allowlist is the source of the list, never the provider. Asking
+   * Confluence which spaces exist and filtering afterwards would put spaces
+   * the profile forbids one bug away from the screen.
+   */
+  async listAllowedSpaces(
+    userId: number,
+    correlationId: string,
+  ): Promise<ConfluenceSpaceList> {
+    const profile = await this.accessPolicy.activeProfile();
+    const spaceKeys: string[] = [];
+    for (const spaceKey of profile.allowedSpaceKeys) {
+      try {
+        spaceKeys.push(this.accessPolicy.assertAllowedSpace(profile, spaceKey));
+      } catch {
+        // A malformed key in the profile is a configuration problem, not
+        // something to surface as a pickable space.
+        continue;
+      }
+    }
+
+    if (spaceKeys.length === 0) {
+      return { spaces: [] };
+    }
+
+    const spaces: ConfluenceSpaceOption[] = spaceKeys.map((spaceKey) => ({
+      spaceKey,
+      name: null,
+      accessStatus: 'not_requested' as const,
+    }));
+    const accessToken = await this.integrationsOAuthService.getAccessToken(
+      userId,
+      'confluence',
+      correlationId,
+    );
+
+    let next = 0;
+    const lookup = async (): Promise<void> => {
+      while (next < Math.min(spaces.length, MAX_SPACE_LOOKUPS)) {
+        const target = spaces[next++];
+        const result = await this.readClient.getJson(
+          this.spaceUrl(profile, target.spaceKey),
+          this.accessPolicy.providerBaseUrl(profile, 'confluence'),
+          accessToken,
+        );
+
+        if (result.status !== 'ok') {
+          // Still pickable: the profile allows it, this user just cannot read
+          // its metadata. Hiding it would silently narrow the allowlist.
+          target.accessStatus = result.status;
+          continue;
+        }
+
+        target.accessStatus = 'accessible';
+        target.name = this.spaceName(result.body, target.spaceKey);
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        {
+          length: Math.min(
+            MAX_SPACE_LOOKUP_CONCURRENCY,
+            spaces.length,
+            MAX_SPACE_LOOKUPS,
+          ),
+        },
+        () => lookup(),
+      ),
+    );
+
+    return { spaces };
+  }
 
   async searchEvidence(
     userId: number,
@@ -373,6 +472,30 @@ export class ConfluenceWorkItemService {
       'confluence',
       `rest/api/content/search?${parameters.toString()}`,
     );
+  }
+
+  private spaceUrl(profile: IntegrationProfile, spaceKey: string): URL {
+    // Confluence Data Center exposes a single space by key.
+    // Source: https://developer.atlassian.com/server/confluence/confluence-server-rest-api/
+    return this.accessPolicy.providerUrl(
+      profile,
+      'confluence',
+      `rest/api/space/${encodeURIComponent(spaceKey)}`,
+    );
+  }
+
+  /**
+   * The provider is not trusted to say which space it answered for: a name
+   * from another space would mislabel a picker row.
+   */
+  private spaceName(
+    body: Record<string, unknown>,
+    expectedSpaceKey: string,
+  ): string | null {
+    const key = typeof body.key === 'string' ? body.key.toUpperCase() : null;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+
+    return key === expectedSpaceKey && name.length > 0 ? name : null;
   }
 
   private pageUrl(

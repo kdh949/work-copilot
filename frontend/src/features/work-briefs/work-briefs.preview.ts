@@ -4,6 +4,7 @@ import type {
   BriefPublication,
   ChildTasksPublicationPreview,
   ConfluencePublicationPreview,
+  ConfluenceSpaceList,
   EvidenceCollection,
   JiraAssignedIssueList,
   JiraPublicationPreview,
@@ -384,6 +385,15 @@ export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
   }
   if (path.startsWith("/brief-drafts?") || path === "/brief-drafts") {
     return previewDraftList as T;
+  }
+  if (path === "/work-items/confluence/spaces") {
+    return {
+      spaces: [
+        { spaceKey: "PAY", name: "결제 플랫폼", accessStatus: "accessible" },
+        // Allowed by the profile but unreadable for this user: still pickable.
+        { spaceKey: "CS", name: null, accessStatus: "access_limited" },
+      ],
+    } satisfies ConfluenceSpaceList as T;
   }
   if (path === "/work-items/jira/my-issues") {
     // One issue already has the fixture draft, so the design QA screen shows
