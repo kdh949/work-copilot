@@ -33,6 +33,7 @@ import type {
 } from "./work-briefs.types";
 import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
+import { loadDraftRoute } from "./draft-route-loader";
 import { PublicationPanel, PublicationProgress } from "./PublicationPanel";
 import {
   canRunReadinessAssessment,
@@ -194,6 +195,7 @@ export function WorkBriefsPage({
   const inFlightCommandKeyRef = useRef<Partial<Record<PublicationPhase, string>>>({});
   const editingRevisionRef = useRef(0);
   const publicationRequestRevisionRef = useRef(0);
+  const draftRouteRequestRevisionRef = useRef(0);
   const connectionRequestRevisionRef = useRef(0);
   const [connections, setConnections] = useState<ConnectionSnapshot>({
     state: "loading",
@@ -207,11 +209,9 @@ export function WorkBriefsPage({
   // `request` is re-created on every parent render, so the connection lookup
   // reads it through a ref instead of depending on its identity.
   const requestRef = useRef(request);
-  const applyDraftRef = useRef<(nextDraft: BriefDraft) => void>(() => undefined);
   const onDraftUnavailableRef = useRef(onDraftUnavailable);
   useEffect(() => {
     requestRef.current = request;
-    applyDraftRef.current = applyDraft;
     onDraftUnavailableRef.current = onDraftUnavailable;
   });
 
@@ -241,27 +241,34 @@ export function WorkBriefsPage({
     void loadConnections();
   }, [loadConnections]);
 
-  // Opening an existing draft is the whole resume path. `applyDraft` asks the
-  // server for the latest publication, and the server runs its step recovery
-  // there — so a brief that was published to Confluence and failed at Jira
-  // comes back with its progress and retry button. No recovery logic is
-  // duplicated on the client.
-  const openedDraftIdRef = useRef<string | null>(null);
+  // Each setup gets its own revision. React StrictMode deliberately executes
+  // setup → cleanup → setup, so a one-shot ref would discard the second setup
+  // and leave the first response unable to update state. The current revision
+  // is also what prevents a prior URL from winning after navigation.
   useEffect(() => {
-    if (!draftId || openedDraftIdRef.current === draftId) return;
-    openedDraftIdRef.current = draftId;
+    const requestRevision = ++draftRouteRequestRevisionRef.current;
+    // A publication request started by a previous local update must not apply
+    // after the route has changed.
+    publicationRequestRevisionRef.current += 1;
 
-    let isCurrent = true;
-    void requestRef
-      .current<BriefDraft>(`/brief-drafts/${draftId}`)
+    if (!draftId) {
+      clearDraftRouteState();
+      return;
+    }
+
+    clearDraftRouteState();
+
+    void loadDraftRoute(requestRef.current, draftId)
       .then((loaded) => {
-        if (isCurrent) applyDraftRef.current(loaded);
+        if (requestRevision !== draftRouteRequestRevisionRef.current) return;
+        initializeDraftState(loaded.draft);
+        if (loaded.publication) {
+          setPublication(loaded.publication);
+          resetNeedsReviewState(loaded.publication);
+        }
       })
       .catch((error: unknown) => {
-        if (!isCurrent) return;
-        // Clear the guard so returning to the same URL retries instead of
-        // sitting on the loading line forever.
-        openedDraftIdRef.current = null;
+        if (requestRevision !== draftRouteRequestRevisionRef.current) return;
         const status = (error as HttpError).status;
         onDraftUnavailableRef.current?.(
           status === 404 || status === 403
@@ -269,10 +276,6 @@ export function WorkBriefsPage({
             : "초안을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
         );
       });
-
-    return () => {
-      isCurrent = false;
-    };
   }, [draftId]);
 
   const evidence = useMemo(
@@ -311,9 +314,8 @@ export function WorkBriefsPage({
     [connections],
   );
 
-  function applyDraft(nextDraft: BriefDraft) {
+  function initializeDraftState(nextDraft: BriefDraft) {
     editingRevisionRef.current += 1;
-    const publicationRequestRevision = ++publicationRequestRevisionRef.current;
     setDraft(nextDraft);
     setEditingContent(nextDraft.content);
     setConflict(false);
@@ -326,6 +328,24 @@ export function WorkBriefsPage({
     setPublicationPreviews({});
     setPublicationApprovals(emptyPublicationApprovals());
     inFlightCommandKeyRef.current = {};
+  }
+
+  function clearDraftRouteState() {
+    editingRevisionRef.current += 1;
+    setDraft(null);
+    setEditingContent(null);
+    setConflict(false);
+    setReadiness(null);
+    setReadinessStale(false);
+    setPublication(null);
+    setPublicationPreviews({});
+    setPublicationApprovals(emptyPublicationApprovals());
+    inFlightCommandKeyRef.current = {};
+  }
+
+  function applyDraft(nextDraft: BriefDraft) {
+    const publicationRequestRevision = ++publicationRequestRevisionRef.current;
+    initializeDraftState(nextDraft);
     void loadPublication(nextDraft.id, publicationRequestRevision);
   }
 
@@ -456,7 +476,6 @@ export function WorkBriefsPage({
       // The draft now has a URL of its own. `replace` keeps the back button
       // pointing at the list rather than at a selection screen whose draft
       // already exists.
-      openedDraftIdRef.current = created.id;
       applyDraft(created);
       onOpenDraft?.(created.id, { replace: true });
     } catch (error) {
