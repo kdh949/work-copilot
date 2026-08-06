@@ -384,9 +384,21 @@ export class WorkBriefsService {
       );
     }
     if (context.sourceJiraVersion !== draft.sourceJiraVersion) {
-      // The issue moved while the draft looked current. Regenerating now would
-      // silently adopt the new version without the review step.
-      throw new ConflictException({ code: 'SOURCE_REVIEW_REQUIRED' });
+      // The issue moved while the draft still looked current. Regenerating now
+      // would silently adopt the new version without the review step, so the
+      // draft is marked for review in the same request: refusing alone would
+      // leave the stored state claiming to be current. `sourceJiraVersion` is
+      // deliberately not advanced — clearing the signal is refreshDraft's job,
+      // after the owner re-reads every source.
+      const marked = await this.applyRefresh(draft, dto.optimisticVersion, {
+        evidence: draft.evidence,
+        freshnessStatus: 'review_required',
+        status: 'review_required',
+      });
+      throw new ConflictException({
+        code: 'SOURCE_REVIEW_REQUIRED',
+        currentVersion: marked.optimisticVersion,
+      });
     }
 
     const selectedJiraEvidence = this.selectedJiraEvidence(
