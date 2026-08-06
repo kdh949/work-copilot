@@ -16,6 +16,7 @@ describe('WorkBriefsController', () => {
     refreshDraft: jest.fn(),
     listDrafts: jest.fn(),
     deleteDraft: jest.fn(),
+    regenerateDraft: jest.fn(),
   };
   const readinessService = {
     assessDraft: jest.fn(),
@@ -240,6 +241,40 @@ describe('WorkBriefsController', () => {
     expect(service.deleteDraft).toHaveBeenCalledWith(
       7,
       'draft-id',
+      'correlation-id',
+    );
+  });
+
+  it('exposes regeneration as a POST on the draft with the correlation ID', async () => {
+    const handlers = WorkBriefsController.prototype as unknown as Record<
+      string,
+      object
+    >;
+
+    expect(Reflect.getMetadata(PATH_METADATA, handlers.regenerate)).toBe(
+      'brief-drafts/:id/regenerate',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, handlers.regenerate)).toBe(
+      RequestMethod.POST,
+    );
+
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+      publicationService as never,
+    );
+    service.regenerateDraft.mockResolvedValue({ id: 'draft-id' });
+
+    await controller.regenerate(
+      'draft-id',
+      { optimisticVersion: 2, instruction: '더 간결하게 작성하세요.' },
+      { user: { sub: 7 }, correlationId: 'correlation-id' } as never,
+    );
+
+    expect(service.regenerateDraft).toHaveBeenCalledWith(
+      7,
+      'draft-id',
+      expect.objectContaining({ optimisticVersion: 2 }),
       'correlation-id',
     );
   });

@@ -32,6 +32,7 @@ import {
   DRAFT_LIST_DEFAULT_LIMIT,
   ListBriefDraftsDto,
   RefreshBriefDraftDto,
+  RegenerateBriefDraftDto,
   UpdateBriefDraftDto,
 } from './dto/brief-draft.dto';
 import { TransientEvidenceFragmentsService } from './transient-evidence-fragments.service';
@@ -329,6 +330,112 @@ export class WorkBriefsService {
         updatedAt: new Date(),
       },
     );
+    await this.assertUpdateSucceeded(
+      userId,
+      draftId,
+      dto.optimisticVersion,
+      updated.affected,
+    );
+
+    return this.present(await this.findOwnedDraft(userId, draftId));
+  }
+
+  /**
+   * Re-run generation over the draft's sources and replace the brief in place.
+   *
+   * The evidence excerpts are never stored, so this re-reads every source with
+   * the user's own OAuth token exactly like `createDraft` does.  The user's
+   * manual edits are overwritten wholesale: the client keeps the pre-
+   * regeneration content for a single undo, and a draft version history table
+   * stays out of scope.
+   */
+  async regenerateDraft(
+    userId: number,
+    draftId: string,
+    dto: RegenerateBriefDraftDto,
+    correlationId: string,
+  ): Promise<BriefDraftView> {
+    const draft = await this.findOwnedDraft(userId, draftId);
+    if (draft.optimisticVersion !== dto.optimisticVersion) {
+      this.versionConflict(draft.optimisticVersion, dto.optimisticVersion);
+    }
+    if (draft.freshnessStatus !== 'current') {
+      // Same rule as saving: a draft whose sources moved has to be refreshed
+      // and re-reviewed before it is rewritten.
+      throw new ConflictException({
+        code:
+          draft.freshnessStatus === 'access_changed'
+            ? 'ACCESS_CHANGED'
+            : 'SOURCE_REVIEW_REQUIRED',
+      });
+    }
+
+    const selectedEvidenceIds = this.selectedEvidenceIds(
+      dto.selectedEvidenceIds ?? draft.evidence.map((item) => item.id),
+    );
+    const context = await this.jiraWorkItemService.collectIssueDraftContext(
+      userId,
+      draft.sourceJiraKey,
+      correlationId,
+    );
+    if (context.profileId !== draft.profileId) {
+      throw new ConflictException(
+        'Selected Jira evidence is no longer accessible.',
+      );
+    }
+    if (context.sourceJiraVersion !== draft.sourceJiraVersion) {
+      // The issue moved while the draft looked current. Regenerating now would
+      // silently adopt the new version without the review step.
+      throw new ConflictException({ code: 'SOURCE_REVIEW_REQUIRED' });
+    }
+
+    const selectedJiraEvidence = this.selectedJiraEvidence(
+      context,
+      selectedEvidenceIds.jira,
+    );
+    const confluenceContext =
+      selectedEvidenceIds.confluence.length > 0
+        ? await this.confluenceWorkItemService.collectDraftEvidence(
+            userId,
+            selectedEvidenceIds.confluence,
+            correlationId,
+          )
+        : null;
+    const selectedEvidence = [
+      ...selectedJiraEvidence,
+      ...this.selectedConfluenceEvidence(
+        context,
+        confluenceContext,
+        selectedEvidenceIds.confluence,
+      ),
+    ];
+
+    const output = await this.aiClient.generate(
+      dto.instruction,
+      selectedEvidence.map((item) => ({
+        evidenceId: item.evidence.id,
+        content: item.content,
+      })),
+    );
+    const content = this.contentFromAi(output);
+    const evidence = this.evidenceFromAi(selectedEvidence, output, content);
+
+    const updated = await this.draftsRepository.update(
+      {
+        id: draftId,
+        createdByUserId: userId,
+        optimisticVersion: dto.optimisticVersion,
+        deletedAt: IsNull(),
+      },
+      {
+        maskedBrief: await this.maskContent(content),
+        evidence,
+        optimisticVersion: dto.optimisticVersion + 1,
+        updatedAt: new Date(),
+      },
+    );
+    // The readiness cache keys on optimisticVersion, so the bump invalidates
+    // the previous assessment without touching readiness_assessments here.
     await this.assertUpdateSucceeded(
       userId,
       draftId,
