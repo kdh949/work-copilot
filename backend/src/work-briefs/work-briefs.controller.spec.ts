@@ -15,6 +15,7 @@ describe('WorkBriefsController', () => {
     updateDraft: jest.fn(),
     refreshDraft: jest.fn(),
     listDrafts: jest.fn(),
+    lookupDraftsForAssignedIssues: jest.fn(),
     deleteDraft: jest.fn(),
     regenerateDraft: jest.fn(),
   };
@@ -243,6 +244,33 @@ describe('WorkBriefsController', () => {
       'draft-id',
       'correlation-id',
     );
+  });
+
+  it('uses a protected bulk lookup for the current assigned-issue rows', async () => {
+    const handlers = WorkBriefsController.prototype as unknown as Record<
+      string,
+      object
+    >;
+    const controller = new WorkBriefsController(
+      service as never,
+      readinessService as never,
+      publicationService as never,
+    );
+    service.lookupDraftsForAssignedIssues.mockResolvedValue({ items: [] });
+
+    await controller.lookup({ sourceJiraKeys: ['ENG-1', 'ENG-2'] }, {
+      user: { sub: 7 },
+    } as never);
+
+    expect(Reflect.getMetadata(PATH_METADATA, handlers.lookup)).toBe(
+      'brief-drafts/lookup',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, handlers.lookup)).toBe(
+      RequestMethod.POST,
+    );
+    expect(service.lookupDraftsForAssignedIssues).toHaveBeenCalledWith(7, {
+      sourceJiraKeys: ['ENG-1', 'ENG-2'],
+    });
   });
 
   it('exposes regeneration as a POST on the draft with the correlation ID', async () => {

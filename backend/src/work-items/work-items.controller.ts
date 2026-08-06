@@ -18,6 +18,18 @@ export class WorkItemsController {
     private readonly confluenceWorkItemService: ConfluenceWorkItemService,
   ) {}
 
+  /**
+   * Declared before `jira/:issueKey/context` so the literal segment is not
+   * swallowed by the issue key parameter.
+   */
+  @Get('jira/my-issues')
+  jiraAssignedIssues(@Req() request: WorkItemRequest) {
+    return this.jiraWorkItemService.listAssignedIssues(
+      request.user.sub,
+      request.correlationId ?? 'missing-correlation-id',
+    );
+  }
+
   @Get('jira/:issueKey/context')
   jiraContext(
     @Param('issueKey') issueKey: string,
@@ -38,6 +50,14 @@ export class WorkItemsController {
     @Req() request: WorkItemRequest,
   ) {
     return this.jiraContext(issueKey, request);
+  }
+
+  @Get('confluence/spaces')
+  confluenceSpaces(@Req() request: WorkItemRequest) {
+    return this.confluenceWorkItemService.listAllowedSpaces(
+      request.user.sub,
+      request.correlationId ?? 'missing-correlation-id',
+    );
   }
 
   @Get('confluence/spaces/:spaceKey/search')

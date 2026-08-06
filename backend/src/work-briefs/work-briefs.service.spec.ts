@@ -86,6 +86,7 @@ describe('WorkBriefsService', () => {
       Promise<{ affected?: number }>,
       [unknown, Partial<WorkBriefDraft>]
     >(),
+    find: jest.fn<Promise<WorkBriefDraft[]>, [unknown]>(),
     createQueryBuilder: jest.fn(),
   };
   const jiraWorkItemService = {
@@ -94,6 +95,9 @@ describe('WorkBriefsService', () => {
   const confluenceWorkItemService = {
     collectDraftEvidence: jest.fn(),
     collectEvidenceMetadata: jest.fn(),
+  };
+  const accessPolicy = {
+    activeProfile: jest.fn(),
   };
   const aiClient = {
     generate: jest.fn(),
@@ -139,6 +143,7 @@ describe('WorkBriefsService', () => {
       repository as never,
       jiraWorkItemService as never,
       confluenceWorkItemService as never,
+      accessPolicy as never,
       aiClient as never,
       new BriefCitationValidatorService(),
       publicationService as never,
@@ -151,12 +156,16 @@ describe('WorkBriefsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.findOneBy.mockResolvedValue(null);
+    repository.find.mockResolvedValue([]);
     repository.createQueryBuilder.mockReturnValue(queryBuilder);
     queryBuilder.getMany.mockResolvedValue([]);
     publicationService.findLatestStoredSummaries.mockResolvedValue(new Map());
     publicationService.assessDraftDeletion.mockResolvedValue({
       publishing: false,
       externalWritePerformed: false,
+    });
+    accessPolicy.activeProfile.mockResolvedValue({
+      id: 'bc4ed2ab-812a-4162-a7a7-e0ea1bd4b48e',
     });
     fragments.purgeDraft.mockResolvedValue(0);
       audit.record.mockResolvedValue(undefined);
@@ -1453,6 +1462,36 @@ describe('WorkBriefsService', () => {
         code: 'DRAFT_ALREADY_EXISTS',
         message: expect.stringMatching(/another user/),
       },
+    });
+  });
+
+  describe('lookupDraftsForAssignedIssues', () => {
+    it('uses every requested key but scopes the result to the caller and active profile', async () => {
+      const profileBDraft = createDraft({
+        id: 'b1c1b8f0-0000-4000-8000-000000000021',
+        profileId: 'profile-b',
+        sourceJiraKey: 'ENG-21',
+      });
+      repository.find.mockResolvedValue([profileBDraft]);
+      accessPolicy.activeProfile.mockResolvedValue({ id: 'profile-b' });
+
+      const result = await createService().lookupDraftsForAssignedIssues(7, {
+        // ENG-21 models an existing draft beyond a first page of 20.
+        sourceJiraKeys: ['ENG-1', 'eng-21'],
+      });
+
+      expect(result).toEqual({
+        items: [{ id: profileBDraft.id, sourceJiraKey: 'ENG-21' }],
+      });
+      expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(repository.find.mock.calls[0]?.[0]).toMatchObject({
+        where: {
+          createdByUserId: 7,
+          profileId: 'profile-b',
+          deletedAt: IsNull(),
+        },
+        order: { updatedAt: 'DESC', id: 'DESC' },
+      });
     });
   });
 });

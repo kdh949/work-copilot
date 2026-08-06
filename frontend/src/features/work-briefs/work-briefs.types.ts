@@ -87,6 +87,49 @@ export type BriefDraftSummary = {
   updatedAt: string;
 };
 
+/**
+ * A Confluence space the active profile allows. The name needs the user's own
+ * token, so it can be absent for a space that is still pickable.
+ */
+export type ConfluenceSpaceOption = {
+  spaceKey: string;
+  name: string | null;
+  accessStatus:
+    | "accessible"
+    | "access_limited"
+    | "not_found"
+    | "not_requested"
+    | "unavailable";
+};
+
+export type ConfluenceSpaceList = {
+  spaces: ConfluenceSpaceOption[];
+};
+
+/** An issue the user can start a brief from. A picker row, not evidence. */
+export type JiraAssignedIssue = {
+  issueKey: string;
+  projectKey: string;
+  title: string;
+  url: string;
+  updatedAt: string;
+};
+
+export type JiraAssignedIssueList = {
+  accessStatus: "accessible" | "access_limited" | "not_found";
+  issues: JiraAssignedIssue[];
+};
+
+/** A current-profile, own-draft identity returned for assigned issues. */
+export type AssignedIssueDraftLookupItem = {
+  id: string;
+  sourceJiraKey: string;
+};
+
+export type AssignedIssueDraftLookup = {
+  items: AssignedIssueDraftLookupItem[];
+};
+
 export type BriefDraftListView = {
   items: BriefDraftSummary[];
   nextCursor: string | null;

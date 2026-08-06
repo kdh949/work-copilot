@@ -22,6 +22,8 @@ import type {
   BriefContent,
   BriefDraft,
   ChildTask,
+  ConfluenceSpaceList,
+  ConfluenceSpaceOption,
   EvidenceCitation,
   EvidenceCollection,
   ReadinessAssessment,
@@ -31,8 +33,17 @@ import type {
   WorkBriefApiRequest,
   WorkEvidence,
 } from "./work-briefs.types";
+import { AssignedIssueList } from "./AssignedIssueList";
 import { BriefDraftList } from "./BriefDraftList";
 import { createDraftFailureMessage } from "./brief-draft-error-copy";
+import {
+  spaceListNotice,
+  spaceOptionLabel,
+} from "./confluence-space-copy";
+import {
+  loadConfluenceSpaces,
+  shouldLoadConfluenceSpaces,
+} from "./confluence-space-loading";
 import {
   canRegenerateDraft,
   canUndoRegeneration,
@@ -177,6 +188,12 @@ export function WorkBriefsPage({
     WorkEvidence[]
   >(initialEvidence.filter((item) => item.provider === "confluence"));
   const [confluenceSpaceKey, setConfluenceSpaceKey] = useState("");
+  const [confluenceSpaces, setConfluenceSpaces] = useState<
+    ConfluenceSpaceOption[]
+  >([]);
+  const [confluenceSpaceState, setConfluenceSpaceState] = useState<
+    "loading" | "ready" | "unavailable"
+  >("loading");
   const [confluenceQuery, setConfluenceQuery] = useState("");
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(
     initialEvidence.filter((item) => item.aiStatus !== "excluded").map((item) => item.id),
@@ -220,6 +237,12 @@ export function WorkBriefsPage({
   const publicationRequestRevisionRef = useRef(0);
   const draftRouteRequestRevisionRef = useRef(0);
   const connectionRequestRevisionRef = useRef(0);
+  // Preserve one request result (including a failure) while this selection
+  // screen remains mounted. A shared promise also survives StrictMode's
+  // setup → cleanup → setup cycle without dropping the only response.
+  const confluenceSpacesRequestRef = useRef<Promise<ConfluenceSpaceList> | null>(
+    null,
+  );
   const [connections, setConnections] = useState<ConnectionSnapshot>({
     state: "loading",
   });
@@ -263,6 +286,35 @@ export function WorkBriefsPage({
   useEffect(() => {
     void loadConnections();
   }, [loadConnections]);
+
+  // The allowlist itself, so the space field is a choice rather than a key the
+  // user has to know. It is intentionally lazy: a detail page and a closed
+  // source-options panel must not trigger up to 20 metadata reads.
+  useEffect(() => {
+    if (draftId || !showSourceOptions) {
+      return;
+    }
+    let active = true;
+    const loading =
+      confluenceSpacesRequestRef.current ??
+      (shouldLoadConfluenceSpaces(draftId, showSourceOptions, false)
+        ? loadConfluenceSpaces(requestRef.current, loadConnections)
+        : null);
+    if (!loading) return;
+    confluenceSpacesRequestRef.current = loading;
+    loading
+      .then((loaded) => {
+        if (!active) return;
+        setConfluenceSpaces(loaded.spaces);
+        setConfluenceSpaceState("ready");
+      })
+      .catch(() => {
+        if (active) setConfluenceSpaceState("unavailable");
+      });
+    return () => {
+      active = false;
+    };
+  }, [draftId, loadConnections, showSourceOptions]);
 
   // Each setup gets its own revision. React StrictMode deliberately executes
   // setup → cleanup → setup, so a one-shot ref would discard the second setup
@@ -380,8 +432,10 @@ export function WorkBriefsPage({
     void loadPublication(nextDraft.id, publicationRequestRevision);
   }
 
-  async function collectEvidence() {
-    const normalizedKey = issueKey.trim().toUpperCase();
+  async function collectEvidence(issueKeyOverride?: string) {
+    // The assigned-issue picker passes its key directly: `issueKey` state is
+    // set in the same event and is not readable here yet.
+    const normalizedKey = (issueKeyOverride ?? issueKey).trim().toUpperCase();
     if (!normalizedKey) {
       notifyWarning("Jira 이슈 키를 입력하세요.");
       return;
@@ -919,6 +973,15 @@ export function WorkBriefsPage({
             request={request}
             onOpen={(openedDraftId) => onOpenDraft?.(openedDraftId)}
           />
+          <AssignedIssueList
+            request={request}
+            refreshConnections={loadConnections}
+            onOpenDraft={(openedDraftId) => onOpenDraft?.(openedDraftId)}
+            onSelectIssue={(selectedIssueKey) => {
+              setIssueKey(selectedIssueKey);
+              void collectEvidence(selectedIssueKey);
+            }}
+          />
           <div className="work-brief-workspace">
             <aside className="work-brief-source-rail" aria-label="근거 범위">
               <div className="work-brief-rail-heading">
@@ -970,7 +1033,27 @@ export function WorkBriefsPage({
               {showSourceOptions ? (
                 <section className="work-brief-source-options">
                   <label htmlFor="brief-confluence-space">Confluence space</label>
-                  <input id="brief-confluence-space" value={confluenceSpaceKey} placeholder="예: ENG" onChange={(event) => setConfluenceSpaceKey(event.target.value)} />
+                  {confluenceSpaces.length > 0 ? (
+                    <select
+                      id="brief-confluence-space"
+                      value={confluenceSpaceKey}
+                      onChange={(event) => setConfluenceSpaceKey(event.target.value)}
+                    >
+                      <option value="">space 선택</option>
+                      {confluenceSpaces.map((space) => (
+                        <option key={space.spaceKey} value={space.spaceKey}>
+                          {spaceOptionLabel(space)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input id="brief-confluence-space" value={confluenceSpaceKey} placeholder="예: ENG" onChange={(event) => setConfluenceSpaceKey(event.target.value)} />
+                  )}
+                  {spaceListNotice(confluenceSpaceState, confluenceSpaces) ? (
+                    <p className="work-brief-source-options-note">
+                      {spaceListNotice(confluenceSpaceState, confluenceSpaces)}
+                    </p>
+                  ) : null}
                   <label htmlFor="brief-confluence-query">검색어</label>
                   <input id="brief-confluence-query" value={confluenceQuery} placeholder="예: 배포 결정" onChange={(event) => setConfluenceQuery(event.target.value)} />
                   <Button type="button" size="sm" onClick={() => void collectConfluenceEvidence()} disabled={isLoadingConfluenceEvidence || isLoadingEvidence}>{isLoadingConfluenceEvidence ? "검색 중" : "문서 검색"}</Button>

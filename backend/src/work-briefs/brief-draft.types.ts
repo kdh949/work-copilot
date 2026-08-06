@@ -85,3 +85,13 @@ export type BriefDraftListView = {
   items: BriefDraftSummary[];
   nextCursor: string | null;
 };
+
+/** The minimal own-draft identity needed by the assigned-issue picker. */
+export type BriefDraftLookupItem = Pick<
+  BriefDraftSummary,
+  'id' | 'sourceJiraKey'
+>;
+
+export type BriefDraftLookupView = {
+  items: BriefDraftLookupItem[];
+};

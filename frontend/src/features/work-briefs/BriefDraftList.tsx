@@ -40,7 +40,10 @@ const formatUpdatedAt = (value: string): string => {
  * Visibility is own-drafts-only, matching the server. A colleague's draft on
  * the same issue is not shown and surfaces only as the 409 on create.
  */
-export function BriefDraftList({ request, onOpen }: BriefDraftListProps) {
+export function BriefDraftList({
+  request,
+  onOpen,
+}: BriefDraftListProps) {
   const [items, setItems] = useState<BriefDraftSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(

@@ -26,6 +26,7 @@ import { ReadinessService } from '../readiness/readiness.service';
 import {
   CreateBriefDraftDto,
   ListBriefDraftsDto,
+  LookupBriefDraftsDto,
   RefreshBriefDraftDto,
   RegenerateBriefDraftDto,
   UpdateBriefDraftDto,
@@ -56,6 +57,14 @@ export class WorkBriefsController {
   @Get('brief-drafts')
   list(@Query() query: ListBriefDraftsDto, @Req() request: WorkBriefRequest) {
     return this.workBriefsService.listDrafts(request.user.sub, query);
+  }
+
+  @Post('brief-drafts/lookup')
+  lookup(@Body() dto: LookupBriefDraftsDto, @Req() request: WorkBriefRequest) {
+    return this.workBriefsService.lookupDraftsForAssignedIssues(
+      request.user.sub,
+      dto,
+    );
   }
 
   @Get('brief-drafts/:id')

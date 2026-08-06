@@ -4,7 +4,9 @@ import type {
   BriefPublication,
   ChildTasksPublicationPreview,
   ConfluencePublicationPreview,
+  ConfluenceSpaceList,
   EvidenceCollection,
+  JiraAssignedIssueList,
   JiraPublicationPreview,
   ReadinessAssessment,
   WorkBriefApiRequest,
@@ -381,8 +383,50 @@ export const previewWorkBriefRequest: WorkBriefApiRequest = async <T>(
     publication = null;
     return previewDraft as T;
   }
+  if (path === "/brief-drafts/lookup" && method === "POST") {
+    return {
+      items: [
+        {
+          id: previewDraft.id,
+          sourceJiraKey: previewDraft.sourceJiraKey,
+        },
+      ],
+    } as T;
+  }
   if (path.startsWith("/brief-drafts?") || path === "/brief-drafts") {
     return previewDraftList as T;
+  }
+  if (path === "/work-items/confluence/spaces") {
+    return {
+      spaces: [
+        { spaceKey: "PAY", name: "결제 플랫폼", accessStatus: "accessible" },
+        // Allowed by the profile but unreadable for this user: still pickable.
+        { spaceKey: "CS", name: null, accessStatus: "access_limited" },
+      ],
+    } satisfies ConfluenceSpaceList as T;
+  }
+  if (path === "/work-items/jira/my-issues") {
+    // One issue already has the fixture draft, so the design QA screen shows
+    // both picker states: "초안 열기" and "근거 선택".
+    return {
+      accessStatus: "accessible",
+      issues: [
+        {
+          issueKey: WORK_BRIEF_PREVIEW_ISSUE,
+          projectKey: WORK_BRIEF_PREVIEW_ISSUE.split("-")[0],
+          title: "결제 실패 재시도 정책 정리",
+          url: `#${WORK_BRIEF_PREVIEW_ISSUE}`,
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          issueKey: "PROJ-301",
+          projectKey: "PROJ",
+          title: "정산 리포트 지연 원인 분석",
+          url: "#PROJ-301",
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    } satisfies JiraAssignedIssueList as T;
   }
   if (path === draftPath && method === "DELETE") {
     // The fixture draft carries publication history, so the preview shows the
