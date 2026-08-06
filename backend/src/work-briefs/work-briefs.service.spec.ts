@@ -777,9 +777,10 @@ describe('WorkBriefsService', () => {
       expect(values.deletedAt).toBeInstanceOf(Date);
       expect(fragments.purgeDraft).toHaveBeenCalledWith(draft.id);
       expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: 7,
         action: 'BRIEF_DRAFT_DELETED',
         profileId: draft.profileId,
-        targetId: draft.sourceJiraKey,
+        targetId: `draft:${draft.id}:issue:${draft.sourceJiraKey}`,
         correlationId: 'correlation-id',
         resultCode: 'SOFT_DELETED',
       });

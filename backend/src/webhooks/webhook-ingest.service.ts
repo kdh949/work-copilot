@@ -104,6 +104,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
         outcome: 'manual_refresh',
       });
       await this.audit.record({
+        actorUserId: null,
         action: 'WEBHOOK_INGRESS_FALLBACK',
         profileId: profile.id,
         targetId: null,
@@ -118,6 +119,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
         outcome: 'rejected',
       });
       await this.audit.record({
+        actorUserId: null,
         action: 'WEBHOOK_INGRESS_REJECTED',
         profileId: profile.id,
         targetId: null,
@@ -134,6 +136,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
         outcome: 'malformed',
       });
       await this.audit.record({
+        actorUserId: null,
         action: 'WEBHOOK_PAYLOAD_REJECTED',
         profileId: profile.id,
         targetId: null,
@@ -149,6 +152,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
         outcome: 'self_event',
       });
       await this.audit.record({
+        actorUserId: null,
         action: 'WEBHOOK_EVENT_IGNORED',
         profileId: profile.id,
         targetId: change.sourceId,
@@ -183,6 +187,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
           outcome: 'replay',
         });
         await this.audit.record({
+          actorUserId: null,
           action: 'WEBHOOK_EVENT_IGNORED',
           profileId: profile.id,
           targetId: change.sourceId,
@@ -207,6 +212,7 @@ export class WebhookIngestService implements OnModuleInit, OnModuleDestroy {
       this.metrics.increment('draft_review_required_total', { provider });
     }
     await this.audit.record({
+      actorUserId: null,
       action: 'WEBHOOK_SHADOW_PROCESSED',
       profileId: profile.id,
       targetId: change.sourceId,

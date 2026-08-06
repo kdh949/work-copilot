@@ -247,9 +247,12 @@ export class WorkBriefsService {
     await this.fragments.purgeDraft(draftId);
     // Draft id, issue key and profile only — never brief content.
     await this.audit.record({
+      actorUserId: userId,
       action: 'BRIEF_DRAFT_DELETED',
       profileId: draft.profileId,
-      targetId: draft.sourceJiraKey,
+      // A bounded composite preserves both identifiers after the draft itself
+      // is hard-deleted by the retention job.
+      targetId: `draft:${draft.id}:issue:${draft.sourceJiraKey}`,
       correlationId,
       resultCode: 'SOFT_DELETED',
     });
