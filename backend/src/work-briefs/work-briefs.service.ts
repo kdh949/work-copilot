@@ -44,6 +44,8 @@ import { WorkBriefDraft } from './entities/work-brief-draft.entity';
 // someone else may own it without disclosing who.
 const DRAFT_ALREADY_EXISTS_MESSAGE =
   'A brief draft already exists for this issue. It may have been created by another user.';
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class WorkBriefsService {
@@ -272,7 +274,12 @@ export class WorkBriefsService {
       .split('|');
     const parsed = new Date(updatedAt ?? '');
 
-    if (rest.length > 0 || !id || Number.isNaN(parsed.getTime())) {
+    if (
+      rest.length > 0 ||
+      !id ||
+      !UUID_PATTERN.test(id) ||
+      Number.isNaN(parsed.getTime())
+    ) {
       throw new BadRequestException('Draft list cursor is invalid.');
     }
 

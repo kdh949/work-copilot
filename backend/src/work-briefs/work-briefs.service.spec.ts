@@ -734,6 +734,18 @@ describe('WorkBriefsService', () => {
       expect(queryBuilder.getMany).not.toHaveBeenCalled();
     });
 
+    it('rejects a decodable cursor whose id is not a UUID before querying Postgres', async () => {
+      await expect(
+        createService().listDrafts(7, {
+          cursor: Buffer.from(
+            '2026-08-02T00:00:00.000Z|not-a-uuid',
+            'utf8',
+          ).toString('base64url'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(queryBuilder.getMany).not.toHaveBeenCalled();
+    });
+
     it('filters by status only when one is requested', async () => {
       queryBuilder.getMany.mockResolvedValue([]);
 
