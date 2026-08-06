@@ -2,6 +2,7 @@ import { createDatabaseOptions } from './database.config';
 import { WorkCopilotFoundation1785510000000 } from '../database/migrations/2026080100000-work-copilot-foundation';
 import { PublicationSagaState1785609800000 } from '../database/migrations/2026080200000-publication-saga-state';
 import { PublicationExecutionFencing1785873600000 } from '../database/migrations/2026080500000-publication-execution-fencing';
+import { BriefDraftSoftDelete1786000000000 } from '../database/migrations/2026080600000-brief-draft-soft-delete';
 
 describe('createDatabaseOptions', () => {
   it('disables automatic schema synchronization and registers the migration', () => {
@@ -20,6 +21,15 @@ describe('createDatabaseOptions', () => {
     expect(options.migrations).toContain(WorkCopilotFoundation1785510000000);
     expect(options.migrations).toContain(PublicationSagaState1785609800000);
     expect(options.migrations).toContain(PublicationExecutionFencing1785873600000);
+    expect(options.migrations).toContain(BriefDraftSoftDelete1786000000000);
+    // Ordering matters: the soft delete migration rewrites a constraint the
+    // foundation migration created.
+    const migrations = Array.isArray(options.migrations)
+      ? options.migrations
+      : [];
+    expect(
+      migrations.indexOf(BriefDraftSoftDelete1786000000000),
+    ).toBeGreaterThan(migrations.indexOf(WorkCopilotFoundation1785510000000));
   });
 
   it('rejects invalid database ports before a connection is attempted', () => {

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import {
   ConfluenceWorkItemService,
   type ConfluenceDraftContext,
@@ -140,6 +140,9 @@ export class WorkBriefsService {
         id: draftId,
         createdByUserId: userId,
         optimisticVersion: dto.optimisticVersion,
+        // `update()` ignores the soft delete filter. Without this a deleted
+        // draft would be resurrected by a stale tab's save.
+        deletedAt: IsNull(),
       },
       {
         maskedBrief: maskedContent,
@@ -449,6 +452,8 @@ export class WorkBriefsService {
         id: draft.id,
         createdByUserId: draft.createdByUserId,
         optimisticVersion,
+        // See updateDraft: `update()` does not apply the soft delete filter.
+        deletedAt: IsNull(),
       },
       {
         ...values,

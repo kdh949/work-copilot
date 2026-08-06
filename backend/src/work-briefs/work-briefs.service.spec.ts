@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { IsNull } from 'typeorm';
 import { BriefCitationValidatorService } from './brief-citation-validator.service';
 import type { BriefContent } from './brief-draft.types';
 import type { WorkBriefDraft } from './entities/work-brief-draft.entity';
@@ -46,6 +51,7 @@ const createDraft = (
   policyVersion: 1,
   createdAt: new Date('2026-08-02T00:00:00.000Z'),
   updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+  deletedAt: null,
   ...overrides,
 });
 
@@ -441,5 +447,104 @@ describe('WorkBriefsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  // R1 — `repository.update()` does not apply the soft delete filter, so a
+  // missing `deletedAt: IsNull()` criterion would resurrect a deleted draft
+  // without any type error to catch it.
+  it('scopes an edit to live drafts so a deleted draft cannot be resurrected', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    repository.update.mockResolvedValue({ affected: 1 });
+    aiClient.sanitize.mockResolvedValue([
+      initialContent.title.text,
+      initialContent.summary.text,
+      initialContent.requirements[0].text,
+      initialContent.risks[0].text,
+      initialContent.nextSteps[0].text,
+    ]);
+
+    await createService().updateDraft(7, current.id, {
+      optimisticVersion: 1,
+      content: initialContent,
+    });
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ deletedAt: IsNull() }),
+      expect.anything(),
+    );
+  });
+
+  it('scopes a refresh to live drafts so a deleted draft cannot be resurrected', async () => {
+    const current = createDraft();
+    repository.findOneBy.mockResolvedValue(current);
+    jiraWorkItemService.collectIssueDraftContext.mockResolvedValue({
+      accessStatus: 'accessible',
+      profileId: current.profileId,
+      sourceJiraId: '100',
+      sourceJiraKey: 'DEMO-1',
+      sourceJiraVersion: '2026-08-03T00:00:00.000Z',
+      evidence: [
+        {
+          evidence: {
+            ...current.evidence[0],
+            version: '2026-08-03T00:00:00.000Z',
+          },
+          content: 'new transient evidence',
+        },
+      ],
+    });
+    repository.update.mockResolvedValue({ affected: 1 });
+
+    await createService().refreshDraft(
+      7,
+      current.id,
+      { optimisticVersion: 1 },
+      'correlation-id',
+    );
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ deletedAt: IsNull() }),
+      expect.anything(),
+    );
+  });
+
+  it('reports a deleted draft as not found when a stale tab saves', async () => {
+    // A soft-deleted draft is invisible to every `find*` call, so the update
+    // matches nothing and the follow-up lookup raises 404 rather than a
+    // version conflict.
+    repository.findOneBy.mockResolvedValueOnce(createDraft());
+    repository.update.mockResolvedValue({ affected: 0 });
+    repository.findOneBy.mockResolvedValueOnce(null);
+    aiClient.sanitize.mockResolvedValue([
+      initialContent.title.text,
+      initialContent.summary.text,
+      initialContent.requirements[0].text,
+      initialContent.risks[0].text,
+      initialContent.nextSteps[0].text,
+    ]);
+
+    await expect(
+      createService().updateDraft(7, createDraft().id, {
+        optimisticVersion: 1,
+        content: initialContent,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('reports a deleted draft as not found when a stale tab refreshes', async () => {
+    repository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      createService().refreshDraft(
+        7,
+        createDraft().id,
+        { optimisticVersion: 1 },
+        'correlation-id',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(
+      jiraWorkItemService.collectIssueDraftContext,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { BriefPublication } from '../publications/entities/brief-publication.entity';
 import { WorkBriefDraft } from '../work-briefs/entities/work-brief-draft.entity';
 import type { SourceChangeProvider } from './entities/source-change-event.entity';
@@ -40,7 +40,9 @@ export class FreshnessReviewService {
 
     for (const draft of affectedDrafts) {
       await this.draftsRepository.update(
-        { id: draft.id, profileId },
+        // `find()` above already excludes soft-deleted drafts, but `update()`
+        // does not apply that filter on its own — keep it explicit.
+        { id: draft.id, profileId, deletedAt: IsNull() },
         {
           status: 'review_required',
           freshnessStatus:

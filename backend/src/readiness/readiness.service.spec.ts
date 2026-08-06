@@ -63,6 +63,7 @@ const createDraft = (
   policyVersion: 1,
   createdAt: now,
   updatedAt: now,
+  deletedAt: null,
   ...overrides,
 });
 
